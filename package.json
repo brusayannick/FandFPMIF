@@ -1,0 +1,14 @@
+{
+  "name": "process-analysis-tool-flows-funds",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev:web": "npm --workspace=apps/web run dev",
+    "dev:api": "cd apps/api && uv run uvicorn main:app --reload --port 8000",
+    "build:web": "npm --workspace=apps/web run build",
+    "lint": "npm --workspaces run lint"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 
-const API_URL =
+const API_BASE =
   process.env.INTERNAL_API_URL ??
   process.env.NEXT_PUBLIC_API_URL ??
   "http://localhost:8000";
@@ -12,7 +12,7 @@ async function forward(
   context: { params: Promise<{ proxy: string[] }> },
 ) {
   const { proxy } = await context.params;
-  const target = new URL(`/api/v1/${proxy.join("/")}`, API_URL);
+  const target = new URL(`/api/${proxy.join("/")}`, API_BASE);
   target.search = req.nextUrl.search;
 
   const headers = new Headers(req.headers);

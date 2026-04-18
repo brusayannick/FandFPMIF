@@ -189,7 +189,7 @@ function MenuItem({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
+        "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
         danger
           ? "text-error hover:bg-error/10"
           : "text-text hover:bg-surface-offset",

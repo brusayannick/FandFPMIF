@@ -78,7 +78,7 @@ export function Topbar() {
         <button
           type="button"
           aria-label="Notifications"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-surface-offset hover:text-text"
+          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-text-muted hover:bg-surface-offset hover:text-text"
         >
           <Bell size={16} />
         </button>

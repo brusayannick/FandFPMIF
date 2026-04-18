@@ -8,7 +8,7 @@ from core.config import get_settings
 from core.database import init_db
 from modules.builtin.analytics.module import ProcessAnalyticsModule
 from modules.builtin.event_log_importer.module import EventLogImporterModule
-from modules.builtin.importer.module import BpmnImporterModule
+from modules.builtin.bpmn_importer.module import BpmnImporterModule
 from modules.builtin.simulation.module import ProcessSimulationModule
 from modules.registry import registry
 from routers import dashboard as dashboard_router

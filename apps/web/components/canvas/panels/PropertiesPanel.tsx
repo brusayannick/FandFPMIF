@@ -149,7 +149,7 @@ export function PropertiesPanel({ processId }: PropertiesPanelProps) {
                         type="button"
                         onClick={() => patch({ status: s })}
                         className={
-                          "rounded-md border px-2 py-1 text-[11px] capitalize " +
+                          "cursor-pointer rounded-md border px-2 py-1 text-[11px] capitalize " +
                           (active
                             ? "border-primary bg-primary-highlight text-text"
                             : "border-border text-text-muted hover:bg-surface-offset")

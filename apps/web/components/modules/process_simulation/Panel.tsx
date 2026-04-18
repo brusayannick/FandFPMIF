@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, ApiError } from "@/lib/api-client";
 import { formatDuration, formatNumber } from "@/lib/utils";
-import type { ModulePanelProps } from "@/types/module";
+import type { ModulePanelProps } from "@/components/modules/types";
 import { z } from "zod";
 
 const percentileSchema = z.object({

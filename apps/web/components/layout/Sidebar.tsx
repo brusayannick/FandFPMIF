@@ -72,7 +72,7 @@ export function Sidebar() {
             type="button"
             onClick={toggle}
             aria-label="Collapse sidebar"
-            className="rounded-sm p-1 text-text-muted hover:bg-surface-offset hover:text-text"
+            className="cursor-pointer rounded-sm p-1 text-text-muted hover:bg-surface-offset hover:text-text"
           >
             <ChevronsLeft size={16} />
           </button>
@@ -123,7 +123,7 @@ export function Sidebar() {
               type="button"
               onClick={toggle}
               aria-label="Expand sidebar"
-              className="rounded-sm p-1 text-text-muted hover:bg-surface-offset hover:text-text"
+              className="cursor-pointer rounded-sm p-1 text-text-muted hover:bg-surface-offset hover:text-text"
             >
               <ChevronsRight size={16} />
             </button>

@@ -6,7 +6,7 @@ import { BarChart3, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api-client";
 import { formatDuration } from "@/lib/utils";
-import type { ModulePanelProps } from "@/types/module";
+import type { ModulePanelProps } from "@/components/modules/types";
 import { z } from "zod";
 
 const nodeMetricSchema = z.object({

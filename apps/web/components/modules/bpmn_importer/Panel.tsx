@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api-client";
 import { graphSchema } from "@/lib/schemas/graph";
 import { useProcessStore } from "@/stores/process.store";
-import type { ModulePanelProps } from "@/types/module";
+import type { ModulePanelProps } from "@/components/modules/types";
 import { z } from "zod";
 
 const importResultSchema = z.object({
@@ -114,7 +114,7 @@ export function BpmnImporterPanel(_props: ModulePanelProps) {
             }
           }}
           className={cn(
-            "flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed bg-surface-2 p-6 text-center transition-colors",
+            "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed bg-surface-2 p-6 text-center transition-colors",
             dragging
               ? "border-primary bg-primary-highlight"
               : "border-border hover:border-primary/50",

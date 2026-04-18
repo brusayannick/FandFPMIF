@@ -1,5 +1,5 @@
 import { BarChart3, Activity, FileInput, FileSpreadsheet } from "lucide-react";
-import type { FrontendModuleManifest } from "@/types/module";
+import type { FrontendModuleManifest } from "@/components/modules/types";
 import { ProcessAnalyticsPanel } from "./process_analytics/Panel";
 import { ProcessSimulationPanel } from "./process_simulation/Panel";
 import { BpmnImporterPanel } from "./bpmn_importer/Panel";

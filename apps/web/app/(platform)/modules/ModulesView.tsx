@@ -221,7 +221,7 @@ function AddModuleGuide({
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-3 px-6 py-4 text-left"
+        className="flex w-full cursor-pointer items-center gap-3 px-6 py-4 text-left"
       >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-surface-2 text-text-muted">
           <Code2 size={16} />

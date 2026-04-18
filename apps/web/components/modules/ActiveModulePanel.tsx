@@ -41,7 +41,7 @@ export function ActiveModulePanel({ processId }: ActiveModulePanelProps) {
                 key={m.moduleId}
                 type="button"
                 onClick={() => setActiveModuleId(m.moduleId)}
-                className="flex items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-surface-offset hover:text-text"
+                className="flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-surface-offset hover:text-text"
               >
                 <Icon size={14} className="shrink-0" />
                 <span className="flex-1 truncate">{m.displayName}</span>

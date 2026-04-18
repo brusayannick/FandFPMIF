@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { NodePalette } from "@/components/panels/NodePalette";
-import { PropertiesPanel } from "@/components/panels/PropertiesPanel";
+import { NodePalette } from "@/components/canvas/panels/NodePalette";
+import { PropertiesPanel } from "@/components/canvas/panels/PropertiesPanel";
 import { ProcessCanvas } from "./ProcessCanvas";
 import { CanvasHeader } from "./CanvasHeader";
 import { useProcessStore } from "@/stores/process.store";

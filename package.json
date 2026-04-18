@@ -3,12 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev:web": "npm --workspace=apps/web run dev",
-    "dev:api": "cd apps/api && uv run uvicorn main:app --reload --port 8000",
-    "build:web": "npm --workspace=apps/web run build",
-    "lint": "npm --workspaces run lint"
+    "dev": "concurrently --names api,web --prefix-colors cyan,magenta \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "exec uv run --directory apps/api uvicorn main:app --reload --port 8000",
+    "build:web": "pnpm --filter web build",
+    "lint": "pnpm --filter web lint"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }

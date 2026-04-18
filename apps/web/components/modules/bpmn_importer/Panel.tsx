@@ -25,7 +25,7 @@ type ImportResult = z.infer<typeof importResultSchema>;
 async function uploadBpmn(file: File): Promise<ImportResult> {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch("/api/modules/bpmn_importer/import", {
+  const res = await fetch("/api/v1/modules/bpmn_importer/import", {
     method: "POST",
     body: fd,
   });

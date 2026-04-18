@@ -162,6 +162,11 @@ Each module panel is a React component accepting `ModulePanelProps` (defined in 
 
 The frontend registry (`components/modules/registry.ts`) is currently a static hardcoded list — it must be manually updated when a new backend module is added.
 
+### Frontend Guidelines
+
+- **Use shadcn/ui components everywhere possible** — buttons, inputs, dialogs, dropdowns, etc. should use shadcn components instead of custom HTML or plain divs. Components are available in `components/ui/`.
+- **Cursor hover for interactive elements** — all clickable elements (buttons, links, interactive icons, etc.) must have `cursor-pointer` on hover. Use `className="cursor-pointer"` or Tailwind's `hover:cursor-pointer` to ensure visual feedback.
+
 ---
 
 ## Adding a New Module

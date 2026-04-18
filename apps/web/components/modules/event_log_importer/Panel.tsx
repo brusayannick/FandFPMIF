@@ -64,7 +64,7 @@ async function uploadEventLog(params: UploadParams): Promise<ImportResult> {
   fd.append("noise_threshold", String(params.noiseThreshold));
   fd.append("show_frequencies", String(params.showFrequencies));
 
-  const res = await fetch("/api/modules/event_log_importer/import", {
+  const res = await fetch("/api/v1/modules/event_log_importer/import", {
     method: "POST",
     body: fd,
   });

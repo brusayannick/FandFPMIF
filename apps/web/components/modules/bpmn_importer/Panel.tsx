@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api-client";
 import { graphSchema } from "@/lib/schemas/graph";
+import { layoutGraph } from "@/lib/layout";
 import { useProcessStore } from "@/stores/process.store";
 import type { ModulePanelProps } from "@/components/modules/types";
 import { z } from "zod";
@@ -47,8 +48,9 @@ export function BpmnImporterPanel(_props: ModulePanelProps) {
   const mutation = useMutation({
     mutationFn: uploadBpmn,
     onSuccess: (data) => {
-      setResult(data);
-      syncFromServer(data.graph);
+      const laidOut = layoutGraph(data.graph, { direction: "LR" });
+      setResult({ ...data, graph: laidOut });
+      syncFromServer(laidOut);
       toast.success(
         `Imported ${data.imported_node_count} node${
           data.imported_node_count === 1 ? "" : "s"

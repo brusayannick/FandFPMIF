@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api-client";
 import { graphSchema } from "@/lib/schemas/graph";
+import { layoutGraph } from "@/lib/layout";
 import { useProcessStore } from "@/stores/process.store";
 import type { ModulePanelProps } from "@/components/modules/types";
 import { z } from "zod";
@@ -93,8 +94,9 @@ export function EventLogImporterPanel(_props: ModulePanelProps) {
   const mutation = useMutation({
     mutationFn: uploadEventLog,
     onSuccess: (data) => {
-      setResult(data);
-      syncFromServer(data.graph);
+      const laidOut = layoutGraph(data.graph, { direction: "LR" });
+      setResult({ ...data, graph: laidOut });
+      syncFromServer(laidOut);
       toast.success(
         `Imported ${data.num_events.toLocaleString()} events from ${data.num_cases.toLocaleString()} cases`,
         {

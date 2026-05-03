@@ -1,0 +1,39 @@
+id: cost_analysis
+name: Cost Analysis
+version: 0.1.0
+category: attribute
+description: Activity-based costing — cost per activity, per case, per variant.
+author: Flows & Funds Core
+license: MIT
+default_enabled: false
+
+requirements:
+  event_log:
+    required_columns:
+      - case_id
+      - activity
+      - timestamp
+      - cost
+    min_events: 100
+
+provides:
+  - cost.per_activity
+  - cost.per_case
+  - cost.per_variant
+
+consumes:
+  - log.imported
+
+dependencies:
+  python:
+    requires-python: ">=3.12"
+    packages: []
+    inherit:
+      - pm4py
+      - pandas
+      - duckdb
+    isolation: in_process
+
+permissions:
+  - read:event_log
+  - write:module_results

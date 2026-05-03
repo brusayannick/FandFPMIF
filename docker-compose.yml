@@ -1,0 +1,48 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: flows-funds-api
+    volumes:
+      # Persistent state. Back up by copying ./data.
+      - ./data:/app/data
+      # Module folder is the platform's extension point — exposed read/write so
+      # the install flow can write modules/<id>/ into the host filesystem.
+      - ./modules:/app/modules
+    environment:
+      DATA_DIR: /app/data
+      MODULES_DIR: /app/modules
+      DATABASE_URL: sqlite+aiosqlite:////app/data/metadata.db
+      LOG_LEVEL: info
+      # Allow the web container's browser-side origin (the host's port 3000).
+      CORS_ORIGINS: '["http://localhost:3000"]'
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # NEXT_PUBLIC_* envs are inlined at build time (the rationale lives in
+        # apps/web/lib/api.ts). Set this to the URL the *browser* will use to
+        # reach the api — for local docker-compose that's the host's port 8000.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    container_name: flows-funds-web
+    environment:
+      INTERNAL_API_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

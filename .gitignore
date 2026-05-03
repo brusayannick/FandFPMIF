@@ -1,20 +1,47 @@
-/node_modules/
-/.pnpm-store/
-*.py[cod]
+# Python
 __pycache__/
+*.py[cod]
 *.egg-info/
-.env
 .venv/
-*.sqlite3
-dev.db
-.DS_Store
-Thumbs.db
+.uv/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.coverage
+htmlcov/
+
+# Node / Next.js
+node_modules/
+.next/
+.turbo/
+out/
+
+# Module per-folder install artefacts (manifest.yaml + uv.lock are committed)
+modules/*/.venv/
+modules/*/.dist/
+modules/*/node_modules/
+modules/*/.installed-hash
+
+# Runtime data (the directory layout itself is kept via .gitkeep)
+data/event_logs/*
+!data/event_logs/.gitkeep
+data/module_results/*
+!data/module_results/.gitkeep
+data/metadata.db
+data/metadata.db-wal
+data/metadata.db-shm
+data/*.bak
+
+# Generated TypeScript types
+packages/shared-types/generated/
+
+# IDE / OS
 .vscode/
 .idea/
-*.sublime-project
-*.sublime-workspace
-*.log
-.next/
-out/
-coverage/
-.coverage
+*.swp
+.DS_Store

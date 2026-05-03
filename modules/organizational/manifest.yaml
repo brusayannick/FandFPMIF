@@ -1,0 +1,43 @@
+id: organizational
+name: Organizational Mining
+version: 0.1.0
+category: attribute
+description: Resource & role mining, handover-of-work network, social network analysis.
+author: Flows & Funds Core
+license: MIT
+default_enabled: false
+
+requirements:
+  event_log:
+    required_columns:
+      - case_id
+      - activity
+      - timestamp
+      - resource
+    min_events: 100
+    min_cases: 5
+  optional_modules:
+    - id: discovery
+      reason: Adds DFG context to handover and social-network views.
+
+provides:
+  - org.handover_network
+  - org.social_network
+  - org.role_mining
+
+consumes:
+  - log.imported
+
+dependencies:
+  python:
+    requires-python: ">=3.12"
+    packages: []
+    inherit:
+      - pm4py
+      - pandas
+      - duckdb
+    isolation: in_process
+
+permissions:
+  - read:event_log
+  - write:module_results

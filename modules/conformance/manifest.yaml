@@ -1,0 +1,39 @@
+id: conformance
+name: Conformance Checking
+version: 0.1.0
+category: external_input
+description: Token-replay and alignment fitness against a user-supplied BPMN model.
+author: Flows & Funds Core
+license: MIT
+default_enabled: false
+
+requirements:
+  event_log:
+    required_columns:
+      - case_id
+      - activity
+      - timestamp
+    min_events: 100
+
+provides:
+  - conformance.fitness
+  - conformance.precision
+  - conformance.alignments
+
+consumes:
+  - log.imported
+
+dependencies:
+  python:
+    requires-python: ">=3.12"
+    packages:
+      - "bpmn-python>=0.0.18"
+    inherit:
+      - pm4py
+      - pandas
+      - duckdb
+    isolation: in_process
+
+permissions:
+  - read:event_log
+  - write:module_results

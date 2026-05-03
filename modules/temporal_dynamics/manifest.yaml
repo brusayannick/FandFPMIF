@@ -1,0 +1,41 @@
+id: temporal_dynamics
+name: Temporal Dynamics
+version: 0.1.0
+category: advanced
+description: Concept drift detection, seasonality, time-window stability.
+author: Flows & Funds Core
+license: MIT
+default_enabled: false
+
+requirements:
+  event_log:
+    required_columns:
+      - case_id
+      - activity
+      - timestamp
+    min_events: 500
+    min_cases: 30
+
+provides:
+  - temporal.drift
+  - temporal.seasonality
+  - temporal.windows
+
+consumes:
+  - log.imported
+
+dependencies:
+  python:
+    requires-python: ">=3.12"
+    packages:
+      - "scikit-learn>=1.5"
+      - "tslearn>=0.6"
+    inherit:
+      - pm4py
+      - pandas
+      - duckdb
+    isolation: in_process
+
+permissions:
+  - read:event_log
+  - write:module_results

@@ -1,0 +1,38 @@
+id: process_complexity
+name: Process Complexity
+version: 0.1.0
+category: advanced
+description: Variant entropy and structural metrics (CFC, cyclomatic complexity).
+author: Flows & Funds Core
+license: MIT
+default_enabled: false
+
+requirements:
+  event_log:
+    required_columns:
+      - case_id
+      - activity
+      - timestamp
+    min_events: 100
+
+provides:
+  - complexity.variant_entropy
+  - complexity.cfc
+  - complexity.structural
+
+consumes:
+  - log.imported
+
+dependencies:
+  python:
+    requires-python: ">=3.12"
+    packages: []
+    inherit:
+      - pm4py
+      - pandas
+      - duckdb
+    isolation: in_process
+
+permissions:
+  - read:event_log
+  - write:module_results

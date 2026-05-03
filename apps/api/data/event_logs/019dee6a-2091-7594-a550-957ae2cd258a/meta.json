@@ -1,0 +1,55 @@
+{
+  "log_id": "019dee6a-2091-7594-a550-957ae2cd258a",
+  "source_format": "csv",
+  "source_filename": "original.csv",
+  "imported_at": "2026-05-03T15:17:05.898719+00:00",
+  "ocel_flag": false,
+  "events_count": 9,
+  "cases_count": 3,
+  "variants_count": 2,
+  "date_min": "2026-01-01T08:00:00+00:00",
+  "date_max": "2026-01-02T12:00:00+00:00",
+  "detected_schema": {
+    "csv_columns": [
+      "case_id",
+      "activity",
+      "timestamp",
+      "resource"
+    ],
+    "canonical_columns": [
+      "activity",
+      "case_id",
+      "resource",
+      "timestamp"
+    ],
+    "mapping": {
+      "case_id": "case_id",
+      "activity": "activity",
+      "timestamp": "timestamp",
+      "end_timestamp": null,
+      "resource": "resource",
+      "cost": null,
+      "delimiter": ",",
+      "timestamp_format": null,
+      "extra": {}
+    },
+    "columns": [
+      "case_id",
+      "activity",
+      "timestamp",
+      "resource"
+    ],
+    "row_count": 9
+  },
+  "mapping": {
+    "case_id": "case_id",
+    "activity": "activity",
+    "timestamp": "timestamp",
+    "end_timestamp": null,
+    "resource": "resource",
+    "cost": null,
+    "delimiter": ",",
+    "timestamp_format": null,
+    "extra": {}
+  }
+}

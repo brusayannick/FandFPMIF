@@ -1,0 +1,14 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ff-mod-conformance"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "bpmn-python>=0.0.18",
+]
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true

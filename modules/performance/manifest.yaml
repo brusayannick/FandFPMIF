@@ -1,0 +1,50 @@
+id: performance
+name: Performance
+version: 1.0.0
+category: foundation
+description: Throughput, lead / cycle / sojourn time, P90 cycle time, bottlenecks, performance DFG.
+author: Flows & Funds Core
+license: MIT
+default_enabled: true
+
+requirements:
+  event_log:
+    required_columns:
+      - case_id
+      - activity
+      - timestamp
+    optional_columns:
+      - resource
+      - end_timestamp
+    min_events: 100
+    min_cases: 5
+  optional_modules:
+    - id: discovery
+      reason: Performance overlays look best on the discovered DFG.
+
+provides:
+  - perf.kpis
+  - perf.bottlenecks
+  - perf.dfg_performance
+  - perf.cycle_time_distribution
+
+consumes:
+  - log.imported
+  - discovery.completed
+
+dependencies:
+  python:
+    requires-python: ">=3.12"
+    packages: []
+    inherit:
+      - pm4py
+      - pandas
+      - duckdb
+    isolation: in_process
+
+frontend:
+  panel: ./panel/index.tsx
+
+permissions:
+  - read:event_log
+  - write:module_results

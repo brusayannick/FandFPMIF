@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ff-mod-temporal-dynamics"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "scikit-learn>=1.5",
+    "tslearn>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true

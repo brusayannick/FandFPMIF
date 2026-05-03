@@ -1,0 +1,41 @@
+id: decision_mining
+name: Decision Mining
+version: 0.1.0
+category: attribute
+description: Discovers branching rules at process gateways using decision trees.
+author: Flows & Funds Core
+license: MIT
+default_enabled: false
+
+requirements:
+  event_log:
+    required_columns:
+      - case_id
+      - activity
+      - timestamp
+    min_events: 200
+  modules:
+    - discovery
+
+provides:
+  - decision.rules
+  - decision.gateways
+
+consumes:
+  - log.imported
+  - discovery.completed
+
+dependencies:
+  python:
+    requires-python: ">=3.12"
+    packages:
+      - "scikit-learn>=1.5"
+    inherit:
+      - pm4py
+      - pandas
+      - duckdb
+    isolation: in_process
+
+permissions:
+  - read:event_log
+  - write:module_results

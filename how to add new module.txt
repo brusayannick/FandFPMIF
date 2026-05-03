@@ -1,5 +1,0 @@
-Adding a new module (proves zero-touch)
-apps/api/modules/builtin/my_module/module.py implementing AbstractModule
-registry.register(MyModule()) in main.py's _register_builtin_modules()
-apps/web/components/modules/my_module/Panel.tsx implementing ModulePanelProps
-One entry in components/modules/registry.ts

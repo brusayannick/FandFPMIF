@@ -10,6 +10,9 @@ services:
       # Module folder is the platform's extension point — exposed read/write so
       # the install flow can write modules/<id>/ into the host filesystem.
       - ./modules:/app/modules
+      # CV4CDD model — mounted at the same absolute path so the model_path
+      # setting in Settings → Modules → Temporal Dynamics works unchanged.
+      - /Users/yannickbrusa/cv4cdd_model:/Users/yannickbrusa/cv4cdd_model:ro
     environment:
       DATA_DIR: /app/data
       MODULES_DIR: /app/modules
@@ -17,6 +20,9 @@ services:
       LOG_LEVEL: info
       # Allow the web container's browser-side origin (the host's port 3000).
       CORS_ORIGINS: '["http://localhost:3000"]'
+      # Persist uv-managed Python runtimes to the data volume so they survive
+      # container rebuilds and don't need to be re-downloaded on every start.
+      UV_PYTHON_INSTALL_DIR: /app/data/uv-python
     ports:
       - "8000:8000"
     healthcheck:

@@ -3,7 +3,6 @@
 import { useState } from "react";
 import {
   Copy,
-  ExternalLink,
   Info,
   Loader2,
   RefreshCcw,
@@ -13,6 +12,7 @@ import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
@@ -24,14 +24,13 @@ import {
 import { StatusBadge } from "@/components/status-badge";
 import { useCancelJob, useRetryJob } from "@/lib/queries";
 import { formatDuration, formatNumber, formatRelative } from "@/lib/format";
-import type { LiveJob } from "@/lib/stores/jobs";
+import { parseJobTitle, type LiveJob } from "@/lib/stores/jobs";
 
 interface JobRowProps {
   job: LiveJob;
-  onOpenResult?: (job: LiveJob) => void;
 }
 
-export function JobRow({ job, onOpenResult }: JobRowProps) {
+export function JobRow({ job }: JobRowProps) {
   const cancel = useCancelJob();
   const retry = useRetryJob();
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -48,19 +47,27 @@ export function JobRow({ job, onOpenResult }: JobRowProps) {
   const isFailed = job.status === "failed";
   const isCompleted = job.status === "completed";
 
-  const subtitle = job.subtitle ?? `${job.type}${job.module_id ? ` · ${job.module_id}` : ""}`;
+  const subtitle = job.subtitle ?? (job.module_id ? job.module_id : "");
+  const { name: cleanTitle, badge: typeCategory } = parseJobTitle(job);
 
   return (
-    <Card className="space-y-2 p-3">
+    <Card className="space-y-3 p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{job.title}</div>
-          <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
+          <div className="flex items-center gap-2 min-w-0">
+            <Badge variant="outline" className="h-5 shrink-0 whitespace-nowrap border-0 bg-muted px-1.5 text-[10px]">
+              {typeCategory}
+            </Badge>
+            <div className="truncate text-sm font-medium leading-tight">{cleanTitle}</div>
+          </div>
+          {subtitle && <div className="truncate text-xs text-muted-foreground">{subtitle}</div>}
         </div>
-        <StatusBadge status={job.status} />
+        <div className="flex items-center gap-1 shrink-0">
+          <StatusBadge status={job.status} />
+        </div>
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-0.5">
         <Progress
           value={pct ?? undefined}
           className={pct === null && isActive ? "h-1 animate-pulse" : "h-1"}
@@ -89,16 +96,16 @@ export function JobRow({ job, onOpenResult }: JobRowProps) {
         </p>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
         <span>
           {job.started_at ? `Started ${formatRelative(job.started_at)}` : `Created ${formatRelative(job.created_at)}`}
         </span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           {isActive && (
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 cursor-pointer gap-1 text-xs"
+              className="h-6 cursor-pointer gap-0.5 px-2 text-xs"
               onClick={() => cancel.mutate(job.id)}
               disabled={cancel.isPending}
             >
@@ -110,7 +117,7 @@ export function JobRow({ job, onOpenResult }: JobRowProps) {
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 cursor-pointer gap-1 text-xs"
+              className="h-6 cursor-pointer gap-0.5 px-2 text-xs"
               onClick={() => retry.mutate(job.id)}
               disabled={retry.isPending}
             >
@@ -118,32 +125,10 @@ export function JobRow({ job, onOpenResult }: JobRowProps) {
               Retry
             </Button>
           )}
-          {isCompleted && onOpenResult && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 cursor-pointer gap-1 text-xs"
-              onClick={() => onOpenResult(job)}
-            >
-              <ExternalLink className="h-3 w-3" />
-              Open
-            </Button>
-          )}
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 cursor-pointer gap-1 text-xs"
-            onClick={() => {
-              navigator.clipboard.writeText(job.id);
-              toast.success("Job id copied");
-            }}
-          >
-            <Copy className="h-3 w-3" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 cursor-pointer gap-1 text-xs"
+            className="h-6 cursor-pointer gap-0.5 px-2 text-xs"
             onClick={() => setDetailsOpen(true)}
           >
             <Info className="h-3 w-3" />
@@ -167,7 +152,8 @@ function JobDetailsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const subtitle = job.subtitle ?? `${job.type}${job.module_id ? ` · ${job.module_id}` : ""}`;
+  const subtitle = job.subtitle ?? (job.module_id ? job.module_id : "");
+  const { name: cleanTitle, badge: typeCategory } = parseJobTitle(job);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -175,7 +161,12 @@ function JobDetailsDialog({
         <DialogHeader>
           <div className="flex items-start justify-between gap-3 pr-6">
             <div className="min-w-0 flex-1 space-y-1">
-              <DialogTitle className="truncate">{job.title}</DialogTitle>
+              <div className="flex items-center gap-2 min-w-0">
+                <Badge variant="outline" className="h-5 shrink-0 whitespace-nowrap border-0 bg-muted px-1.5 text-[10px]">
+                  {typeCategory}
+                </Badge>
+                <DialogTitle className="truncate">{cleanTitle}</DialogTitle>
+              </div>
               <DialogDescription className="truncate">{subtitle}</DialogDescription>
             </div>
             <StatusBadge status={job.status} />
@@ -218,7 +209,7 @@ function JobDetailsDialog({
                 Copy
               </Button>
             </div>
-            <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-[11px]">
+            <pre className="max-h-64 overflow-y-auto overflow-x-hidden rounded-md bg-muted p-3 text-[11px]">
               {JSON.stringify(job.payload_json, null, 2)}
             </pre>
           </div>
@@ -226,7 +217,7 @@ function JobDetailsDialog({
           {job.error && (
             <div className="space-y-1">
               <div className="text-[10px] uppercase tracking-wide text-destructive">Error</div>
-              <pre className="max-h-64 overflow-auto rounded-md bg-destructive/10 p-3 text-[11px] text-destructive">
+              <pre className="max-h-64 overflow-y-auto overflow-x-hidden rounded-md bg-destructive/10 p-3 text-[11px] text-destructive">
                 {job.error}
               </pre>
             </div>

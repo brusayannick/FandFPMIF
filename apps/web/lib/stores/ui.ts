@@ -3,34 +3,34 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-export type Density = "comfortable" | "compact";
-
 interface UiState {
-  density: Density;
   sidebarCollapsed: boolean;
   showUnavailableModules: boolean;
   showDisabledModules: boolean;
   notificationsMuted: boolean;
-  setDensity: (d: Density) => void;
+  atlasOpen: boolean;
   toggleSidebar: () => void;
   setShowUnavailableModules: (v: boolean) => void;
   setShowDisabledModules: (v: boolean) => void;
   setNotificationsMuted: (v: boolean) => void;
+  toggleAtlas: () => void;
+  setAtlasOpen: (v: boolean) => void;
 }
 
 export const useUi = create<UiState>()(
   persist(
     (set) => ({
-      density: "comfortable",
       sidebarCollapsed: false,
       showUnavailableModules: true,
       showDisabledModules: false,
       notificationsMuted: false,
-      setDensity: (density) => set({ density }),
+      atlasOpen: false,
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setShowUnavailableModules: (v) => set({ showUnavailableModules: v }),
       setShowDisabledModules: (v) => set({ showDisabledModules: v }),
       setNotificationsMuted: (v) => set({ notificationsMuted: v }),
+      toggleAtlas: () => set((s) => ({ atlasOpen: !s.atlasOpen })),
+      setAtlasOpen: (v) => set({ atlasOpen: v }),
     }),
     {
       name: "ff.ui",

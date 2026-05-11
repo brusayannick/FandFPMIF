@@ -154,7 +154,7 @@ export function VariantsTab({ logId, log }: { logId: string; log: EventLogDetail
                   return (
                   <TableRow
                     key={v.variant_id}
-                    className="h-[var(--row-height)] cursor-pointer hover:bg-muted/40"
+                    className="h-12 cursor-pointer hover:bg-muted/40"
                   >
                     <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
                       <Link

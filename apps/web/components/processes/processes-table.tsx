@@ -52,7 +52,6 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 
@@ -66,7 +65,6 @@ export function ProcessesTable({ rows }: ProcessesTableProps) {
       <TableHeader>
         <TableRow>
           <TableHead className="w-[40%]">Name</TableHead>
-          <TableHead>Status</TableHead>
           <TableHead className="text-right">Cases</TableHead>
           <TableHead className="text-right">Events</TableHead>
           <TableHead className="text-right">Variants</TableHead>
@@ -123,7 +121,7 @@ function ProcessRow({ row }: { row: EventLogSummary }) {
   return (
     <TableRow
       className={cn(
-        "h-[var(--row-height)]",
+        "h-12",
         ready && "cursor-pointer",
         importing && "opacity-60",
       )}
@@ -135,25 +133,6 @@ function ProcessRow({ row }: { row: EventLogSummary }) {
           <div className="mt-1 max-w-xs">
             <Progress value={undefined} className="h-1" />
           </div>
-        )}
-      </TableCell>
-      <TableCell>
-        {failed ? (
-          <HoverCard>
-            <HoverCardTrigger asChild>
-              <span>
-                <StatusBadge status={row.status} />
-              </span>
-            </HoverCardTrigger>
-            <HoverCardContent className="text-xs">
-              <p className="font-medium">Import failed</p>
-              <p className="mt-1 text-muted-foreground break-words">
-                {row.error ?? "No error recorded."}
-              </p>
-            </HoverCardContent>
-          </HoverCard>
-        ) : (
-          <StatusBadge status={row.status} />
         )}
       </TableCell>
       <TableCell className="text-right tabular-nums">{formatNumber(row.cases_count)}</TableCell>

@@ -24,12 +24,14 @@ interface State {
   byId: Map<string, JobLive>;
   drawerOpen: boolean;
   paused: boolean;
+  finishedHidden: boolean;
 
   setAll: (rows: JobDetail[]) => void;
   upsert: (job: Partial<JobLive> & { id: string }) => void;
   applyEvent: (topic: string, payload: Record<string, unknown>) => void;
   setDrawerOpen: (open: boolean) => void;
   setPaused: (paused: boolean) => void;
+  setFinishedHidden: (hidden: boolean) => void;
   remove: (id: string) => void;
   clearFinished: () => void;
 }
@@ -45,10 +47,16 @@ function tracker(id: string): EtaTracker {
   return t;
 }
 
-export const useJobsStore = create<State>((set, get) => ({
-  byId: new Map(),
-  drawerOpen: false,
-  paused: false,
+export const useJobsStore = create<State>((set, get) => {
+  const finishedHidden = typeof localStorage !== "undefined"
+    ? localStorage.getItem("ff.jobs.finishedHidden") === "true"
+    : false;
+
+  return {
+    byId: new Map(),
+    drawerOpen: false,
+    paused: false,
+    finishedHidden,
 
   setAll: (rows) => {
     const byId = new Map<string, JobLive>();
@@ -168,6 +176,12 @@ export const useJobsStore = create<State>((set, get) => ({
 
   setDrawerOpen: (drawerOpen) => set({ drawerOpen }),
   setPaused: (paused) => set({ paused }),
+  setFinishedHidden: (finishedHidden) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("ff.jobs.finishedHidden", finishedHidden.toString());
+    }
+    set({ finishedHidden });
+  },
 
   remove: (id) => {
     const byId = new Map(get().byId);
@@ -177,18 +191,52 @@ export const useJobsStore = create<State>((set, get) => ({
   },
 
   clearFinished: () => {
-    const byId = new Map(get().byId);
-    for (const [id, j] of byId) {
-      if (j.status === "completed" || j.status === "cancelled" || j.status === "failed") {
-        byId.delete(id);
-        trackers.delete(id);
-      }
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("ff.jobs.finishedHidden", "true");
     }
-    set({ byId });
+    set({ finishedHidden: true });
   },
-}));
+  };
+});
 
 export type LiveJob = JobLive;
+
+export type JobTypeCategory = "Import" | "Precompute" | "Module" | "Other";
+
+export function categorizeJobType(job: LiveJob): JobTypeCategory {
+  const type = job.type.toLowerCase();
+  if (type.includes("import")) return "Import";
+  if (type.includes("module.install")) return "Module";
+  if (type.includes("module.")) return "Precompute";
+  return "Other";
+}
+
+// Job titles use " — " (em-dash) as a separator between a "type" part and a
+// "name" part. Which side is which depends on the job kind:
+//   "Import — env_permit"      → badge: Import,      name: env_permit
+//   "Discovery — precompute"   → badge: precompute,   name: Discovery
+// Known type-prefixes (first part) are treated as the badge; everything else
+// is assumed to be name-first, type-last.
+const TITLE_TYPE_PREFIXES = new Set(["import", "export"]);
+
+export function parseJobTitle(job: LiveJob): { name: string; badge: string } {
+  const SEP = " — "; // " — "
+  const { title } = job;
+
+  if (!title.includes(SEP)) {
+    return { name: title, badge: categorizeJobType(job) };
+  }
+
+  const idx = title.indexOf(SEP);
+  const first = title.slice(0, idx);
+  const rest = title.slice(idx + SEP.length);
+
+  if (TITLE_TYPE_PREFIXES.has(first.toLowerCase())) {
+    return { name: rest, badge: first };
+  }
+
+  return { name: first, badge: rest };
+}
 
 /* -------- selectors -------- */
 
@@ -202,6 +250,7 @@ export const selectActiveJobs = (s: State): LiveJob[] => {
 };
 
 export const selectFinishedJobs = (s: State): LiveJob[] => {
+  if (s.finishedHidden) return [];
   const out: LiveJob[] = [];
   for (const j of s.byId.values()) if (FINISHED.has(j.status)) out.push(j);
   return out.sort((a, b) => (a.finished_at ?? a.created_at) > (b.finished_at ?? b.created_at) ? -1 : 1);

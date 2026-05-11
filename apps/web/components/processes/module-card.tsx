@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronRight, MoreHorizontal } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -57,39 +57,22 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
         }
       }}
       className={cn(
-        "group relative flex h-full flex-col gap-2 transition-all",
+        "group relative flex h-full flex-col transition-all",
         isAvailable && "cursor-pointer hover:-translate-y-0.5 hover:shadow-md",
         isDegraded && "cursor-pointer hover:shadow-md",
         (isUnavailable || isDisabled) && "cursor-not-allowed opacity-60",
       )}
       aria-disabled={isUnavailable || isDisabled}
     >
-      <CardContent className="flex h-full flex-col gap-2 p-[var(--card-padding)]">
-        <div className="flex items-start justify-between gap-2">
+      <CardContent className="flex h-full flex-col gap-3 p-4">
+        {/* Header: Name, version, author */}
+        <div className="flex items-start justify-between gap-2 min-w-0">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="truncate text-sm font-semibold">{module.name}</h3>
-              <span className="text-xs text-muted-foreground">{module.version}</span>
-            </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-              <Badge variant="outline" className="border-0 bg-muted text-[10px] uppercase tracking-wide text-muted-foreground">
-                {module.category.replace("_", " ")}
-              </Badge>
-              {isDisabled && (
-                <Badge className="border-0 bg-muted text-[10px] text-muted-foreground">
-                  Disabled
-                </Badge>
-              )}
-              {!isDisabled && isDegraded && (
-                <Badge className="border-0 bg-chart-4/20 text-[10px] text-foreground">
-                  Limited
-                </Badge>
-              )}
-              {!isDisabled && isUnavailable && (
-                <Badge className="border-0 bg-muted text-[10px] text-muted-foreground">
-                  Requirements not met
-                </Badge>
-              )}
+            <h3 className="truncate text-sm font-semibold leading-tight">{module.name}</h3>
+            <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+              {module.version && <span className="shrink-0">{module.version}</span>}
+              {module.author && module.version && <span className="shrink-0 text-muted-foreground/50">·</span>}
+              {module.author && <span className="truncate">by {module.author}</span>}
             </div>
           </div>
           <DropdownMenu>
@@ -97,7 +80,7 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 cursor-pointer opacity-0 transition-opacity group-hover:opacity-100"
+                className="h-6 w-6 shrink-0 cursor-pointer opacity-0 transition-opacity group-hover:opacity-100"
                 aria-label="Module actions"
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
@@ -122,17 +105,38 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        {module.description && (
-          <p className="line-clamp-3 text-xs text-muted-foreground">{module.description}</p>
-        )}
-        <div className="mt-auto flex items-center justify-between pt-1">
-          <span className="text-xs text-muted-foreground">
-            {module.provides.length} capabilit{module.provides.length === 1 ? "y" : "ies"}
-          </span>
-          {(isAvailable || isDegraded) && (
-            <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+
+        {/* Category & Status */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge
+            variant="secondary"
+            className="h-5 px-2 py-0 text-[9px] font-medium uppercase tracking-wide"
+          >
+            {module.category.replace(/_/g, " ")}
+          </Badge>
+          {isDisabled && (
+            <Badge className="h-5 border-0 bg-muted px-2 py-0 text-[9px] font-medium text-muted-foreground">
+              Disabled
+            </Badge>
+          )}
+          {!isDisabled && isDegraded && (
+            <Badge className="h-5 border-0 bg-amber-500/15 px-2 py-0 text-[9px] font-medium text-amber-700 dark:text-amber-400">
+              Limited
+            </Badge>
+          )}
+          {!isDisabled && isUnavailable && (
+            <Badge className="h-5 border-0 bg-destructive/10 px-2 py-0 text-[9px] font-medium text-destructive">
+              Unavailable
+            </Badge>
           )}
         </div>
+
+        {/* Description */}
+        {module.description && (
+          <p className="line-clamp-2 flex-1 text-xs leading-snug text-muted-foreground">
+            {module.description}
+          </p>
+        )}
       </CardContent>
     </Card>
   );

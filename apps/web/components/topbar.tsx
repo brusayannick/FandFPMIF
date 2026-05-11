@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Search } from "lucide-react";
+import { Activity, Search, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
+import { useUi } from "@/lib/stores/ui";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -18,23 +20,37 @@ import {
 import { CommandPalette } from "@/components/cmdk";
 import { useShallow } from "zustand/react/shallow";
 import { selectCounts, useJobsStore } from "@/lib/stores/jobs";
+import { useEventLogs } from "@/lib/queries";
 
 function isMac() {
   if (typeof navigator === "undefined") return false;
   return /Mac|iPhone|iPad/.test(navigator.platform);
 }
 
-function deriveCrumbs(pathname: string) {
+function deriveCrumbs(pathname: string, logNames?: Map<string, string>) {
   const parts = pathname.split("/").filter(Boolean);
   if (parts.length === 0) return [{ href: "/processes", label: "Processes", current: true }];
   const out: { href: string; label: string; current: boolean }[] = [];
   let acc = "";
   for (let i = 0; i < parts.length; i++) {
     acc += `/${parts[i]}`;
+
+    // Skip displaying "modules" in breadcrumb
+    if (parts[i] === "modules") {
+      continue;
+    }
+
     const isLast = i === parts.length - 1;
+
+    // Use process name if this is the logId (comes after "processes")
+    let label = prettify(parts[i]);
+    if (parts[i - 1] === "processes" && logNames?.has(parts[i])) {
+      label = logNames.get(parts[i])!;
+    }
+
     out.push({
       href: acc,
-      label: prettify(parts[i]),
+      label,
       current: isLast,
     });
   }
@@ -48,8 +64,11 @@ function prettify(seg: string): string {
 
 export function Topbar() {
   const pathname = usePathname();
-  const crumbs = deriveCrumbs(pathname);
+  const { data: logs } = useEventLogs();
   const [open, setOpen] = useState(false);
+
+  const logNames = new Map(logs?.map((log) => [log.id, log.name]) ?? []);
+  const crumbs = deriveCrumbs(pathname, logNames);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -83,6 +102,8 @@ export function Topbar() {
 
 <JobsTopbarButton />
 
+      <AtlasTopbarButton />
+
       <Button
         type="button"
         variant="outline"
@@ -102,25 +123,54 @@ export function Topbar() {
   );
 }
 
-function JobsTopbarButton() {
-  const counts = useJobsStore(useShallow(selectCounts));
-  const setOpen = useJobsStore((s) => s.setDrawerOpen);
-  const active = counts.running + counts.queued;
+function AtlasTopbarButton() {
+  const open = useUi((s) => s.atlasOpen);
+  const toggle = useUi((s) => s.toggleAtlas);
   return (
     <Button
       type="button"
       variant="ghost"
       size="sm"
-      className="relative cursor-pointer gap-1.5 text-muted-foreground"
+      className={cn(
+        "cursor-pointer gap-1.5 text-muted-foreground",
+        open && "text-foreground",
+      )}
+      onClick={toggle}
+      aria-label="Toggle ATLAS AI"
+      aria-pressed={open}
+    >
+      <Sparkles className="h-3.5 w-3.5" />
+      <span className="hidden md:inline">ATLAS AI</span>
+    </Button>
+  );
+}
+
+function JobsTopbarButton() {
+  const counts = useJobsStore(useShallow(selectCounts));
+  const setOpen = useJobsStore((s) => s.setDrawerOpen);
+  const active = counts.running + counts.queued;
+  const running = counts.running;
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className={cn(
+        "relative cursor-pointer gap-1.5 overflow-hidden text-muted-foreground",
+        active > 0 && "text-foreground",
+      )}
       onClick={() => setOpen(true)}
       aria-label={active ? `${active} active jobs` : "Open jobs drawer"}
     >
-      <Activity className="h-3.5 w-3.5" />
+      <Activity className={cn("h-3.5 w-3.5", running > 0 && "animate-heartbeat")} />
       <span className="hidden md:inline">Jobs</span>
       {active > 0 && (
-        <Badge className="ml-1 h-4 min-w-4 border-0 bg-foreground/10 px-1 text-[10px] tabular-nums text-foreground">
-          {active}
-        </Badge>
+        <>
+          <Badge className="ml-1 h-4 min-w-4 border-0 bg-foreground/10 px-1 text-[10px] tabular-nums text-foreground">
+            {active}
+          </Badge>
+          <span className={cn("absolute inset-x-0 bottom-0 h-[2px] bg-primary/70", running > 0 && "animate-heartbeat")} />
+        </>
       )}
     </Button>
   );

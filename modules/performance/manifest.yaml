@@ -3,7 +3,7 @@ name: Performance
 version: 1.0.0
 category: foundation
 description: Throughput, lead / cycle / sojourn time, P90 cycle time, bottlenecks, performance DFG.
-author: Flows & Funds Core
+author: FlowFactory
 license: MIT
 default_enabled: true
 

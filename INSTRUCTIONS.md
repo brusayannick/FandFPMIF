@@ -615,7 +615,8 @@ Each module's *Configure* opens the deep page (`/settings/modules/{moduleId}`):
 - **Configuration:** the module's `config_schema` rendered as a shadcn `Form` with Zod validation. Save persists to `module_configs` in SQLite.
 - **Dependencies:** Python + npm packages from the manifest's `dependencies` block, with their resolved versions from the lockfile, install size, and a *Reinstall* button.
 - **Logs:** tail of recent module logs (server-streamed via `WS /events` filtered by `module_id`).
-- **Danger zone:** *Disable for all logs*, *Uninstall* (deletes `modules/<folder>/`).
+- **Danger zone:** *Disable for all logs*, *Uninstall*.
+  Removes the module folder, its venv, and any cached results. The platform's own dependencies are unaffected.
 
 ##### Importing a new module (`/settings/modules/import`)
 
@@ -739,8 +740,25 @@ The Job model in SQLite (§8) gains: `title`, `subtitle`, `module_id?`, `eta_sec
 
 ## 8. Job & Progress Architecture
 
+### 8.1 Job model & status
+
 - **Job model** in SQLite: `id, type, title, subtitle, module_id?, payload_json, status, progress_current, progress_total, stage, message, rate?, eta_seconds?, priority, parent_job_id?, created_at, started_at?, finished_at?`. Status values: `queued | running | paused | completed | failed | cancelled`. The `title` / `subtitle` are user-facing strings that the producing module supplies (defaults are computed from `type` + `payload`).
-- **Producer.** REST endpoints insert a Job row, push a marker onto an in-process `asyncio.Queue`.
+
+### 8.2 Job types
+
+| Type | When | Who creates | Module-scoped | Purpose |
+|---|---|---|---|---|
+| `import` | User uploads an event log via `/processes/import` | Platform (core) | No | Parse and normalise XES / CSV / XML / OCEL into Parquet. Multi-stage: `parsing` → `normalizing` → `indexing`. |
+| `module` | Module defines a `@job`-decorated route or event handler | Module (SDK `@job`) | Yes (module_id required) | Long-running module computation (discovery, conformance, cost analysis, etc.). Title supplied by the module's `@job(title=...)` decorator. |
+
+**Notes:**
+- The `module_id` field is `NULL` for `import` jobs, required for `module` jobs.
+- When a module declares `@job(progress=True)` on a handler, the SDK automatically inserts a Job row, assigns it a UUID v7, and returns `{ job_id }` to the client (non-blocking). For handlers without `@job`, the request blocks and returns the result directly.
+- Module jobs inherit the same progress streaming, cancellation, and drawer integration as import jobs. The frontend treats them uniformly.
+
+### 8.3 Job lifecycle & worker pool
+
+- **Producer.** REST endpoints (import, module `@route` with `@job`) insert a Job row, push a marker onto an in-process `asyncio.Queue`.
 - **Worker pool.** In-process asyncio tasks (configurable `WORKER_CONCURRENCY`, default 2). Progress is persisted to SQLite every N events (default 1000) and broadcast over the WebSocket fan-out.
 - **Stream.** WebSocket subscribes to a per-job `asyncio.Event`; falls back to SQLite polling if the connection drops.
 - **No Redis / Celery / RQ / Dramatiq.** Keeps the stack to two services and a single Python process per scale unit.

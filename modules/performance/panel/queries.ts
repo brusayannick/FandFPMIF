@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
-import type { DfgData } from "@/components/visualizations";
+import type { DfgData } from "@modules/discovery/panel/types";
 
 const STALE_TIME = 30_000;
 

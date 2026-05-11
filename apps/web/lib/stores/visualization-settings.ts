@@ -29,13 +29,20 @@ export interface DfgRenderSettings {
   /** Fraction of edges to show, sorted by frequency, after the activity filter. */
   connectionsShown: number;
   hideSelfLoops: boolean;
+  /** Keep only the top N% of visible edges by count (100 = show all). Unlike
+   *  the connections slider this does NOT affect node visibility — nodes stay
+   *  shown even if all their edges are removed. */
+  edgeTopPercent: 100 | 95 | 90 | 85 | 80 | 70;
   edgeLabel: "count" | "duration" | "off";
   edgeThicknessEncoding: "linear" | "log" | "off";
-  /** "layered" = ELK Sugiyama (default; cleanest for cyclical DFGs).
-   *  "temporal" = nodes positioned along the primary axis by their mean
-   *  trace position; ELK only routes edges. Requires `mean_trace_position`
-   *  on activities (discovery serializer v3+). */
-  layoutMode: "layered" | "temporal";
+  /** Layout mode for DFG visualization:
+   *  - "temporal"           nodes along time axis by mean_trace_position; greedy lane-packing
+   *  - "temporal-phases-2"  5 phase columns (quintile); 3× node-height gap
+   *  - "temporal-phases-3"  7 fine phase columns; 2× node-height gap
+   *  - "temporal-swimlane"  swimlane bands by role (Entry / Core / Exit)
+   *  - "happy-path-tower"   happy-path spine + parallel activities stacked per-column
+   *  Temporal modes require `mean_trace_position` on activities (discovery serializer v3+). */
+  layoutMode: "temporal" | "temporal-phases-2" | "temporal-phases-3" | "temporal-swimlane" | "happy-path-tower";
 }
 
 export interface PetriRenderSettings {
@@ -56,9 +63,15 @@ export interface ProcessTreeRenderSettings {
 export interface HeuristicsRenderSettings {
   edgeLabel: "dependency" | "count" | "both";
   hideRareArcs: boolean;
+  /** Per-(log, module) threshold sliders. Held client-side because the
+   *  cascade of /config PUT + refetchType:"all" was crashing inactive
+   *  ILP/process-tree queries (OOM / recursion) mid-drag. */
+  dependencyThreshold: number;
+  andThreshold: number;
+  loopTwoThreshold: number;
 }
 
-export type VizKey = "dfg" | "petri" | "process_tree" | "heuristics";
+export type VizKey = "dfg" | "petri" | "process_tree" | "heuristics" | "prefix_tree";
 
 export interface PerVizSettings {
   dfg?: DfgRenderSettings;
@@ -115,9 +128,10 @@ export const DEFAULT_DFG: DfgRenderSettings = {
   activitiesShown: 1,
   connectionsShown: 1,
   hideSelfLoops: false,
+  edgeTopPercent: 100,
   edgeLabel: "count",
   edgeThicknessEncoding: "log",
-  layoutMode: "layered",
+  layoutMode: "temporal",
 };
 
 export const DEFAULT_PETRI: PetriRenderSettings = {
@@ -138,6 +152,9 @@ export const DEFAULT_PROCESS_TREE: ProcessTreeRenderSettings = {
 export const DEFAULT_HEURISTICS: HeuristicsRenderSettings = {
   edgeLabel: "both",
   hideRareArcs: false,
+  dependencyThreshold: 0.5,
+  andThreshold: 0.65,
+  loopTwoThreshold: 0.5,
 };
 
 // --------------------------------------------------------------------------
@@ -244,24 +261,48 @@ export const useVizSettings = create<VizSettingsState>()(
       name: "ff.viz-settings.v1",
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
-      version: 2,
+      version: 3,
       migrate: (persisted: unknown, version: number) => {
+        if (!persisted || typeof persisted !== "object") {
+          return persisted as VizSettingsState;
+        }
+        let p = persisted as Partial<VizSettingsState>;
+
         // v1 → v2: flip stale `layoutDirection: "LR"` to the new TB default.
-        // We can't blindly stomp it (a user may have intentionally chosen LR)
-        // but anyone still on v1 hasn't seen the new default yet, so the
-        // upgrade path is to align them with it.
-        if (version < 2 && persisted && typeof persisted === "object") {
-          const p = persisted as { general?: GeneralSettings };
-          return {
+        if (version < 2) {
+          p = {
             ...p,
-            general: {
-              ...DEFAULT_GENERAL,
-              ...p.general,
-              layoutDirection: "TB",
-            },
+            general: { ...DEFAULT_GENERAL, ...p.general, layoutDirection: "TB" },
           };
         }
-        return persisted as VizSettingsState;
+
+        // v2 → v3: backfill per-viz fields that were added after the user
+        // first persisted (e.g. heuristics threshold sliders). Without this
+        // backfill, accessing the new field returns `undefined` and crashes
+        // consumers like `<Slider value.toFixed()>`.
+        if (version < 3 && p.perLog) {
+          const nextPerLog: VizSettingsState["perLog"] = {};
+          for (const [logId, modMap] of Object.entries(p.perLog)) {
+            const nextModMap: Record<string, PerVizSettings> = {};
+            for (const [modId, viz] of Object.entries(modMap ?? {})) {
+              nextModMap[modId] = {
+                ...viz,
+                dfg: viz.dfg ? { ...DEFAULT_DFG, ...viz.dfg } : viz.dfg,
+                petri: viz.petri ? { ...DEFAULT_PETRI, ...viz.petri } : viz.petri,
+                process_tree: viz.process_tree
+                  ? { ...DEFAULT_PROCESS_TREE, ...viz.process_tree }
+                  : viz.process_tree,
+                heuristics: viz.heuristics
+                  ? { ...DEFAULT_HEURISTICS, ...viz.heuristics }
+                  : viz.heuristics,
+              };
+            }
+            nextPerLog[logId] = nextModMap;
+          }
+          p = { ...p, perLog: nextPerLog };
+        }
+
+        return p as VizSettingsState;
       },
     },
   ),

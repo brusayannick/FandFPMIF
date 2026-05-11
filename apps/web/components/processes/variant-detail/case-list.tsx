@@ -44,7 +44,7 @@ export function CaseList({
         </TableHeader>
         <TableBody>
           {cases.map((c) => (
-            <TableRow key={c.case_id} className="h-[var(--row-height)]">
+            <TableRow key={c.case_id} className="h-12">
               <TableCell className="font-mono text-sm">{c.case_id}</TableCell>
               <TableCell className="text-sm text-muted-foreground">
                 {c.case_start ? new Date(c.case_start).toLocaleString() : "—"}

@@ -50,20 +50,11 @@ interface CanvasShellProps {
   onNodeDragStop?: NodeMouseHandler;
 }
 
-// Minimap node colors are pre-resolved RGB so they render reliably as SVG
-// `fill` attributes (CSS vars + oklch() in SVG presentation attributes is
-// inconsistent across browsers — a CSS class would also work, but we want
-// per-node-type tinting).
-const NODE_TYPE_COLORS: Record<string, string> = {
-  activity: "rgb(99, 102, 241)",       // indigo-500 — distinct in both themes
-  place: "rgb(148, 163, 184)",         // slate-400
-  transition: "rgb(71, 85, 105)",      // slate-600
-  pt_operator: "rgb(168, 85, 247)",    // purple-500
-  pt_leaf: "rgb(148, 163, 184)",       // slate-400
-};
-
-const minimapNodeColor = (node: Node): string =>
-  (node.type && NODE_TYPE_COLORS[node.type]) ?? "rgb(100, 116, 139)";
+// All minimap nodes use a single neutral grey so the minimap reads as a
+// structural overview rather than adding a second colour legend.
+// Pre-resolved RGB — CSS vars and oklch() in SVG presentation attributes are
+// inconsistent across browsers.
+const minimapNodeColor = (_node: Node): string => "rgb(148, 163, 184)"; // slate-400
 
 function CanvasInner({
   nodes,

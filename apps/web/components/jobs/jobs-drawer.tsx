@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useShallow } from "zustand/react/shallow";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Inbox, MoreHorizontal, Play, Square, Trash2 } from "lucide-react";
+import { Inbox, MoreHorizontal, Pause, Play, Trash2, Eye } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -41,11 +40,11 @@ export function JobsDrawer() {
   const open = useJobsStore((s) => s.drawerOpen);
   const setOpen = useJobsStore((s) => s.setDrawerOpen);
   const paused = useJobsStore((s) => s.paused);
-  const counts = useJobsStore(useShallow(selectCounts));
+  const finishedHidden = useJobsStore((s) => s.finishedHidden);
   const active = useJobsStore(useShallow(selectActiveJobs));
   const finished = useJobsStore(useShallow(selectFinishedJobs));
   const clearFinished = useJobsStore((s) => s.clearFinished);
-  const router = useRouter();
+  const setFinishedHidden = useJobsStore((s) => s.setFinishedHidden);
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
 
@@ -91,15 +90,6 @@ export function JobsDrawer() {
     return rows;
   }, [active, finished, filter, q]);
 
-  const onOpenResult = (job: LiveJob) => {
-    if (job.type === "event_log.import") {
-      const logId = (job.payload_json as { log_id?: string })?.log_id;
-      if (logId) {
-        router.push(`/processes/${logId}`);
-        setOpen(false);
-      }
-    }
-  };
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -138,28 +128,29 @@ export function JobsDrawer() {
                     }}
                     className="cursor-pointer"
                   >
-                    <Square className="mr-2 h-3.5 w-3.5" /> Pause queue
+                    <Pause className="mr-2 h-3.5 w-3.5" /> Pause queue
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={() => {
-                    clearFinished();
-                    toast.success("Cleared finished jobs from view");
-                  }}
-                  className="cursor-pointer"
-                >
-                  <Trash2 className="mr-2 h-3.5 w-3.5" /> Clear finished
-                </DropdownMenuItem>
+                {finishedHidden ? (
+                  <DropdownMenuItem
+                    onSelect={() => setFinishedHidden(false)}
+                    className="cursor-pointer"
+                  >
+                    <Eye className="mr-2 h-3.5 w-3.5" /> Show finished
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    onSelect={() => clearFinished()}
+                    className="cursor-pointer"
+                  >
+                    <Trash2 className="mr-2 h-3.5 w-3.5" /> Clear finished
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="outline" className="border-0 bg-muted">Running {counts.running}</Badge>
-            <Badge variant="outline" className="border-0 bg-muted">Queued {counts.queued}</Badge>
-            <Badge variant="outline" className="border-0 bg-muted">Finished {counts.finished}</Badge>
-            {paused && <Badge className="border-0 bg-chart-4/20 text-foreground">Paused</Badge>}
-          </div>
+          {paused && <Badge className="border-0 bg-chart-4/20 text-foreground w-fit">Paused</Badge>}
           <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
             <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="all" className="cursor-pointer text-xs">All</TabsTrigger>
@@ -176,7 +167,7 @@ export function JobsDrawer() {
           />
         </SheetHeader>
 
-        <DrawerBody rows={ordered} onOpenResult={onOpenResult} />
+        <DrawerBody rows={ordered} />
       </SheetContent>
     </Sheet>
   );
@@ -184,10 +175,8 @@ export function JobsDrawer() {
 
 function DrawerBody({
   rows,
-  onOpenResult,
 }: {
   rows: LiveJob[];
-  onOpenResult: (job: LiveJob) => void;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -228,7 +217,7 @@ function DrawerBody({
                 paddingBottom: 8,
               }}
             >
-              <JobRow job={job} onOpenResult={onOpenResult} />
+              <JobRow job={job} />
             </div>
           );
         })}

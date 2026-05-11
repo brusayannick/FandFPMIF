@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
-import type { DfgData, PetriNetData, ProcessTreeData } from "@/components/visualizations";
+import type { DfgData, PetriNetData, PrefixTreeData, ProcessTreeData } from "./types";
 
 const STALE_TIME = 30_000;
 
@@ -15,10 +15,13 @@ function discoveryUrl(path: string, logId: string, params: Record<string, string
   return `/api/v1/modules/discovery${path}?${search.toString()}`;
 }
 
-export function useDiscoveryDfg(logId: string) {
+export function useDiscoveryDfg(logId: string, variantPct?: number) {
   return useQuery<DfgData>({
-    queryKey: ["modules", "discovery", "dfg", logId],
-    queryFn: () => api<DfgData>(discoveryUrl("/dfg", logId)),
+    queryKey: ["modules", "discovery", "dfg", logId, variantPct ?? 1],
+    queryFn: () =>
+      api<DfgData>(
+        discoveryUrl("/dfg", logId, variantPct !== undefined && variantPct < 1 ? { variant_pct: variantPct } : {}),
+      ),
     enabled: Boolean(logId),
     staleTime: STALE_TIME,
   });
@@ -46,6 +49,53 @@ export function useDiscoveryProcessTree(logId: string) {
   return useQuery<ProcessTreeData>({
     queryKey: ["modules", "discovery", "process-tree", logId],
     queryFn: () => api<ProcessTreeData>(discoveryUrl("/process-tree", logId)),
+    enabled: Boolean(logId),
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useDiscoveryPetriAlphaPlus(logId: string) {
+  return useQuery<PetriNetData>({
+    queryKey: ["modules", "discovery", "petri-alpha-plus", logId],
+    queryFn: () => api<PetriNetData>(discoveryUrl("/petri-net/alpha-plus", logId)),
+    enabled: Boolean(logId),
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useDiscoveryPetriIlp(logId: string) {
+  return useQuery<PetriNetData>({
+    queryKey: ["modules", "discovery", "petri-ilp", logId],
+    queryFn: () => api<PetriNetData>(discoveryUrl("/petri-net/ilp", logId)),
+    enabled: Boolean(logId),
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useDiscoveryPetriImf(logId: string, noiseThreshold: number) {
+  return useQuery<PetriNetData>({
+    queryKey: ["modules", "discovery", "petri-imf", logId, noiseThreshold],
+    queryFn: () =>
+      api<PetriNetData>(discoveryUrl("/petri-net/imf", logId, { noise_threshold: noiseThreshold })),
+    enabled: Boolean(logId),
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useDiscoveryProcessTreeImf(logId: string, noiseThreshold: number) {
+  return useQuery<ProcessTreeData>({
+    queryKey: ["modules", "discovery", "process-tree-imf", logId, noiseThreshold],
+    queryFn: () =>
+      api<ProcessTreeData>(discoveryUrl("/process-tree/imf", logId, { noise_threshold: noiseThreshold })),
+    enabled: Boolean(logId),
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useDiscoveryPrefixTree(logId: string) {
+  return useQuery<PrefixTreeData>({
+    queryKey: ["modules", "discovery", "prefix-tree", logId],
+    queryFn: () => api<PrefixTreeData>(discoveryUrl("/prefix-tree", logId)),
     enabled: Boolean(logId),
     staleTime: STALE_TIME,
   });

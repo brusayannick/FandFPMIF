@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { useUi } from "@/lib/stores/ui";
 import { useVizSettings } from "@/lib/stores/visualization-settings";
+import { useOnboarding } from "@/lib/stores/onboarding";
 
 function makeQueryClient() {
   return new QueryClient({
@@ -38,18 +39,12 @@ function getQueryClient() {
  * server-rendered and dependency-free.
  */
 export function Providers({ children }: { children: React.ReactNode }) {
-  const density = useUi((s) => s.density);
-
-  // Reflect density on <html data-density="…"> after rehydration from localStorage.
-  useEffect(() => {
-    document.documentElement.dataset.density = density;
-  }, [density]);
-
   // Rehydrate persisted UI state after mount so SSR and initial client render
   // both use the same defaults (no hydration mismatch).
   useEffect(() => {
     useUi.persist.rehydrate();
     useVizSettings.persist.rehydrate();
+    useOnboarding.persist.rehydrate();
   }, []);
 
   return (

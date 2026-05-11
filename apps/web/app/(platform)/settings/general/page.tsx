@@ -14,18 +14,16 @@ import { useUi } from "@/lib/stores/ui";
 
 export default function GeneralSettingsPage() {
   const { theme = "system", setTheme } = useTheme();
-  const density = useUi((s) => s.density);
-  const setDensity = useUi((s) => s.setDensity);
   const muted = useUi((s) => s.notificationsMuted);
   const setMuted = useUi((s) => s.setNotificationsMuted);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <Card>
-        <CardHeader>
-          <CardTitle>Appearance</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Appearance</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-3">
           <div className="space-y-2">
             <Label>Theme</Label>
             <RadioGroup
@@ -36,29 +34,10 @@ export default function GeneralSettingsPage() {
               {(["light", "dark", "system"] as const).map((t) => (
                 <Label
                   key={t}
-                  className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-3 py-2 capitalize text-sm has-[input:checked]:border-primary"
+                  className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm capitalize has-[input:checked]:border-primary"
                 >
                   <RadioGroupItem value={t} />
                   {t}
-                </Label>
-              ))}
-            </RadioGroup>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Density</Label>
-            <RadioGroup
-              value={density}
-              onValueChange={(v) => setDensity(v as "comfortable" | "compact")}
-              className="flex gap-3"
-            >
-              {(["comfortable", "compact"] as const).map((d) => (
-                <Label
-                  key={d}
-                  className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-3 py-2 capitalize text-sm has-[input:checked]:border-primary"
-                >
-                  <RadioGroupItem value={d} />
-                  {d}
                 </Label>
               ))}
             </RadioGroup>
@@ -67,8 +46,8 @@ export default function GeneralSettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Notifications</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Notifications</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <Label className="flex items-center justify-between gap-3">
@@ -84,8 +63,8 @@ export default function GeneralSettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Jobs</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Jobs</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
@@ -101,8 +80,8 @@ export default function GeneralSettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Telemetry</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Telemetry</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
           Off by default. The platform is local-first; no telemetry is collected

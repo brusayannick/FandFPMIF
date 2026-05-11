@@ -147,6 +147,38 @@ def serialize_process_tree(tree: Any) -> dict[str, Any]:
     return {"kind": "process_tree", "root": _walk(tree)}
 
 
+def serialize_prefix_tree(cases: list[list[str]]) -> dict[str, Any]:
+    """Build a prefix tree (trie) from a list of activity sequences.
+
+    Returns a flat node list with parent-id references instead of a nested
+    tree, so FastAPI's JSON encoder never recurses deeply regardless of the
+    maximum trace length.
+    """
+    # node_id -> {id, label, frequency, parent}
+    node_store: dict[str, dict[str, Any]] = {
+        "n0": {"id": "n0", "label": None, "frequency": len(cases), "parent": None}
+    }
+    # parent_id -> {activity -> child_id}
+    children_map: dict[str, dict[str, str]] = {"n0": {}}
+    id_seq = [1]
+
+    for case in cases:
+        current = "n0"
+        for act in case:
+            ch = children_map[current]
+            if act not in ch:
+                nid = f"n{id_seq[0]}"
+                id_seq[0] += 1
+                node_store[nid] = {"id": nid, "label": act, "frequency": 0, "parent": current}
+                children_map[nid] = {}
+                ch[act] = nid
+            child = ch[act]
+            node_store[child]["frequency"] += 1
+            current = child
+
+    return {"kind": "prefix_tree", "nodes": list(node_store.values())}
+
+
 def serialize_heuristics_net(hnet: Any) -> dict[str, Any]:
     """Serialise pm4py HeuristicsNet (frequency + dependency)."""
     occurrences: dict[str, int] = dict(getattr(hnet, "activities_occurrences", {}) or {})

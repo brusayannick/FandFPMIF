@@ -1,4 +1,4 @@
-"""Materialise per-module Python deps via `uv sync` (§5.4).
+"""Materialise per-module Python deps via `uv venv` + `uv pip install` (§5.4).
 
 For each discovered module:
 
@@ -6,9 +6,13 @@ For each discovered module:
     module folder doesn't already contain a `pyproject.toml`, we skip — the
     module imports nothing beyond stdlib + inherits + SDK.
   - Otherwise we synthesise a minimal `pyproject.toml` (when the author
-    didn't supply one) and run `uv sync` into `modules/<folder>/.venv/`.
+    didn't supply one), create an isolated venv, and install deps into it.
   - A content-hash of the dependencies block is cached at
     `modules/<folder>/.installed-hash`. Re-runs skip when the hash matches.
+
+We use `uv venv` + `uv pip install` rather than `uv sync` to avoid writing
+a lock file, which fails on macOS Docker Desktop bind mounts due to atomic-
+write restrictions on the VirtioFS layer.
 
 `subprocess` isolation is recognised but currently a no-op — the loader
 warns and falls back to in_process. (See INSTRUCTIONS.md §5.4 — promoting a
@@ -35,6 +39,19 @@ def _hash_path(folder: Path) -> Path:
 
 
 def _venv_site_packages(folder: Path) -> Path:
+    """Return the site-packages path for the venv in *folder*.
+
+    Reads the Python version from the venv's pyvenv.cfg so modules that use
+    a different Python version than the platform (e.g. Python 3.9 subprocess
+    venvs running alongside the platform's Python 3.12) get the correct path.
+    """
+    cfg = folder / ".venv" / "pyvenv.cfg"
+    if cfg.exists():
+        for line in cfg.read_text().splitlines():
+            key, _, val = line.partition("=")
+            if key.strip() == "version_info":
+                major, minor, *_ = val.strip().split(".")
+                return folder / ".venv" / "lib" / f"python{major}.{minor}" / "site-packages"
     pyver = f"python{sys.version_info.major}.{sys.version_info.minor}"
     return folder / ".venv" / "lib" / pyver / "site-packages"
 
@@ -65,9 +82,22 @@ bypass-selection = true
     target.write_text(content)
 
 
+async def _run(cmd: list[str]) -> tuple[int, str]:
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    out, _ = await proc.communicate()
+    text = out.decode("utf-8", errors="replace") if out else ""
+    return proc.returncode or 0, text
+
+
 async def install_module(folder: Path, manifest: Manifest, *, force: bool = False) -> Path | None:
-    """Run `uv sync` for the module if needed. Returns the venv site-packages
-    path (or None if the module declares no Python deps and no venv is required).
+    """Create an isolated venv and install module deps if needed.
+
+    Returns the venv site-packages path, or None when no Python deps are
+    declared or installation failed.
     """
     if manifest.dependencies.python.isolation == "subprocess":
         log.warning(
@@ -82,26 +112,38 @@ async def install_module(folder: Path, manifest: Manifest, *, force: bool = Fals
 
     expected = manifest.dependencies_hash()
     hash_file = _hash_path(folder)
+    venv_dir = folder / ".venv"
     if not force and hash_file.exists() and hash_file.read_text().strip() == expected:
         site = _venv_site_packages(folder)
-        if site.exists():
+        venv_python = venv_dir / "bin" / "python3"
+        if site.exists() and venv_python.exists():
             log.debug("modules.installer.skip_unchanged", module_id=manifest.id)
             return site
 
     _synthesise_pyproject(folder, manifest)
 
+    requires_python = py.requires_python or ">=3.12"
+    # Wipe a stale venv so `uv venv` starts clean (broken symlinks from a
+    # previous container won't confuse it).
+    if venv_dir.exists():
+        shutil.rmtree(venv_dir, ignore_errors=True)
+
     log.info("modules.installer.start", module_id=manifest.id, packages=py.packages)
-    cmd = ["uv", "sync", "--directory", str(folder)]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+
+    # Step 1 — create the venv with the right Python version.
+    rc, out = await _run(["uv", "venv", str(venv_dir), "--python", requires_python])
+    if rc != 0:
+        log.error("modules.installer.venv_failed", module_id=manifest.id, output=out)
+        return None
+
+    # Step 2 — install the project (and all its declared deps) into the venv.
+    # `uv pip install <dir>` reads pyproject.toml and installs dependencies
+    # without creating or requiring a lock file.
+    rc, out = await _run(
+        ["uv", "pip", "install", "--python", str(venv_dir), str(folder)]
     )
-    out, _ = await proc.communicate()
-    if proc.returncode != 0:
-        text = out.decode("utf-8", errors="replace") if out else ""
-        log.error("modules.installer.failed", module_id=manifest.id, output=text)
-        # Bail noisily — but don't raise so a single bad module doesn't break the platform.
+    if rc != 0:
+        log.error("modules.installer.failed", module_id=manifest.id, output=out)
         return None
 
     hash_file.write_text(expected)

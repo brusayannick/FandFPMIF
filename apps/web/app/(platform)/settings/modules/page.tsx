@@ -25,7 +25,7 @@ export default function ModulesSettingsPage() {
       </div>
 
       {isLoading ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-32" />
           ))}
@@ -45,17 +45,17 @@ export default function ModulesSettingsPage() {
           }
         />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {modules.map((m) => (
             <Card key={m.id}>
-              <CardContent className="space-y-2 p-[var(--card-padding)]">
+              <CardContent className="space-y-3 p-4">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <h3 className="truncate text-sm font-semibold">{m.name}</h3>
                       <span className="text-xs text-muted-foreground">{m.version}</span>
                     </div>
-                    <Badge variant="outline" className="mt-1 border-0 bg-muted text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <Badge variant="secondary" className="mt-1 h-5 px-2 py-0 text-[9px] font-medium uppercase tracking-wide">
                       {m.category.replace("_", " ")}
                     </Badge>
                   </div>
@@ -63,11 +63,9 @@ export default function ModulesSettingsPage() {
                 {m.description && (
                   <p className="line-clamp-2 text-xs text-muted-foreground">{m.description}</p>
                 )}
-                <div className="pt-2">
-                  <Button asChild variant="outline" size="sm" className="cursor-pointer">
-                    <Link href={`/settings/modules/${m.id}`}>Configure</Link>
-                  </Button>
-                </div>
+                <Button asChild variant="outline" size="sm" className="cursor-pointer w-full">
+                  <Link href={`/settings/modules/${m.id}`}>Configure</Link>
+                </Button>
               </CardContent>
             </Card>
           ))}

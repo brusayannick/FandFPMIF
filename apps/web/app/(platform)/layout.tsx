@@ -5,6 +5,8 @@ import { Topbar } from "@/components/topbar";
 import { JobsProvider } from "@/components/jobs/jobs-provider";
 import { JobsDock } from "@/components/jobs/jobs-dock";
 import { JobsDrawer } from "@/components/jobs/jobs-drawer";
+import { OnboardingOverlay } from "@/components/onboarding";
+import { AtlasAiSidebar } from "@/components/atlas-ai/atlas-ai-sidebar";
 
 export default function PlatformLayout({
   children,
@@ -20,9 +22,11 @@ export default function PlatformLayout({
         </Suspense>
         <main className="min-h-0 flex-1 overflow-auto">{children}</main>
       </div>
+      <AtlasAiSidebar />
       <JobsProvider />
       <JobsDock />
       <JobsDrawer />
+      <OnboardingOverlay />
     </div>
   );
 }

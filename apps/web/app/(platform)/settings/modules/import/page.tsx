@@ -69,7 +69,7 @@ export default function ImportModulePage() {
 
         <TabsContent value="zip">
           <Card>
-            <CardContent className="space-y-3 p-6 text-sm">
+            <CardContent className="space-y-4 p-6">
               {archive ? (
                 <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
                   <div className="min-w-0">
@@ -137,7 +137,7 @@ export default function ImportModulePage() {
 
         <TabsContent value="git">
           <Card>
-            <CardContent className="space-y-3 p-6 text-sm">
+            <CardContent className="space-y-4 p-6">
               <div className="grid gap-2">
                 <Label>Repository URL</Label>
                 <Input

@@ -27,6 +27,9 @@ modules/*/.dist/
 modules/*/node_modules/
 modules/*/.installed-hash
 
+# CV4CDD vendored source (cloned separately — not committed)
+modules/*/cv4cdd/
+
 # Runtime data (the directory layout itself is kept via .gitkeep)
 data/event_logs/*
 !data/event_logs/.gitkeep

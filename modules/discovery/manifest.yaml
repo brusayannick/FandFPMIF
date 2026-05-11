@@ -3,7 +3,7 @@ name: Discovery
 version: 1.0.0
 category: foundation
 description: Process discovery — DFG, Petri nets (Alpha / Inductive miners), Process Tree, Heuristics Net.
-author: Flows & Funds Core
+author: van der Aalst
 license: MIT
 default_enabled: true
 

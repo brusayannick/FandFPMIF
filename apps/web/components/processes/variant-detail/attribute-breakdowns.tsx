@@ -23,24 +23,24 @@ export function AttributeBreakdowns({ breakdowns }: { breakdowns: AttributeBreak
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3.5">
       {filtered.map((b) => (
         <div key={b.column}>
-          <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
+          <div className="mb-2 text-xs font-medium uppercase tracking-wider text-foreground/70">
             {b.label}
           </div>
           <ul className="space-y-1">
             {b.top.map((entry, i) => (
               <li
                 key={`${entry.value}-${i}`}
-                className="flex items-center justify-between text-sm"
+                className="flex items-center justify-between text-xs"
               >
-                <span className="truncate">
+                <span className="truncate text-sm">
                   {entry.value === null || entry.value === undefined
                     ? <span className="italic text-muted-foreground">empty</span>
                     : String(entry.value)}
                 </span>
-                <span className="tabular-nums text-muted-foreground">
+                <span className="tabular-nums text-muted-foreground/70 ml-2 shrink-0">
                   {formatNumber(entry.count)}
                 </span>
               </li>

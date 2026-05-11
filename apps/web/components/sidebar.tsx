@@ -45,8 +45,6 @@ const NAV: NavItem[] = [
 export function Sidebar() {
   const collapsed = useUi((s) => s.sidebarCollapsed);
   const toggle = useUi((s) => s.toggleSidebar);
-  const density = useUi((s) => s.density);
-  const setDensity = useUi((s) => s.setDensity);
   const pathname = usePathname();
 
   return (
@@ -57,20 +55,30 @@ export function Sidebar() {
       )}
       aria-label="Primary navigation"
     >
-      <div className="flex items-center gap-2 px-3 py-3.5">
-        <div
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground"
-          aria-hidden
-        >
-          <Pickaxe className="h-4 w-4" />
-        </div>
+      <div
+        className={cn(
+          "flex items-center py-3.5",
+          collapsed ? "justify-center px-2" : "gap-2 px-3",
+        )}
+      >
         {!collapsed && (
-          <span className="truncate text-sm font-semibold tracking-tight">ATLAS Hub</span>
+          <>
+            <div
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground"
+              aria-hidden
+            >
+              <Pickaxe className="h-4 w-4" />
+            </div>
+            <span className="truncate text-sm font-semibold tracking-tight">ATLAS Hub</span>
+          </>
         )}
         <button
           type="button"
           onClick={toggle}
-          className="ml-auto cursor-pointer rounded-md p-1.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          className={cn(
+            "cursor-pointer rounded-md p-1.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+            !collapsed && "ml-auto",
+          )}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           <PanelLeftClose
@@ -121,18 +129,6 @@ export function Sidebar() {
         )}
       >
         <ThemeToggle collapsed={collapsed} />
-        {!collapsed && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="ml-auto h-8 cursor-pointer text-xs text-sidebar-foreground/60"
-            onClick={() => setDensity(density === "comfortable" ? "compact" : "comfortable")}
-            aria-label="Toggle density"
-          >
-            {density === "comfortable" ? "Compact" : "Comfy"}
-          </Button>
-        )}
       </div>
       {!collapsed && (
         <div className="border-t border-sidebar-border px-4 py-2 text-[10px] uppercase tracking-wide text-sidebar-foreground/40">

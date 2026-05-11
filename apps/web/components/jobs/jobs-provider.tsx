@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -25,9 +25,6 @@ export function JobsProvider() {
   const qc = useQueryClient();
   const router = useRouter();
 
-  const queuedToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const queuedBuffer = useRef<{ title: string; id: string }[]>([]);
-
   // Initial hydration.
   useEffect(() => {
     let cancelled = false;
@@ -49,32 +46,6 @@ export function JobsProvider() {
 
       const id = (env.payload.id as string | undefined) ?? "";
       const title = (env.payload.title as string | undefined) ?? id;
-
-      if (env.topic === "job.queued") {
-        if (muted) return;
-        queuedBuffer.current.push({ title, id });
-        if (queuedToastTimer.current) clearTimeout(queuedToastTimer.current);
-        queuedToastTimer.current = setTimeout(() => {
-          const buf = queuedBuffer.current;
-          queuedBuffer.current = [];
-          if (buf.length === 1) {
-            toast.info(`Queued — ${buf[0].title}`, {
-              action: {
-                label: "View",
-                onClick: () => useJobsStore.getState().setDrawerOpen(true),
-              },
-            });
-          } else if (buf.length > 1) {
-            toast.info(`${buf.length} jobs queued`, {
-              action: {
-                label: "View",
-                onClick: () => useJobsStore.getState().setDrawerOpen(true),
-              },
-            });
-          }
-        }, 200);
-        return;
-      }
 
       if (env.topic === "job.completed") {
         // Refresh anything keyed off the api state. Event-log imports flip a

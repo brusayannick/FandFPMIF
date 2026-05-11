@@ -181,7 +181,7 @@ export function ActivitiesTab({ logId, log }: ActivitiesTabProps) {
                   const draft = drafts[row.activity] ?? "";
                   const renamed = draft.trim().length > 0;
                   return (
-                    <TableRow key={row.activity} className="h-[var(--row-height)]">
+                    <TableRow key={row.activity} className="h-12">
                       <TableCell>
                         <span
                           className={cn(

@@ -8,7 +8,15 @@ registered.
 from __future__ import annotations
 
 import logging
+import sys
 from contextlib import asynccontextmanager
+
+# Process trees discovered from real-world logs can nest deep enough to
+# exceed CPython's default 1000-frame recursion limit when FastAPI's
+# jsonable_encoder walks the response dict. Raising it once at import time
+# is cheap and avoids a class of RecursionError → 500 failures on the
+# /process-tree routes.
+sys.setrecursionlimit(10_000)
 
 import structlog
 from fastapi import FastAPI

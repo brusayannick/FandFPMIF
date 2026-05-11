@@ -176,7 +176,7 @@ function EventTableRow({
   return (
     <TableRow
       className={cn(
-        "h-[var(--row-height)]",
+        "h-12",
         hasMissing && "bg-amber-500/5",
       )}
     >

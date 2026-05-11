@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { Plus, Settings2, FileBox } from "lucide-react";
+import { Plus, FileBox } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -39,15 +39,17 @@ export function ModuleGrid({ logId }: { logId: string }) {
 
   if (isLoading) {
     return (
-      <div className="space-y-8">
+      <div className="space-y-5">
         {CATEGORIES.slice(0, 2).map((c) => (
-          <section key={c.id} className="space-y-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              {c.label}
-            </h2>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <section key={c.id} className="space-y-2.5">
+            <div className="pb-1 border-b border-border">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-foreground/70">
+                {c.label}
+              </h2>
+            </div>
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-32" />
+                <Skeleton key={i} className="h-40" />
               ))}
             </div>
           </section>
@@ -85,29 +87,34 @@ export function ModuleGrid({ logId }: { logId: string }) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
-        <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
-        <Label htmlFor="toggle-unavailable">
-          <Switch
-            id="toggle-unavailable"
-            checked={showUnavailable}
-            onCheckedChange={setShowUnavailable}
-            className="cursor-pointer"
-          />
-          <span className="ml-2 text-xs text-muted-foreground">Show unavailable</span>
-        </Label>
+    <div className="space-y-5">
+      <div className="flex items-center gap-2">
+        <Switch
+          id="toggle-unavailable"
+          checked={showUnavailable}
+          onCheckedChange={setShowUnavailable}
+          className="cursor-pointer"
+        />
+        <label
+          htmlFor="toggle-unavailable"
+          className="cursor-pointer select-none text-xs text-muted-foreground"
+        >
+          Show unavailable modules
+        </label>
       </div>
 
       {CATEGORIES.map((c) => {
         const bucket = grouped.get(c.id)!;
         if (bucket.length === 0) return null;
         return (
-          <section key={c.id} className="space-y-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              {c.label}
-            </h2>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <section key={c.id} className="space-y-2.5">
+            <div className="flex items-center gap-2 pb-1 border-b border-border">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-foreground/70">
+                {c.label}
+              </h2>
+              <span className="text-[10px] text-muted-foreground/60">({bucket.length})</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {bucket.map((m) => (
                 <ModuleCard key={m.id} module={m} logId={logId} />
               ))}
@@ -119,16 +126,3 @@ export function ModuleGrid({ logId }: { logId: string }) {
   );
 }
 
-function Label({
-  htmlFor,
-  children,
-}: {
-  htmlFor: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label htmlFor={htmlFor} className="inline-flex cursor-pointer items-center">
-      {children}
-    </label>
-  );
-}

@@ -1,101 +1,164 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertTriangle, ArrowUp, RotateCcw, Settings2 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/empty-state";
+
+import { DfgCanvas } from "./canvases/DfgCanvas";
+import { HeuristicsNetCanvas } from "./canvases/HeuristicsNetCanvas";
+import { PetriNetCanvas } from "./canvases/PetriNetCanvas";
+import { PrefixTreeCanvas } from "./canvases/PrefixTreeCanvas";
+import { ProcessTreeCanvas } from "./canvases/ProcessTreeCanvas";
+import { DfgDetailsPanel } from "./dfg-details-panel";
+import { computeDfgVisibility } from "./dfg-filter";
 import {
-  DfgCanvas,
-  HeuristicsNetCanvas,
-  PetriNetCanvas,
-  ProcessTreeCanvas,
-} from "@/components/visualizations";
-import { DfgDetailsPanel } from "@/components/visualizations/dfg-details-panel";
-import { computeDfgVisibility } from "@/components/visualizations/dfg-filter";
-import {
+  DiscoverySettingsProvider,
   useDfgSettings,
   useHeuristicsRenderSettings,
-  useModuleConfig,
   usePetriSettings,
   useProcessTreeSettings,
-  useUpdateModuleConfig,
-} from "@/components/visualizations/discovery-settings-context";
+  useResetPositions,
+} from "./discovery-settings-context";
+import { SettingsSheet } from "./settings-sheet";
 
 import {
   useDiscoveryDfg,
   useDiscoveryHeuristicsNet,
   useDiscoveryPetriAlpha,
+  useDiscoveryPetriAlphaPlus,
+  useDiscoveryPetriIlp,
+  useDiscoveryPetriImf,
   useDiscoveryPetriInductive,
+  useDiscoveryPrefixTree,
   useDiscoveryProcessTree,
+  useDiscoveryProcessTreeImf,
   type HeuristicsThresholds,
 } from "./queries";
 
-type View = "dfg" | "alpha" | "inductive" | "tree" | "heuristics";
+type View = "dfg" | "petri" | "tree" | "prefix-tree" | "heuristics";
 const VIEWS: { value: View; label: string }[] = [
   { value: "dfg", label: "DFG" },
-  { value: "alpha", label: "Petri (Alpha)" },
-  { value: "inductive", label: "Petri (Inductive)" },
+  { value: "petri", label: "Petri Net" },
   { value: "tree", label: "Process Tree" },
-  { value: "heuristics", label: "Heuristics-Net" },
+  { value: "prefix-tree", label: "Prefix Tree" },
+  { value: "heuristics", label: "Heuristics Net" },
 ];
 
-const HEURISTICS_KEYS = [
-  "heuristics_dependency_threshold",
-  "heuristics_and_threshold",
-  "heuristics_loop_two_threshold",
-] as const;
-type HeuristicsKey = (typeof HEURISTICS_KEYS)[number];
+export function DiscoveryPanel({ logId, moduleId }: { logId: string; moduleId: string }) {
+  return (
+    <DiscoverySettingsProvider logId={logId} moduleId={moduleId}>
+      <DiscoveryPanelContent logId={logId} />
+    </DiscoverySettingsProvider>
+  );
+}
 
-const HEURISTICS_DEFAULTS: Record<HeuristicsKey, number> = {
-  heuristics_dependency_threshold: 0.5,
-  heuristics_and_threshold: 0.65,
-  heuristics_loop_two_threshold: 0.5,
-};
-
-export function DiscoveryPanel({ logId }: { logId: string; moduleId: string }) {
+function DiscoveryPanelContent({ logId }: { logId: string }) {
   const [view, setView] = useState<View>("dfg");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const resetPositions = useResetPositions();
 
   return (
     <div className="flex flex-col gap-4">
-      <div
-        role="tablist"
-        aria-label="Discovery visualisations"
-        className="inline-flex w-full max-w-3xl items-center gap-1 rounded-lg bg-muted p-[3px]"
-      >
-        {VIEWS.map((v) => {
-          const isActive = view === v.value;
-          return (
-            <button
-              key={v.value}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              data-state={isActive ? "active" : "inactive"}
-              onClick={() => setView(v.value)}
-              className={cn(
-                "flex-1 cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-all",
-                isActive
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-foreground/60 hover:text-foreground",
-              )}
-            >
-              {v.label}
-            </button>
-          );
-        })}
+      <div className="flex items-center justify-between gap-3">
+        <div
+          role="tablist"
+          aria-label="Discovery visualisations"
+          className="inline-flex flex-1 max-w-3xl items-center gap-1 rounded-lg bg-muted p-[3px]"
+        >
+          {VIEWS.map((v) => {
+            const isActive = view === v.value;
+            return (
+              <button
+                key={v.value}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                data-state={isActive ? "active" : "inactive"}
+                onClick={() => setView(v.value)}
+                className={cn(
+                  "flex-1 cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-all",
+                  isActive
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-foreground/60 hover:text-foreground",
+                )}
+              >
+                {v.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="cursor-pointer gap-1.5">
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset layout
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Reset layout?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  All dragged node positions for this module on this log will be discarded and
+                  the auto-layout will be reapplied. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="cursor-pointer"
+                  onClick={() => resetPositions()}
+                >
+                  Reset
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="cursor-pointer gap-1.5"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+            Configure
+          </Button>
+        </div>
       </div>
 
-      <div className="mt-2 space-y-3">
+      <SettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      <div className="space-y-3">
         {view === "dfg" && <DfgTab logId={logId} />}
-        {view === "alpha" && <PetriAlphaTab logId={logId} />}
-        {view === "inductive" && <PetriInductiveTab logId={logId} />}
+        {view === "petri" && <PetriTab logId={logId} />}
         {view === "tree" && <ProcessTreeTab logId={logId} />}
+        {view === "prefix-tree" && <PrefixTreeTab logId={logId} />}
         {view === "heuristics" && <HeuristicsTab logId={logId} />}
       </div>
     </div>
@@ -136,7 +199,7 @@ function CanvasError({ message }: { message: string }) {
 
 function FilterBar({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs">
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border bg-muted/40 px-4 py-3 text-xs">
       {children}
     </div>
   );
@@ -144,8 +207,8 @@ function FilterBar({ children }: { children: React.ReactNode }) {
 
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2">
-      <Label className="text-xs text-muted-foreground font-normal">{label}</Label>
+    <div className="flex items-center gap-2.5">
+      <Label className="text-xs text-muted-foreground font-normal shrink-0">{label}</Label>
       {children}
     </div>
   );
@@ -157,7 +220,8 @@ function FilterField({ label, children }: { label: string; children: React.React
 
 function DfgTab({ logId }: { logId: string }) {
   const [dfg, setDfg] = useDfgSettings();
-  const { data, isLoading, isError, error } = useDiscoveryDfg(logId);
+  const [variantPct, setVariantPct] = useState<number>(1);
+  const { data, isLoading, isError, error } = useDiscoveryDfg(logId, variantPct < 1 ? variantPct : undefined);
 
   const [selected, setSelected] = useState<{ kind: "node" | "edge"; id: string } | null>(null);
 
@@ -166,12 +230,7 @@ function DfgTab({ logId }: { logId: string }) {
   // show up in the count even when the user drags connections to 0).
   const counts = (() => {
     if (!data) {
-      return {
-        totalActivities: 0,
-        shownActivities: 0,
-        candidateEdges: 0,
-        shownEdges: 0,
-      };
+      return { totalActivities: 0, shownActivities: 0, candidateEdges: 0, shownEdges: 0 };
     }
     const filtered = computeDfgVisibility(data, dfg);
     return {
@@ -201,12 +260,33 @@ function DfgTab({ logId }: { logId: string }) {
             onChange={(v) => setDfg({ connectionsShown: v })}
           />
         </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t pt-2">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t pt-3">
+          <FilterField label="Algorithm">
+            <span className="text-xs font-medium text-foreground">Direct-Follows Graph</span>
+          </FilterField>
           <FilterField label="Hide self-loops">
             <Switch
               checked={dfg.hideSelfLoops}
               onCheckedChange={(v) => setDfg({ hideSelfLoops: v })}
             />
+          </FilterField>
+          <FilterField label="Show top edges">
+            <Select
+              value={String(dfg.edgeTopPercent)}
+              onValueChange={(v) => setDfg({ edgeTopPercent: Number(v) as typeof dfg.edgeTopPercent })}
+            >
+              <SelectTrigger className="h-7 w-20 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="100">100%</SelectItem>
+                <SelectItem value="95">95%</SelectItem>
+                <SelectItem value="90">90%</SelectItem>
+                <SelectItem value="85">85%</SelectItem>
+                <SelectItem value="80">80%</SelectItem>
+                <SelectItem value="70">70%</SelectItem>
+              </SelectContent>
+            </Select>
           </FilterField>
           <FilterField label="Edge label">
             <Select value={dfg.edgeLabel} onValueChange={(v) => setDfg({ edgeLabel: v as typeof dfg.edgeLabel })}>
@@ -240,12 +320,33 @@ function DfgTab({ logId }: { logId: string }) {
               value={dfg.layoutMode}
               onValueChange={(v) => setDfg({ layoutMode: v as typeof dfg.layoutMode })}
             >
-              <SelectTrigger className="h-7 w-28 text-xs">
+              <SelectTrigger className="h-7 w-36 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="layered">Layered</SelectItem>
                 <SelectItem value="temporal">Temporal</SelectItem>
+                <SelectItem value="temporal-phases-2">Phases #2</SelectItem>
+                <SelectItem value="temporal-phases-3">Phases #3</SelectItem>
+                <SelectItem value="temporal-swimlane">Swimlane</SelectItem>
+                <SelectItem value="happy-path-tower">Happy Path Tower</SelectItem>
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Variant coverage">
+            <Select
+              value={String(variantPct)}
+              onValueChange={(v) => setVariantPct(Number(v))}
+            >
+              <SelectTrigger className="h-7 w-20 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">100%</SelectItem>
+                <SelectItem value="0.95">95%</SelectItem>
+                <SelectItem value="0.9">90%</SelectItem>
+                <SelectItem value="0.8">80%</SelectItem>
+                <SelectItem value="0.7">70%</SelectItem>
+                <SelectItem value="0.5">50%</SelectItem>
               </SelectContent>
             </Select>
           </FilterField>
@@ -285,22 +386,24 @@ function RankSlider({
   fraction,
   shown,
   total,
+  step = 0.005,
   onChange,
 }: {
   label: string;
   fraction: number;
   shown: number;
   total: number;
+  step?: number;
   onChange: (v: number) => void;
 }) {
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2">
       <Label className="w-24 shrink-0 text-xs text-muted-foreground font-normal">{label}</Label>
       <Slider
         value={[fraction]}
         min={0}
         max={1}
-        step={0.005}
+        step={step}
         onValueChange={(v) => onChange(v[0] ?? 0)}
         className="flex-1"
       />
@@ -311,46 +414,78 @@ function RankSlider({
   );
 }
 
-function PetriAlphaTab({ logId }: { logId: string }) {
-  const { data, isLoading, isError, error } = useDiscoveryPetriAlpha(logId);
+type PetriAlgo = "alpha" | "alpha-plus" | "inductive" | "imf" | "ilp";
+
+function PetriTab({ logId }: { logId: string }) {
+  const [algo, setAlgo] = useState<PetriAlgo>("inductive");
+  const [noiseThreshold, setNoiseThreshold] = useState(0.2);
+
+  const alpha = useDiscoveryPetriAlpha(logId);
+  const alphaPlus = useDiscoveryPetriAlphaPlus(logId);
+  const inductive = useDiscoveryPetriInductive(logId);
+  const imf = useDiscoveryPetriImf(logId, noiseThreshold);
+  const ilp = useDiscoveryPetriIlp(logId);
+
+  const q = algo === "alpha" ? alpha
+    : algo === "alpha-plus" ? alphaPlus
+    : algo === "imf" ? imf
+    : algo === "ilp" ? ilp
+    : inductive;
+
   return (
     <>
-      <PetriFilterBar />
-      {isLoading ? (
+      <PetriFilterBar
+        algo={algo}
+        onAlgoChange={setAlgo}
+        noiseThreshold={noiseThreshold}
+        onNoiseThresholdChange={setNoiseThreshold}
+      />
+      {q.isLoading ? (
         <CanvasSkeleton />
-      ) : isError || !data ? (
-        <CanvasError message={(error as Error)?.message ?? "Unknown error"} />
+      ) : q.isError || !q.data ? (
+        <CanvasError message={(q.error as Error)?.message ?? "Unknown error"} />
       ) : (
         <CanvasFrame>
-          <PetriNetCanvas data={data} />
+          <PetriNetCanvas data={q.data} />
         </CanvasFrame>
       )}
     </>
   );
 }
 
-function PetriInductiveTab({ logId }: { logId: string }) {
-  const { data, isLoading, isError, error } = useDiscoveryPetriInductive(logId);
-  return (
-    <>
-      <PetriFilterBar />
-      {isLoading ? (
-        <CanvasSkeleton />
-      ) : isError || !data ? (
-        <CanvasError message={(error as Error)?.message ?? "Unknown error"} />
-      ) : (
-        <CanvasFrame>
-          <PetriNetCanvas data={data} />
-        </CanvasFrame>
-      )}
-    </>
-  );
-}
-
-function PetriFilterBar() {
+function PetriFilterBar({
+  algo,
+  onAlgoChange,
+  noiseThreshold,
+  onNoiseThresholdChange,
+}: {
+  algo: PetriAlgo;
+  onAlgoChange: (v: PetriAlgo) => void;
+  noiseThreshold: number;
+  onNoiseThresholdChange: (v: number) => void;
+}) {
   const [petri, setPetri] = usePetriSettings();
   return (
     <FilterBar>
+      <FilterField label="Algorithm">
+        <Select value={algo} onValueChange={(v) => onAlgoChange(v as PetriAlgo)}>
+          <SelectTrigger className="h-7 w-40 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="inductive">Inductive Miner</SelectItem>
+            <SelectItem value="imf">IM Infrequent</SelectItem>
+            <SelectItem value="ilp">ILP Miner</SelectItem>
+            <SelectItem value="alpha">Alpha Miner</SelectItem>
+            <SelectItem value="alpha-plus">Alpha+ Miner</SelectItem>
+          </SelectContent>
+        </Select>
+      </FilterField>
+      {algo === "imf" && (
+        <FilterField label="Noise threshold">
+          <CommitSlider value={noiseThreshold} onCommit={onNoiseThresholdChange} />
+        </FilterField>
+      )}
       <FilterField label="Show invisible (τ)">
         <Switch
           checked={petri.showInvisibleTransitions}
@@ -384,30 +519,80 @@ function PetriFilterBar() {
           </SelectContent>
         </Select>
       </FilterField>
+      <FilterField label="Place mode">
+        <Select
+          value={petri.placeMode}
+          onValueChange={(v) => setPetri({ placeMode: v as typeof petri.placeMode })}
+        >
+          <SelectTrigger className="h-7 w-24 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="rings">Rings</SelectItem>
+            <SelectItem value="count">Count</SelectItem>
+          </SelectContent>
+        </Select>
+      </FilterField>
     </FilterBar>
   );
 }
 
+type TreeAlgo = "inductive" | "imf";
+
 function ProcessTreeTab({ logId }: { logId: string }) {
   const [pt, setPt] = useProcessTreeSettings();
-  const { data, isLoading, isError, error } = useDiscoveryProcessTree(logId);
+  const [algo, setAlgo] = useState<TreeAlgo>("inductive");
+  const [noiseThreshold, setNoiseThreshold] = useState(0.2);
+
+  const inductive = useDiscoveryProcessTree(logId);
+  const imf = useDiscoveryProcessTreeImf(logId, noiseThreshold);
+
+  const q = algo === "imf" ? imf : inductive;
 
   return (
     <>
       <FilterBar>
-        <FilterField label="Orientation">
-          <Select
-            value={pt.orientation}
-            onValueChange={(v) => setPt({ orientation: v as typeof pt.orientation })}
-          >
-            <SelectTrigger className="h-7 w-32 text-xs">
+        <FilterField label="Algorithm">
+          <Select value={algo} onValueChange={(v) => setAlgo(v as TreeAlgo)}>
+            <SelectTrigger className="h-7 w-44 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="vertical">Vertical</SelectItem>
-              <SelectItem value="horizontal">Horizontal</SelectItem>
+              <SelectItem value="inductive">Inductive Miner</SelectItem>
+              <SelectItem value="imf">IM Infrequent</SelectItem>
             </SelectContent>
           </Select>
+        </FilterField>
+        {algo === "imf" && (
+          <FilterField label="Noise threshold">
+            <CommitSlider value={noiseThreshold} onCommit={setNoiseThreshold} />
+          </FilterField>
+        )}
+        <FilterField label="Orientation">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 cursor-pointer p-0"
+                onClick={() =>
+                  setPt({
+                    orientation: pt.orientation === "vertical" ? "horizontal" : "vertical",
+                  })
+                }
+              >
+                <ArrowUp
+                  className="h-3.5 w-3.5 transition-transform"
+                  style={{
+                    transform: pt.orientation === "horizontal" ? "rotate(90deg)" : "rotate(0deg)",
+                  }}
+                />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {pt.orientation === "vertical" ? "Vertical" : "Horizontal"}
+            </TooltipContent>
+          </Tooltip>
         </FilterField>
         <FilterField label="Fold τ leaves">
           <Switch
@@ -435,13 +620,30 @@ function ProcessTreeTab({ logId }: { logId: string }) {
         </FilterField>
       </FilterBar>
 
+      {q.isLoading ? (
+        <CanvasSkeleton />
+      ) : q.isError || !q.data ? (
+        <CanvasError message={(q.error as Error)?.message ?? "Unknown error"} />
+      ) : (
+        <CanvasFrame>
+          <ProcessTreeCanvas data={q.data} />
+        </CanvasFrame>
+      )}
+    </>
+  );
+}
+
+function PrefixTreeTab({ logId }: { logId: string }) {
+  const { data, isLoading, isError, error } = useDiscoveryPrefixTree(logId);
+  return (
+    <>
       {isLoading ? (
         <CanvasSkeleton />
       ) : isError || !data ? (
         <CanvasError message={(error as Error)?.message ?? "Unknown error"} />
       ) : (
         <CanvasFrame>
-          <ProcessTreeCanvas data={data} />
+          <PrefixTreeCanvas data={data} />
         </CanvasFrame>
       )}
     </>
@@ -450,52 +652,15 @@ function ProcessTreeTab({ logId }: { logId: string }) {
 
 function HeuristicsTab({ logId }: { logId: string }) {
   const [heur, setHeur] = useHeuristicsRenderSettings();
-  const { data: storedConfig } = useModuleConfig();
-  const update = useUpdateModuleConfig();
 
-  // Pull current thresholds from module config (fall back to defaults).
-  const cfgThresholds = useMemo<Record<HeuristicsKey, number>>(() => {
-    const cfg = (storedConfig?.config ?? {}) as Record<string, unknown>;
-    return {
-      heuristics_dependency_threshold: numberOr(
-        cfg.heuristics_dependency_threshold,
-        HEURISTICS_DEFAULTS.heuristics_dependency_threshold,
-      ),
-      heuristics_and_threshold: numberOr(
-        cfg.heuristics_and_threshold,
-        HEURISTICS_DEFAULTS.heuristics_and_threshold,
-      ),
-      heuristics_loop_two_threshold: numberOr(
-        cfg.heuristics_loop_two_threshold,
-        HEURISTICS_DEFAULTS.heuristics_loop_two_threshold,
-      ),
-    };
-  }, [storedConfig]);
-
-  // Local draft for the sliders — debounced commit to backend.
-  const [draft, setDraft] = useState<Record<HeuristicsKey, number>>(cfgThresholds);
-  useEffect(() => {
-    setDraft(cfgThresholds);
-  }, [cfgThresholds]);
-
-  // Debounced persistence: 350ms after the last slider movement, PUT config.
-  useEffect(() => {
-    const same = HEURISTICS_KEYS.every((k) => Math.abs(draft[k] - cfgThresholds[k]) < 1e-6);
-    if (same) return;
-    const handle = setTimeout(() => {
-      update.mutate({
-        config: { ...(storedConfig?.config ?? {}), ...draft },
-        enabled: storedConfig?.enabled ?? true,
-      });
-    }, 350);
-    return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft]);
-
+  // Thresholds live entirely client-side. Persisting them to the module
+  // /config on every slider drag used to cascade refetches across every
+  // discovery query (`refetchType: "all"`), which crashed the inactive ILP
+  // miner with OOM and overflowed FastAPI's encoder on deep process trees.
   const queryThresholds: HeuristicsThresholds = {
-    dependency_threshold: draft.heuristics_dependency_threshold,
-    and_threshold: draft.heuristics_and_threshold,
-    loop_two_threshold: draft.heuristics_loop_two_threshold,
+    dependency_threshold: heur.dependencyThreshold,
+    and_threshold: heur.andThreshold,
+    loop_two_threshold: heur.loopTwoThreshold,
   };
 
   const { data, isLoading, isError, error } = useDiscoveryHeuristicsNet(logId, queryThresholds);
@@ -505,18 +670,18 @@ function HeuristicsTab({ logId }: { logId: string }) {
       <FilterBar>
         <ThresholdSlider
           label="Dependency"
-          value={draft.heuristics_dependency_threshold}
-          onChange={(v) => setDraft((d) => ({ ...d, heuristics_dependency_threshold: v }))}
+          value={heur.dependencyThreshold}
+          onChange={(v) => setHeur({ dependencyThreshold: v })}
         />
         <ThresholdSlider
           label="AND"
-          value={draft.heuristics_and_threshold}
-          onChange={(v) => setDraft((d) => ({ ...d, heuristics_and_threshold: v }))}
+          value={heur.andThreshold}
+          onChange={(v) => setHeur({ andThreshold: v })}
         />
         <ThresholdSlider
           label="Loop-2"
-          value={draft.heuristics_loop_two_threshold}
-          onChange={(v) => setDraft((d) => ({ ...d, heuristics_loop_two_threshold: v }))}
+          value={heur.loopTwoThreshold}
+          onChange={(v) => setHeur({ loopTwoThreshold: v })}
         />
         <FilterField label="Edge label">
           <Select
@@ -565,22 +730,54 @@ function ThresholdSlider({
 }) {
   return (
     <FilterField label={label}>
-      <div className="flex items-center gap-2 w-44">
-        <Slider
-          value={[value]}
-          min={0}
-          max={1}
-          step={0.05}
-          onValueChange={(v) => onChange(v[0] ?? 0)}
-        />
-        <span className="tabular-nums w-10 text-right text-muted-foreground">
-          {value.toFixed(2)}
-        </span>
-      </div>
+      <CommitSlider value={value} onCommit={onChange} />
     </FilterField>
   );
 }
 
-function numberOr(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+/**
+ * Slider that updates its visual position on every drag step but only
+ * commits the value (triggering parent re-renders / refetches) on
+ * pointer release. Used for discovery thresholds where each step
+ * change would otherwise queue an expensive miner / heuristics fetch.
+ */
+function CommitSlider({
+  value,
+  onCommit,
+  min = 0,
+  max = 1,
+  step = 0.05,
+  width = "w-72",
+  digits = 2,
+}: {
+  value: number;
+  onCommit: (v: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  width?: string;
+  digits?: number;
+}) {
+  const safeValue = Number.isFinite(value) ? value : min;
+  const [local, setLocal] = useState(safeValue);
+  useEffect(() => {
+    setLocal(safeValue);
+  }, [safeValue]);
+  return (
+    <div className={cn("flex items-center gap-3", width)}>
+      <Slider
+        value={[local]}
+        min={min}
+        max={max}
+        step={step}
+        onValueChange={(v) => setLocal(v[0] ?? min)}
+        onValueCommit={(v) => onCommit(v[0] ?? min)}
+        className="flex-1"
+      />
+      <span className="tabular-nums w-10 text-right text-muted-foreground shrink-0">
+        {local.toFixed(digits)}
+      </span>
+    </div>
+  );
 }
+

@@ -37,9 +37,9 @@ export function GeneralSection({ logId, log }: { logId: string; log: EventLogDet
 
   return (
     <SectionShell title="General" description="Basic information about this event log.">
-      <div className="space-y-3 max-w-2xl">
-        <div className="space-y-1.5">
-          <Label htmlFor="general-name" className="text-xs text-muted-foreground">
+      <div className="space-y-2.5 max-w-2xl">
+        <div className="space-y-1">
+          <Label htmlFor="general-name" className="text-xs font-medium text-muted-foreground">
             Name
           </Label>
           <Input
@@ -47,22 +47,23 @@ export function GeneralSection({ logId, log }: { logId: string; log: EventLogDet
             maxLength={255}
             value={name}
             onChange={(e) => setName(e.target.value)}
+            className="h-8"
           />
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="general-description" className="text-xs text-muted-foreground">
+        <div className="space-y-1">
+          <Label htmlFor="general-description" className="text-xs font-medium text-muted-foreground">
             Description
           </Label>
           <textarea
             id="general-description"
-            rows={3}
+            rows={2}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Notes about this log — owner, source system, caveats…"
             className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
           />
         </div>
-        <div className="flex justify-end">
+        <div className="flex justify-end pt-1">
           <Button
             size="sm"
             disabled={!dirty || update.isPending}
@@ -87,11 +88,11 @@ export function SectionShell({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-lg border bg-card p-5">
-      <div className="mb-4">
-        <h2 className="text-base font-semibold">{title}</h2>
+    <section className="rounded-lg border bg-card p-4">
+      <div className="mb-3.5">
+        <h2 className="text-sm font-semibold leading-tight">{title}</h2>
         {description && (
-          <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         )}
       </div>
       {children}

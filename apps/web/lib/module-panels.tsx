@@ -28,6 +28,11 @@ const PANELS: Record<string, ComponentType<ModulePanelProps>> = {
     () => import("@modules/performance/panel").then((m) => m.PerformancePanel),
     { ssr: false, loading: () => <PanelSkeleton /> },
   ),
+  process_complexity: dynamic(
+    () =>
+      import("@modules/process_complexity/panel").then((m) => m.ProcessComplexityPanel),
+    { ssr: false, loading: () => <PanelSkeleton /> },
+  ),
 };
 
 export function getModulePanel(moduleId: string): ComponentType<ModulePanelProps> | null {

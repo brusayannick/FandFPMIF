@@ -17,12 +17,22 @@ import json
 from pathlib import Path
 from typing import Any
 
+from fastapi import HTTPException
+
 from flows_funds.sdk import Module, ModuleContext, job, on_event, route
+
+# ILP miner builds a linear program whose memory scales super-linearly in
+# the number of distinct activities and traces. Past these caps pm4py
+# routinely OOM-kills the container (exit 137), which kills every other
+# in-flight request too. We'd rather fail fast with a 413.
+_ILP_MAX_ACTIVITIES = 30
+_ILP_MAX_CASES = 5_000
 
 from .serializers import (
     serialize_dfg,
     serialize_heuristics_net,
     serialize_petri_net,
+    serialize_prefix_tree,
     serialize_process_tree,
 )
 
@@ -109,6 +119,21 @@ async def _cached_or_compute(
     return result
 
 
+def _guard_ilp_size(renamed: Any) -> None:
+    """Refuse ILP miner inputs that would OOM-kill the container."""
+    n_activities = int(renamed["concept:name"].nunique())
+    n_cases = int(renamed["case:concept:name"].nunique())
+    if n_activities > _ILP_MAX_ACTIVITIES or n_cases > _ILP_MAX_CASES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"ILP miner refused: log has {n_activities} distinct activities and "
+                f"{n_cases} cases (limits: {_ILP_MAX_ACTIVITIES} activities, "
+                f"{_ILP_MAX_CASES} cases). Try the Inductive or Alpha+ miner instead."
+            ),
+        )
+
+
 def _rename_pm4py(df: Any) -> Any:
     return df.rename(
         columns={
@@ -190,7 +215,9 @@ class DiscoveryModule(Module):
 
     # -- compute helpers (reusable from routes + precompute) ------------------
 
-    async def _compute_dfg(self, ctx: ModuleContext) -> dict[str, Any]:
+    async def _compute_dfg(
+        self, ctx: ModuleContext, *, variant_pct: float | None = None
+    ) -> dict[str, Any]:
         async with ctx.event_log as log:
             df = await log.pandas()
 
@@ -198,9 +225,12 @@ class DiscoveryModule(Module):
             import pm4py
 
             renamed = _rename_pm4py(df)
-            dfg, start, end = pm4py.discover_dfg(renamed)
-            durations = _edge_mean_durations(renamed)
-            mean_positions = _activity_mean_trace_position(renamed)
+            filtered = renamed
+            if variant_pct is not None and variant_pct < 1.0:
+                filtered = pm4py.filter_variants_percentage(renamed, percentage=variant_pct)
+            dfg, start, end = pm4py.discover_dfg(filtered)
+            durations = _edge_mean_durations(filtered)
+            mean_positions = _activity_mean_trace_position(filtered)
             return serialize_dfg(
                 dfg, start, end, durations=durations, mean_positions=mean_positions
             )
@@ -271,10 +301,121 @@ class DiscoveryModule(Module):
 
         return await asyncio.to_thread(_run)
 
+    async def _compute_petri_alpha_plus(self, ctx: ModuleContext) -> dict[str, Any]:
+        async with ctx.event_log as log:
+            df = await log.pandas()
+
+        def _run() -> dict[str, Any]:
+            import pm4py
+
+            renamed = _rename_pm4py(df)
+            net, im, fm = pm4py.discover_petri_net_alpha_plus(renamed)
+            return serialize_petri_net(net, im, fm)
+
+        return await asyncio.to_thread(_run)
+
+    async def _compute_petri_ilp(self, ctx: ModuleContext) -> dict[str, Any]:
+        async with ctx.event_log as log:
+            df = await log.pandas()
+
+        def _run() -> dict[str, Any]:
+            import pm4py
+
+            renamed = _rename_pm4py(df)
+            _guard_ilp_size(renamed)
+            net, im, fm = pm4py.discover_petri_net_ilp(renamed)
+            return serialize_petri_net(net, im, fm)
+
+        return await asyncio.to_thread(_run)
+
+    async def _compute_petri_imf(
+        self, ctx: ModuleContext, *, noise_threshold: float
+    ) -> dict[str, Any]:
+        async with ctx.event_log as log:
+            df = await log.pandas()
+
+        def _run() -> dict[str, Any]:
+            import pm4py
+
+            renamed = _rename_pm4py(df)
+            net, im, fm = pm4py.discover_petri_net_inductive(
+                renamed, noise_threshold=noise_threshold
+            )
+            return serialize_petri_net(net, im, fm)
+
+        return await asyncio.to_thread(_run)
+
+    async def _compute_process_tree_imf(
+        self, ctx: ModuleContext, *, noise_threshold: float
+    ) -> dict[str, Any]:
+        async with ctx.event_log as log:
+            df = await log.pandas()
+
+        def _run() -> dict[str, Any]:
+            import pm4py
+
+            renamed = _rename_pm4py(df)
+            tree = pm4py.discover_process_tree_inductive(
+                renamed, noise_threshold=noise_threshold
+            )
+            return serialize_process_tree(tree)
+
+        return await asyncio.to_thread(_run)
+
+    async def _compute_process_tree_via_petri(
+        self, ctx: ModuleContext, algo: str
+    ) -> dict[str, Any]:
+        async with ctx.event_log as log:
+            df = await log.pandas()
+
+        def _run() -> dict[str, Any]:
+            import pm4py
+
+            renamed = _rename_pm4py(df)
+            if algo == "alpha":
+                net, im, fm = pm4py.discover_petri_net_alpha(renamed)
+            elif algo == "alpha-plus":
+                net, im, fm = pm4py.discover_petri_net_alpha_plus(renamed)
+            elif algo == "ilp":
+                _guard_ilp_size(renamed)
+                net, im, fm = pm4py.discover_petri_net_ilp(renamed)
+            else:
+                raise ValueError(f"Unknown algo: {algo!r}")
+            tree = pm4py.convert_to_process_tree(net, im, fm)
+            return serialize_process_tree(tree)
+
+        return await asyncio.to_thread(_run)
+
+    async def _compute_prefix_tree(self, ctx: ModuleContext) -> dict[str, Any]:
+        async with ctx.event_log as log:
+            df = await log.pandas()
+
+        def _run() -> dict[str, Any]:
+            renamed = _rename_pm4py(df)
+            sorted_df = renamed.sort_values(
+                ["case:concept:name", "time:timestamp"], kind="mergesort"
+            )
+            cases: list[list[str]] = (
+                sorted_df.groupby("case:concept:name", sort=False)["concept:name"]
+                .apply(list)
+                .tolist()
+            )
+            return serialize_prefix_tree(cases)
+
+        return await asyncio.to_thread(_run)
+
     # -- routes ---------------------------------------------------------------
 
     @route.get("/dfg")
-    async def dfg(self, ctx: ModuleContext) -> dict[str, Any]:
+    async def dfg(
+        self, ctx: ModuleContext, *, variant_pct: float | None = None
+    ) -> dict[str, Any]:
+        if variant_pct is not None:
+            vp = max(0.0, min(1.0, float(variant_pct)))
+            key = f"dfg_variants_{vp:.2f}"
+            return await _cached_or_compute(
+                ctx, key, lambda: self._compute_dfg(ctx, variant_pct=vp)
+            )
         # min_version=3: mean_trace_position was added in v3; force-recompute
         # older caches that don't have it (v2 added durations).
         return await _cached_or_compute(
@@ -319,17 +460,84 @@ class DiscoveryModule(Module):
             ctx, key, lambda: self._compute_heuristics_net(ctx, **thresholds)
         )
 
+    @route.get("/petri-net/alpha-plus")
+    async def petri_alpha_plus(self, ctx: ModuleContext) -> dict[str, Any]:
+        return await _cached_or_compute(
+            ctx, "petri_net_alpha_plus", lambda: self._compute_petri_alpha_plus(ctx)
+        )
+
+    @route.get("/petri-net/ilp")
+    async def petri_ilp(self, ctx: ModuleContext) -> dict[str, Any]:
+        return await _cached_or_compute(
+            ctx, "petri_net_ilp", lambda: self._compute_petri_ilp(ctx)
+        )
+
+    @route.get("/petri-net/imf")
+    async def petri_imf(
+        self, ctx: ModuleContext, *, noise_threshold: float | None = None
+    ) -> dict[str, Any]:
+        nt = float(noise_threshold) if noise_threshold is not None else 0.2
+        key = f"petri_net_imf__{nt:.3f}"
+        return await _cached_or_compute(
+            ctx, key, lambda: self._compute_petri_imf(ctx, noise_threshold=nt)
+        )
+
+    @route.get("/process-tree/imf")
+    async def process_tree_imf(
+        self, ctx: ModuleContext, *, noise_threshold: float | None = None
+    ) -> dict[str, Any]:
+        nt = float(noise_threshold) if noise_threshold is not None else 0.2
+        key = f"process_tree_imf__{nt:.3f}"
+        return await _cached_or_compute(
+            ctx, key, lambda: self._compute_process_tree_imf(ctx, noise_threshold=nt)
+        )
+
+    @route.get("/process-tree/alpha")
+    async def process_tree_alpha(self, ctx: ModuleContext) -> dict[str, Any]:
+        return await _cached_or_compute(
+            ctx,
+            "process_tree_alpha",
+            lambda: self._compute_process_tree_via_petri(ctx, "alpha"),
+        )
+
+    @route.get("/process-tree/alpha-plus")
+    async def process_tree_alpha_plus(self, ctx: ModuleContext) -> dict[str, Any]:
+        return await _cached_or_compute(
+            ctx,
+            "process_tree_alpha_plus",
+            lambda: self._compute_process_tree_via_petri(ctx, "alpha-plus"),
+        )
+
+    @route.get("/process-tree/ilp")
+    async def process_tree_ilp(self, ctx: ModuleContext) -> dict[str, Any]:
+        return await _cached_or_compute(
+            ctx,
+            "process_tree_ilp",
+            lambda: self._compute_process_tree_via_petri(ctx, "ilp"),
+        )
+
+    @route.get("/prefix-tree")
+    async def prefix_tree(self, ctx: ModuleContext) -> dict[str, Any]:
+        return await _cached_or_compute(
+            ctx, "prefix_tree", lambda: self._compute_prefix_tree(ctx)
+        )
+
     # -- precompute on import -------------------------------------------------
 
     @on_event("log.imported")
     @job(progress=True, title="Discovery — precompute")
     async def precompute(self, ctx: ModuleContext, payload: dict[str, Any]) -> None:
         thresholds = _heuristics_thresholds(ctx.config)
+        default_nt = 0.2
         stages: list[tuple[str, Any]] = [
             ("dfg", lambda: self._compute_dfg(ctx)),
             ("petri_net_alpha", lambda: self._compute_petri_alpha(ctx)),
+            ("petri_net_alpha_plus", lambda: self._compute_petri_alpha_plus(ctx)),
             ("petri_net_inductive", lambda: self._compute_petri_inductive(ctx)),
+            (f"petri_net_imf__{default_nt:.3f}", lambda: self._compute_petri_imf(ctx, noise_threshold=default_nt)),
             ("process_tree", lambda: self._compute_process_tree(ctx)),
+            (f"process_tree_imf__{default_nt:.3f}", lambda: self._compute_process_tree_imf(ctx, noise_threshold=default_nt)),
+            ("prefix_tree", lambda: self._compute_prefix_tree(ctx)),
             (
                 _heuristics_cache_key(thresholds),
                 lambda: self._compute_heuristics_net(ctx, **thresholds),

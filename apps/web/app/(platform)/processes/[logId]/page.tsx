@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback } from "react";
-import { Inbox, Loader2 } from "lucide-react";
+import { ArrowLeft, Inbox, Loader2 } from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
-import { StatusBadge } from "@/components/status-badge";
 import { ModuleGrid } from "@/components/processes/module-grid";
 import { EventsTab } from "@/components/processes/events-tab";
 import { VariantsTab } from "@/components/processes/variants-tab";
@@ -75,10 +75,20 @@ export default function ProcessDetailPage() {
 
   return (
     <section className="mx-auto max-w-7xl px-6 py-8">
+      <Button
+        asChild
+        variant="ghost"
+        size="sm"
+        className="mb-4 -ml-2 h-8 cursor-pointer gap-1.5 text-muted-foreground hover:text-foreground"
+      >
+        <Link href="/processes">
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Processes
+        </Link>
+      </Button>
       <header className="space-y-3 pb-6">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">{log.name}</h1>
-          <StatusBadge status={log.status} />
           {log.source_format && (
             <Badge variant="outline" className="border-0 bg-muted text-[10px] uppercase tracking-wide text-muted-foreground">
               {log.source_format}

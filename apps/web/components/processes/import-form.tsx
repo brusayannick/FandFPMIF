@@ -130,7 +130,11 @@ function autoMap(headers: string[]): Partial<CsvMapping> {
   return out;
 }
 
-export function ImportForm() {
+interface ImportFormProps {
+  onSuccess?: (logId: string) => void;
+}
+
+export function ImportForm({ onSuccess }: ImportFormProps = {}) {
   const router = useRouter();
   const importer = useImportEventLog();
 
@@ -183,7 +187,11 @@ export function ImportForm() {
         csvMapping,
       });
       toast.success("Import queued");
-      router.push(`/processes?focus=${resp.log_id}`);
+      if (onSuccess) {
+        onSuccess(resp.log_id);
+      } else {
+        router.push(`/processes?focus=${resp.log_id}`);
+      }
     } catch (err: unknown) {
       toast.error(`Import failed: ${(err as Error).message}`);
     }
@@ -195,7 +203,7 @@ export function ImportForm() {
 
       {file && (
         <Card>
-          <CardContent className="space-y-5 pt-6">
+          <CardContent className="space-y-4 p-6">
             <div className="grid gap-2">
               <Label htmlFor="display-name">Display name</Label>
               <Input

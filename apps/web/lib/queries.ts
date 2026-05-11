@@ -264,6 +264,14 @@ export function useUninstallModule() {
   });
 }
 
+export function useModuleManifest(moduleId: string) {
+  return useQuery({
+    queryKey: queryKeys.moduleManifest(moduleId),
+    queryFn: () => api<Record<string, unknown>>(`/api/v1/modules/${moduleId}/manifest`),
+    staleTime: Infinity,
+  });
+}
+
 export function useUpdateModuleConfig() {
   const qc = useQueryClient();
   return useMutation({

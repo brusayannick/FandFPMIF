@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { toastError } from "@/lib/toast";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +33,7 @@ export function GeneralSection({ logId, log }: { logId: string; log: EventLogDet
       });
       toast.success("Saved");
     } catch (err) {
-      toast.error(`Save failed: ${(err as Error).message}`);
+      toastError(`Save failed: ${(err as Error).message}`);
     }
   };
 

@@ -8,6 +8,7 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   useReactFlow,
   type Edge,
   type EdgeMouseHandler,
@@ -48,6 +49,13 @@ interface CanvasShellProps {
   onNodesChange?: OnNodesChange<Node>;
   onEdgesChange?: OnEdgesChange<Edge>;
   onNodeDragStop?: NodeMouseHandler;
+  /** Enable rubber-band (drag-to-select) on the canvas pane. When true,
+   *  left-drag creates a selection rectangle; panning moves to middle/right drag. */
+  selectionOnDrag?: boolean;
+  /** Override pan-on-drag buttons. Defaults to `true` (left button).
+   *  Pass `[1, 2]` to restrict panning to middle + right buttons. */
+  panOnDrag?: boolean | number[];
+  onSelectionChange?: (params: { nodes: Node[]; edges: Edge[] }) => void;
 }
 
 // All minimap nodes use a single neutral grey so the minimap reads as a
@@ -73,6 +81,9 @@ function CanvasInner({
   onNodesChange,
   onEdgesChange,
   onNodeDragStop,
+  selectionOnDrag = false,
+  panOnDrag = true,
+  onSelectionChange,
 }: Omit<CanvasShellProps, "className">) {
   const { fitView, zoomIn, zoomOut } = useReactFlow();
   const lastKey = useRef<string | number | undefined>(undefined);
@@ -102,6 +113,9 @@ function CanvasInner({
         edgesFocusable
         elementsSelectable
         selectNodesOnDrag={false}
+        selectionOnDrag={selectionOnDrag}
+        selectionMode={SelectionMode.Partial}
+        panOnDrag={panOnDrag}
         zoomOnScroll
         panOnScroll
         fitView
@@ -113,6 +127,7 @@ function CanvasInner({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeDragStop={onNodeDragStop}
+        onSelectionChange={onSelectionChange}
         defaultEdgeOptions={{
           interactionWidth: 24,
           focusable: true,

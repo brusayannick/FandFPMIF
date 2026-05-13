@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { FileBox } from "lucide-react";
-import { toast } from "sonner";
+import { toastError } from "@/lib/toast";
 
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -70,7 +70,7 @@ function ModuleToggleRow({ module: m }: { module: ModuleSummary }) {
       });
     } catch {
       setEnabled(prev);
-      toast.error(`Failed to update ${m.name}`);
+      toastError(`Failed to update ${m.name}`);
     }
   };
 

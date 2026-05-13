@@ -6,6 +6,8 @@ import { useState } from "react";
 import { ArrowLeft, FileBox, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { toastError } from "@/lib/toast";
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,7 +37,7 @@ export default function ImportModulePage() {
       toast.success("Install queued — watch progress in the Jobs drawer");
       router.push("/settings/modules");
     } catch (err: unknown) {
-      toast.error(`Install failed: ${(err as Error).message}`);
+      toastError(`Install failed: ${(err as Error).message}`);
     }
   };
 
@@ -46,7 +48,7 @@ export default function ImportModulePage() {
       toast.success("Clone queued — watch progress in the Jobs drawer");
       router.push("/settings/modules");
     } catch (err: unknown) {
-      toast.error(`Install failed: ${(err as Error).message}`);
+      toastError(`Install failed: ${(err as Error).message}`);
     }
   };
 

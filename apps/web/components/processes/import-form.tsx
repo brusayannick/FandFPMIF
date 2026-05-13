@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { FileText, FileUp, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { toastError } from "@/lib/toast";
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -151,7 +153,7 @@ export function ImportForm({ onSuccess }: ImportFormProps = {}) {
     async (f: File) => {
       const detected = detect(f);
       if (detected === "unsupported") {
-        toast.error(`Unsupported file: ${f.name}. Use .xes, .xes.gz, or .csv.`);
+        toastError(`Unsupported file: ${f.name}. Use .xes, .xes.gz, or .csv.`);
         return;
       }
       setFile(f);
@@ -193,7 +195,7 @@ export function ImportForm({ onSuccess }: ImportFormProps = {}) {
         router.push(`/processes?focus=${resp.log_id}`);
       }
     } catch (err: unknown) {
-      toast.error(`Import failed: ${(err as Error).message}`);
+      toastError(`Import failed: ${(err as Error).message}`);
     }
   };
 

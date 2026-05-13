@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Inbox, MoreHorizontal, Pause, Play, Trash2, Eye } from "lucide-react";
-import { toast } from "sonner";
+import { toastError } from "@/lib/toast";
 
 import {
   Sheet,
@@ -110,7 +110,7 @@ export function JobsDrawer() {
                       try {
                         await api("/api/v1/jobs/queue/resume", { method: "POST" });
                       } catch (e) {
-                        toast.error(`Resume failed: ${(e as Error).message}`);
+                        toastError(`Resume failed: ${(e as Error).message}`);
                       }
                     }}
                     className="cursor-pointer"
@@ -123,7 +123,7 @@ export function JobsDrawer() {
                       try {
                         await api("/api/v1/jobs/queue/pause", { method: "POST" });
                       } catch (e) {
-                        toast.error(`Pause failed: ${(e as Error).message}`);
+                        toastError(`Pause failed: ${(e as Error).message}`);
                       }
                     }}
                     className="cursor-pointer"

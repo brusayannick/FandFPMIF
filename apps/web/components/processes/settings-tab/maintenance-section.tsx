@@ -5,6 +5,8 @@ import { useState } from "react";
 import { RefreshCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { toastError } from "@/lib/toast";
+
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -36,7 +38,7 @@ export function MaintenanceSection({ log }: { log: EventLogDetail }) {
       toast.success("Re-import started");
       setReimportOpen(false);
     } catch (err) {
-      toast.error(`Re-import failed: ${(err as Error).message}`);
+      toastError(`Re-import failed: ${(err as Error).message}`);
     }
   };
 
@@ -46,7 +48,7 @@ export function MaintenanceSection({ log }: { log: EventLogDetail }) {
       toast.success(`Deleted "${log.name}"`);
       router.push("/processes");
     } catch (err) {
-      toast.error(`Delete failed: ${(err as Error).message}`);
+      toastError(`Delete failed: ${(err as Error).message}`);
     }
   };
 

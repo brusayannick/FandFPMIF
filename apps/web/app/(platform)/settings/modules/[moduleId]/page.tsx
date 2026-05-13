@@ -6,6 +6,8 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, FileBox, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { toastError } from "@/lib/toast";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -91,7 +93,7 @@ export default function ModuleDetailPage() {
       toast.success(val ? `${m?.name ?? moduleId} enabled` : `${m?.name ?? moduleId} disabled`);
     } catch {
       setEnabled(!val);
-      toast.error("Failed to update module");
+      toastError("Failed to update module");
     }
   };
 
@@ -100,7 +102,7 @@ export default function ModuleDetailPage() {
       await update.mutateAsync({ id: moduleId, config: draft, enabled });
       toast.success("Configuration saved");
     } catch {
-      toast.error("Failed to save configuration");
+      toastError("Failed to save configuration");
     }
   };
 
@@ -110,7 +112,7 @@ export default function ModuleDetailPage() {
       toast.success(`Uninstalled ${m?.name ?? moduleId}`);
       router.push("/settings/modules");
     } catch (err: unknown) {
-      toast.error(`Uninstall failed: ${(err as Error).message}`);
+      toastError(`Uninstall failed: ${(err as Error).message}`);
     }
   };
 

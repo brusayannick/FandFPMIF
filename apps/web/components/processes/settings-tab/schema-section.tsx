@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { toastError } from "@/lib/toast";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -53,7 +55,7 @@ export function SchemaSection({ logId, log }: { logId: string; log: EventLogDeta
       await update.mutateAsync({ column_overrides: overrides });
       toast.success("Schema updated");
     } catch (err) {
-      toast.error(`Save failed: ${(err as Error).message}`);
+      toastError(`Save failed: ${(err as Error).message}`);
     }
   };
 

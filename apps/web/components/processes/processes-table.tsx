@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { MoreHorizontal, Pencil, Trash2, RefreshCcw } from "lucide-react";
 import { toast } from "sonner";
 
+import { toastError } from "@/lib/toast";
+
 import { cn } from "@/lib/cn";
 import { formatDateRange, formatNumber, formatRelative } from "@/lib/format";
 import type { EventLogSummary } from "@/lib/api-types";
@@ -105,7 +107,7 @@ function ProcessRow({ row }: { row: EventLogSummary }) {
       await del.mutateAsync(row.id);
       toast.success(`Deleted "${row.name}"`);
     } catch (err: unknown) {
-      toast.error(`Delete failed: ${(err as Error).message}`);
+      toastError(`Delete failed: ${(err as Error).message}`);
     }
   };
 
@@ -114,7 +116,7 @@ function ProcessRow({ row }: { row: EventLogSummary }) {
       await reimport.mutateAsync(row.id);
       toast.success(`Re-importing "${row.name}"`);
     } catch (err: unknown) {
-      toast.error(`Re-import failed: ${(err as Error).message}`);
+      toastError(`Re-import failed: ${(err as Error).message}`);
     }
   };
 
@@ -239,7 +241,7 @@ function ProcessRow({ row }: { row: EventLogSummary }) {
               toast.success(`Renamed to "${next}"`);
               setRenameOpen(false);
             } catch (err: unknown) {
-              toast.error(`Rename failed: ${(err as Error).message}`);
+              toastError(`Rename failed: ${(err as Error).message}`);
             }
           }}
         />

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toastError } from "@/lib/toast";
 
 import { Input } from "@/components/ui/input";
 import {
@@ -97,7 +97,7 @@ export function CellEditor({
             : err.message
           : (err as Error).message;
       setErrorMsg(message);
-      toast.error(message);
+      toastError(message);
     }
   };
 

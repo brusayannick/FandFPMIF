@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+
+import { toastError } from "@/lib/toast";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
@@ -73,7 +75,7 @@ export function JobsProvider() {
       }
 
       if (env.topic === "job.failed") {
-        toast.error(`Failed — ${title}`, {
+        toastError(`Failed — ${title}`, {
           duration: Number.POSITIVE_INFINITY,
           action: {
             label: "Details",

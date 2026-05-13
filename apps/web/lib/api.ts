@@ -49,6 +49,19 @@ export async function api<T = unknown>(
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
+/** Raw fetch that returns the Response without JSON-parsing — use for SSE / streaming endpoints. */
+export async function rawFetch(
+  path: string,
+  init: RequestInit & { json?: unknown } = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (init.json !== undefined) {
+    headers.set("Content-Type", "application/json");
+    init.body = JSON.stringify(init.json);
+  }
+  return fetch(`${apiBase()}${path}`, { ...init, headers });
+}
+
 /** Build a WS URL pointing at the backend for both dev and prod. */
 export function wsUrl(path: string): string {
   const base = typeof window === "undefined" ? SERVER_BASE : PUBLIC_BASE;

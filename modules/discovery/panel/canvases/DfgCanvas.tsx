@@ -308,13 +308,21 @@ export function DfgCanvas({
   );
   const onPaneClick = useCallback(() => onSelect?.(null), [onSelect]);
 
-  // Mark the currently-selected element with `selected: true` so xyflow
-  // applies its own focus ring styling (and downstream nodes/edges can react).
+  // Multi-selection via rubber-band: clear the single-node details panel.
+  const onSelectionChange = useCallback(
+    ({ nodes: selected }: { nodes: typeof nodes; edges: typeof edges }) => {
+      if (selected.length > 1) onSelect?.(null);
+    },
+    [onSelect],
+  );
+
+  // Ensure the externally-controlled selectedNodeId is visually selected.
+  // Don't clear other nodes' selection so rubber-band multi-select is preserved.
   const decoratedNodes = nodes.map((n) =>
-    n.id === selectedNodeId ? { ...n, selected: true } : n.selected ? { ...n, selected: false } : n,
+    n.id === selectedNodeId && !n.selected ? { ...n, selected: true } : n,
   );
   const decoratedEdges = edges.map((e) =>
-    e.id === selectedEdgeId ? { ...e, selected: true } : e.selected ? { ...e, selected: false } : e,
+    e.id === selectedEdgeId && !e.selected ? { ...e, selected: true } : e,
   );
 
   if (!laid) return <CanvasLayoutSkeleton />;
@@ -334,6 +342,9 @@ export function DfgCanvas({
       onNodeClick={onNodeClick}
       onEdgeClick={onEdgeClick}
       onPaneClick={onPaneClick}
+      selectionOnDrag
+      panOnDrag={[1, 2]}
+      onSelectionChange={onSelectionChange}
     />
   );
 }

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { RotateCcw, Search } from "lucide-react";
 import { toast } from "sonner";
 
+import { toastError } from "@/lib/toast";
+
 import {
   Table,
   TableBody,
@@ -82,7 +84,7 @@ export function ActivitiesTab({ logId, log }: ActivitiesTabProps) {
       await update.mutateAsync({ column_overrides: nextOverrides });
       toast.success("Activity renames saved");
     } catch (err) {
-      toast.error(`Save failed: ${(err as Error).message}`);
+      toastError(`Save failed: ${(err as Error).message}`);
     }
   };
 

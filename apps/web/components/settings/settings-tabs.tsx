@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 const TABS = [
   { href: "/settings/general", label: "General" },
   { href: "/settings/modules", label: "Modules" },
+  { href: "/settings/ai", label: "AI" },
   { href: "/settings/about", label: "About" },
 ];
 

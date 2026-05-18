@@ -217,7 +217,7 @@ function JobDetailsDialog({
           {job.error && (
             <div className="space-y-1">
               <div className="text-[10px] uppercase tracking-wide text-destructive">Error</div>
-              <pre className="max-h-64 overflow-y-auto overflow-x-hidden rounded-md bg-destructive/10 p-3 text-[11px] text-destructive">
+              <pre className="whitespace-pre-wrap break-words rounded-md bg-destructive/10 p-3 text-[11px] text-destructive">
                 {job.error}
               </pre>
             </div>

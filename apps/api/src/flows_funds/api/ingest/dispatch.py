@@ -126,6 +126,23 @@ async def _import_handler(handle: JobHandle) -> None:
         force=True,
     )
 
+    # Object-dtype columns can hold a messy mix of strings, Python floats, and
+    # NaN — especially XES attributes like RequestedAmount that appear as a
+    # number in some events and as a string ("EUR") in others, or are absent
+    # entirely. PyArrow then fails with "Expected bytes, got a 'float' object".
+    # Strategy: if every non-null value parses as a number, use a numeric dtype;
+    # otherwise coerce everything to a clean string column with real nulls.
+    object_cols = list(df.select_dtypes(include="object").columns)
+    fixed_columns = [col for col in object_cols if df[col].isna().any()]
+    for col in object_cols:
+        non_null = df[col].dropna()
+        if len(non_null) > 0:
+            coerced = pd.to_numeric(non_null, errors="coerce")
+            if coerced.notna().all():
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+                continue
+        df[col] = df[col].map(lambda v: None if pd.isna(v) else str(v))
+
     df.to_parquet(paths.events, index=False, engine="pyarrow", compression="zstd")
 
     cases_df = compute_cases(df)
@@ -192,6 +209,7 @@ async def _import_handler(handle: JobHandle) -> None:
             "events_count": meta["events_count"],
             "cases_count": meta["cases_count"],
             "detected_schema": detected_schema,
+            "fixed_columns": fixed_columns,
         },
     )
 

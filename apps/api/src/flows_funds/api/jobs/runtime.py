@@ -155,6 +155,7 @@ class JobRuntime:
         self._paused = asyncio.Event()
         self._paused.set()  # set = NOT paused (we wait while it's clear)
         self._cancel_tokens: dict[str, CancelToken] = {}
+        self._running_tasks: dict[str, asyncio.Task[None]] = {}
 
     def _ensure_bus(self) -> EventBus:
         return self._bus if self._bus is not None else get_event_bus()
@@ -180,6 +181,11 @@ class JobRuntime:
             w.cancel()
         await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers.clear()
+        for task in self._running_tasks.values():
+            task.cancel()
+        if self._running_tasks:
+            await asyncio.gather(*self._running_tasks.values(), return_exceptions=True)
+        self._running_tasks.clear()
         for tok in self._cancel_tokens.values():
             tok.cancel()
         self._cancel_tokens.clear()
@@ -284,6 +290,10 @@ class JobRuntime:
         if token is not None:
             token.cancel()
 
+        task = self._running_tasks.get(job_id)
+        if task is not None:
+            task.cancel()
+
         if not running:
             await self._ensure_bus().publish("job.cancelled", {"id": job_id, "reason": "queued"})
         return True
@@ -385,9 +395,17 @@ class JobRuntime:
             started_at=time.monotonic(),
         )
 
+        handler_task = asyncio.create_task(self._handlers[handle_type](handle))
+        self._running_tasks[job_id] = handler_task
         try:
-            await self._handlers[handle_type](handle)
-        except JobCancelled:
+            await handler_task
+        except (JobCancelled, asyncio.CancelledError):
+            if not token.cancelled:
+                # Shutdown cancellation — propagate so the worker exits cleanly.
+                handler_task.cancel()
+                with contextlib.suppress(Exception, asyncio.CancelledError):
+                    await handler_task
+                raise
             async with sm() as session:
                 await session.execute(
                     update(Job)
@@ -416,6 +434,7 @@ class JobRuntime:
             )
             return
         finally:
+            self._running_tasks.pop(job_id, None)
             self._cancel_tokens.pop(job_id, None)
 
         async with sm() as session:

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MoreHorizontal, Pencil, Trash2, RefreshCcw } from "lucide-react";
+import { AlertCircle, MoreHorizontal, Pencil, Trash2, RefreshCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { toastError } from "@/lib/toast";
@@ -135,6 +135,25 @@ function ProcessRow({ row }: { row: EventLogSummary }) {
           <div className="mt-1 max-w-xs">
             <Progress value={undefined} className="h-1" />
           </div>
+        )}
+        {failed && (
+          <HoverCard>
+            <HoverCardTrigger asChild>
+              <div className="mt-1 flex cursor-default items-center gap-1">
+                <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />
+                <span className="truncate text-xs text-destructive">
+                  {row.error ?? "Import failed"}
+                </span>
+              </div>
+            </HoverCardTrigger>
+            {row.error && (
+              <HoverCardContent side="bottom" align="start" className="w-96">
+                <pre className="whitespace-pre-wrap break-words text-[11px] text-destructive">
+                  {row.error}
+                </pre>
+              </HoverCardContent>
+            )}
+          </HoverCard>
         )}
       </TableCell>
       <TableCell className="text-right tabular-nums">{formatNumber(row.cases_count)}</TableCell>

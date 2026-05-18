@@ -88,8 +88,14 @@ class ModuleVenvFinder(MetaPathFinder):
         if top_level in self._inherit.get(owner, frozenset()):
             log.debug("modules.finder.inherit_defer", module_id=owner, name=name)
             return None
-        # Use the standard PathFinder restricted to this site-packages dir.
-        spec = PathFinder.find_spec(name, [str(site)])
+        # For submodule imports, Python passes the parent package's
+        # __path__ via the `path` argument. Honour it so PathFinder
+        # searches inside the package directory — falling back to `site`
+        # would let `PathFinder.find_spec("gast.gast", [site])` resolve
+        # to `site/gast/__init__.py` (the package, not `gast/gast.py`),
+        # making `from .gast import *` recurse into the same file.
+        search_path = list(path) if path else [str(site)]
+        spec = PathFinder.find_spec(name, search_path)
         if spec is None:
             return None
         log.debug("modules.finder.resolved_in_module_venv", module_id=owner, name=name)

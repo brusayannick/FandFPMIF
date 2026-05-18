@@ -157,12 +157,7 @@ export const useJobsStore = create<State>((set, get) => {
       });
       trackers.delete(id);
     } else if (topic === "job.cancelled") {
-      byId.set(id, {
-        ...(prev as JobLive),
-        id,
-        status: "cancelled",
-        finished_at: new Date().toISOString(),
-      });
+      byId.delete(id);
       trackers.delete(id);
     } else if (topic === "job.snapshot") {
       // Per-job WS sends an initial snapshot — overwrite cleanly.

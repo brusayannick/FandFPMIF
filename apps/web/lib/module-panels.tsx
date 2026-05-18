@@ -33,6 +33,10 @@ const PANELS: Record<string, ComponentType<ModulePanelProps>> = {
       import("@modules/process_complexity/panel").then((m) => m.ProcessComplexityPanel),
     { ssr: false, loading: () => <PanelSkeleton /> },
   ),
+  cv4cdd: dynamic(
+    () => import("@modules/cv4cdd/panel").then((m) => m.Cv4cddPanel),
+    { ssr: false, loading: () => <PanelSkeleton /> },
+  ),
 };
 
 export function getModulePanel(moduleId: string): ComponentType<ModulePanelProps> | null {

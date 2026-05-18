@@ -43,11 +43,24 @@ export function JobsProvider() {
   }, [setAll]);
 
   useEffect(() => {
-    const sub = subscribeBus<Record<string, unknown>>(["job.*"], (env) => {
+    const sub = subscribeBus<Record<string, unknown>>(["job.*", "log.imported"], (env) => {
       apply(env.topic, env.payload);
 
       const id = (env.payload.id as string | undefined) ?? "";
       const title = (env.payload.title as string | undefined) ?? id;
+
+      if (env.topic === "log.imported") {
+        const fixedCols = env.payload.fixed_columns as string[] | undefined;
+        if (fixedCols && fixedCols.length > 0 && !muted) {
+          toast.info(
+            fixedCols.length === 1
+              ? "1 column was automatically fixed during import"
+              : `${fixedCols.length} columns were automatically fixed during import`,
+            { description: `Mixed-type values coerced to null: ${fixedCols.join(", ")}` },
+          );
+        }
+        return;
+      }
 
       if (env.topic === "job.completed") {
         // Refresh anything keyed off the api state. Event-log imports flip a
@@ -75,7 +88,12 @@ export function JobsProvider() {
       }
 
       if (env.topic === "job.failed") {
-        toastError(`Failed — ${title}`, {
+        // `job.failed` payload has no `title`; look it up from the store
+        // (populated when `job.queued` arrived) so we show the job name, not the UUID.
+        const storedTitle = useJobsStore.getState().byId.get(id)?.title ?? title;
+        const error = (env.payload.error as string | undefined) ?? "";
+        toastError(`Failed — ${storedTitle}`, {
+          description: error || undefined,
           duration: Number.POSITIVE_INFINITY,
           action: {
             label: "Details",

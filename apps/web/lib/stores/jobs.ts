@@ -201,7 +201,6 @@ export type JobTypeCategory = "Import" | "Precompute" | "Module" | "Other";
 export function categorizeJobType(job: LiveJob): JobTypeCategory {
   const type = job.type.toLowerCase();
   if (type.includes("import")) return "Import";
-  if (type.includes("module.install")) return "Module";
   if (type.includes("module.")) return "Precompute";
   return "Other";
 }

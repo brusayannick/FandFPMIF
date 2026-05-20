@@ -29,12 +29,12 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, FastAPI, HTTPException
 
-from flows_funds.api.config import get_settings
 from flows_funds.api.db.engine import get_sessionmaker
 from flows_funds.api.db.models import ModuleConfig
 from flows_funds.api.events import EventBus
 from flows_funds.api.jobs.runtime import JobHandle, JobRuntime
-from flows_funds.api.modules.availability import Availability, evaluate as evaluate_availability
+from flows_funds.api.modules.availability import Availability
+from flows_funds.api.modules.availability import evaluate as evaluate_availability
 from flows_funds.api.modules.cache import ResultCache
 from flows_funds.api.modules.discovery import DiscoveredModule, discover, topo_sort
 from flows_funds.api.modules.event_log_access import EventLogAccess
@@ -228,13 +228,13 @@ class ModuleLoader:
                         site,
                         inherit=d.manifest.dependencies.python.inherit,
                     )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.exception("modules.loader.install_failed", module_id=d.id, error=str(exc))
                 continue
 
             try:
                 instance = self._import_module_class(d)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.exception("modules.loader.import_failed", module_id=d.id, error=str(exc))
                 continue
 
@@ -268,11 +268,12 @@ class ModuleLoader:
         self.loaded.clear()
         reset_finder()
 
-    async def load_one(self, folder: Path, manifest: Manifest) -> LoadedModule:
-        """Load (or reload) a single module post-startup. Used by the install
-        flow (§7.6.2) so the user doesn't have to restart the API to see a
-        newly-imported module.
-        """
+    async def load_one(
+        self,
+        folder: Path,
+        manifest: Manifest,
+    ) -> LoadedModule:
+        """Load (or reload) a single module post-startup."""
         from flows_funds.api.modules.discovery import DiscoveredModule
 
         existing = self.loaded.get(manifest.id)
@@ -343,7 +344,7 @@ class ModuleLoader:
         """
         try:
             sm = get_sessionmaker()
-        except Exception:  # noqa: BLE001 — engine not initialised in tests
+        except Exception:
             return
         async with sm() as session:
             existing = await session.get(ModuleConfig, manifest.id)
@@ -451,7 +452,7 @@ class ModuleLoader:
         extras = _extra_handler_params(bound_method)
 
         if job_spec is None:
-            async def _endpoint(**kwargs: Any) -> Any:  # noqa: ANN401
+            async def _endpoint(**kwargs: Any) -> Any:
                 log_id = kwargs.pop("log_id", None)
                 ctx = await self._make_context(module_id, log_id or "")
                 # FastAPI handles sync→threadpool for sync handlers automatically
@@ -529,7 +530,7 @@ class ModuleLoader:
                                     await bound_method(ctx, env.payload)
                                 else:
                                     await asyncio.to_thread(bound_method, ctx, env.payload)
-                            except Exception:  # noqa: BLE001
+                            except Exception:
                                 log.exception(
                                     "modules.event_handler_failed",
                                     module_id=module_id,
@@ -587,7 +588,7 @@ class ModuleLoader:
                                 },
                                 priority=job_spec.priority,
                             )
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             log.exception(
                                 "modules.event_job_submit_failed",
                                 module_id=module_id,
@@ -617,7 +618,7 @@ class ModuleLoader:
                 row = await session.get(ModuleConfig, module_id)
                 if row is not None and row.config_json:
                     cfg_json = dict(row.config_json)
-        except Exception:  # noqa: BLE001 — engine not initialised in tests
+        except Exception:
             cfg_json = {}
 
         return ModuleContext(

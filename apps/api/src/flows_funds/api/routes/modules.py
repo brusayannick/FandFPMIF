@@ -8,22 +8,18 @@ router; this router covers the platform's own module-meta surface.
 from __future__ import annotations
 
 import shutil
-import tempfile
-from pathlib import Path
 from typing import Annotated, Any
 
-import aiofiles
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
-
 from sqlalchemy import select
 
+from flows_funds.api.config import get_settings
 from flows_funds.api.db.models import EventLog, ModuleConfig
 from flows_funds.api.db.session import SessionDep
-from flows_funds.api.jobs.runtime import get_job_runtime
 from flows_funds.api.modules import get_module_loader
 from flows_funds.api.modules.availability import Availability
-from flows_funds.api.modules.install import INSTALL_JOB_TYPE, uninstall_module
+from flows_funds.api.modules.installer import remove_module_artifacts
 
 router = APIRouter(prefix="/modules", tags=["modules"])
 
@@ -72,8 +68,8 @@ async def list_modules(
             cases_count=log_row.cases_count,
         )
 
-    enabled_rows = await session.execute(select(ModuleConfig.module_id, ModuleConfig.enabled))
-    enabled_map: dict[str, bool] = {r[0]: r[1] for r in enabled_rows.all()}
+    rows = await session.execute(select(ModuleConfig.module_id, ModuleConfig.enabled))
+    enabled_map: dict[str, bool] = {module_id: enabled for module_id, enabled in rows.all()}
 
     return [
         ModuleSummary(
@@ -149,62 +145,14 @@ async def put_config(
     return payload
 
 
-# -- Install / uninstall ----------------------------------------------------
-
-
-class InstallResponse(BaseModel):
-    job_id: str
-
-
-class GitInstallPayload(BaseModel):
-    git_url: str
-    ref: str | None = None
-
-
-@router.post("/install", response_model=InstallResponse, status_code=status.HTTP_202_ACCEPTED)
-async def install_module(
-    file: Annotated[UploadFile | None, File(description="zip / tar.gz")] = None,
-    git_url: Annotated[str | None, Form()] = None,
-    ref: Annotated[str | None, Form()] = None,
-) -> InstallResponse:
-    runtime = get_job_runtime()
-
-    if file is not None:
-        suffix = ".zip" if file.filename and file.filename.lower().endswith(".zip") else ".tar.gz"
-        # Store the upload outside the temp dir the handler creates so the
-        # file survives across the await boundary into the worker.
-        target_dir = Path(tempfile.mkdtemp(prefix="ff-mod-upload-"))
-        archive_path = target_dir / f"upload{suffix}"
-        async with aiofiles.open(archive_path, "wb") as out:
-            while chunk := await file.read(1024 * 1024):
-                await out.write(chunk)
-        title = f"Install module — {file.filename}"
-        job_id = await runtime.submit(
-            type_=INSTALL_JOB_TYPE,
-            title=title,
-            subtitle="module.install · archive",
-            payload={"method": "archive", "archive_path": str(archive_path)},
-        )
-        return InstallResponse(job_id=job_id)
-
-    if git_url:
-        title = f"Install module — {git_url}"
-        job_id = await runtime.submit(
-            type_=INSTALL_JOB_TYPE,
-            title=title,
-            subtitle="module.install · git",
-            payload={"method": "git", "git_url": git_url, "ref": ref},
-        )
-        return InstallResponse(job_id=job_id)
-
-    raise HTTPException(
-        status_code=400,
-        detail="Provide either a `file` (multipart) or a `git_url` (form field).",
-    )
-
-
 @router.delete("/{module_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def uninstall(module_id: str) -> None:
-    ok = await uninstall_module(module_id)
-    if not ok:
+    settings = get_settings()
+    target = settings.modules_dir.resolve() / module_id
+    if not target.exists():
         raise HTTPException(status_code=404, detail=f"Module {module_id!r} is not installed.")
+    loader = get_module_loader()
+    await loader.unload_one(module_id)
+    remove_module_artifacts(target)
+    shutil.rmtree(target, ignore_errors=True)
+    await loader.bus.publish("module.uninstalled", {"id": module_id})

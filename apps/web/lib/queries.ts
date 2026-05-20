@@ -237,25 +237,6 @@ export function useModuleConfig(moduleId: string) {
   });
 }
 
-export function useInstallModule() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: { file?: File; gitUrl?: string; ref?: string }) => {
-      const fd = new FormData();
-      if (input.file) fd.append("file", input.file);
-      if (input.gitUrl) fd.append("git_url", input.gitUrl);
-      if (input.ref) fd.append("ref", input.ref);
-      return api<{ job_id: string }>("/api/v1/modules/install", {
-        method: "POST",
-        body: fd,
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["modules"] });
-    },
-  });
-}
-
 export function useUninstallModule() {
   const qc = useQueryClient();
   return useMutation({

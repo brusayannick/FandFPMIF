@@ -56,8 +56,7 @@ export default function AboutPage() {
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>
             <em>Copy diagnostics</em> bundles the platform version, module
-            list, and recent error excerpts. Implementation lands with the
-            module install pipeline (phase 9+).
+            list, and recent error excerpts. Not implemented yet.
           </p>
           <Button variant="outline" disabled className="cursor-not-allowed gap-2">
             Copy diagnostics

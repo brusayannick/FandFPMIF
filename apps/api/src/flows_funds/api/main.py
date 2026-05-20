@@ -30,7 +30,6 @@ from flows_funds.api.events import EventBus, set_event_bus
 from flows_funds.api.ingest.dispatch import register_import_handler
 from flows_funds.api.jobs.runtime import JobRuntime, set_job_runtime
 from flows_funds.api.modules import CapabilityRegistry, ModuleLoader, set_module_loader
-from flows_funds.api.modules.install import register_install_handler
 from flows_funds.api.routes import v1
 from flows_funds.api.schemas.common import HealthResponse
 
@@ -60,7 +59,6 @@ async def lifespan(app: FastAPI):
 
     runtime = JobRuntime(settings, bus=bus)
     register_import_handler(runtime)
-    register_install_handler(runtime)
     set_job_runtime(runtime)
     await runtime.start()
 
@@ -75,7 +73,7 @@ async def lifespan(app: FastAPI):
     set_module_loader(loader)
     try:
         await loader.load_all()
-    except Exception:  # noqa: BLE001
+    except Exception:
         # Discovery failures should not prevent the platform from booting.
         # Bad manifests are logged inside the loader.
         pass

@@ -232,7 +232,7 @@ permissions:
 | `foundation` | Always-relevant baseline | Discovery, Performance |
 | `attribute` | Mining beyond control-flow (org / time / cost / decisions) | Organizational, Cost Analysis |
 | `external_input` | Compares the log against an externally-supplied artefact | Conformance (BPMN) |
-| `advanced` | Specialised analytics | Temporal Dynamics, Process Complexity |
+| `advanced` | Specialised analytics | Temporal Dynamics |
 | `other` | Catch-all (utility, integrations) | — |
 
 ### 5.3 Module loading (lifecycle)
@@ -827,7 +827,6 @@ The modules below are the **target catalogue** the platform is designed to host.
 | `decision_mining` | attribute | Splits at gateways → decision rules (DT / rule mining) |
 | `conformance` | external_input | Token-replay / alignment vs. user-supplied BPMN |
 | `temporal_dynamics` | advanced | Concept drift, seasonality, time-window stability |
-| `process_complexity` | advanced | Variant entropy, structural metrics (CFC, CC, …) |
 
 These modules are **not** scaffolded, not folder-stubbed, not registered, and not present in `modules/` for v1. They will be authored later through the same flow available to any user (§12 *Adding a New Module*) — this is also the v1 acceptance test for the platform: the core team builds the first module entirely through the public module SDK, with no platform-side privileges.
 

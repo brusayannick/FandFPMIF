@@ -25,6 +25,9 @@ from typing import Any, BinaryIO, cast
 from lxml import etree
 
 XES_NS = "{http://www.xes-standard.org/}"
+# Fluxicon Disco (and others) declare xmlns without the trailing slash, so the
+# resulting element tag is `{http://www.xes-standard.org}trace`. Accept both.
+XES_NS_NOSLASH = "{http://www.xes-standard.org}"
 
 # Map XES standard keys to our canonical column names (events).
 _EVENT_KEY_MAP: dict[str, str] = {
@@ -103,7 +106,11 @@ def parse_xes(
     seen_trace_keys: set[str] = set()
 
     with _open(path) as fh:
-        ctx = etree.iterparse(fh, events=("end",), tag=(f"{XES_NS}trace", "trace"))
+        ctx = etree.iterparse(
+            fh,
+            events=("end",),
+            tag=(f"{XES_NS}trace", f"{XES_NS_NOSLASH}trace", "trace"),
+        )
         for _evt, trace in ctx:
             trace_attrs: dict[str, Any] = {}
             for key, value in _iter_attribute_pairs(trace):
@@ -111,7 +118,9 @@ def parse_xes(
                 canonical = _TRACE_KEY_MAP.get(key, key)
                 trace_attrs[canonical] = value
 
-            for event_elem in trace.iterchildren(f"{XES_NS}event", "event"):
+            for event_elem in trace.iterchildren(
+                f"{XES_NS}event", f"{XES_NS_NOSLASH}event", "event"
+            ):
                 row: dict[str, Any] = dict(trace_attrs)
                 for key, value in _iter_attribute_pairs(event_elem):
                     seen_event_keys.add(key)

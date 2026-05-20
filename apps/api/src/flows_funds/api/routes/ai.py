@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import json
-import re
 import time
 from collections.abc import AsyncGenerator
 from typing import Annotated, Any, Literal
@@ -23,51 +22,39 @@ import httpx
 import structlog
 from fastapi import APIRouter, HTTPException, Path
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from flows_funds.api.ai_config import (
+    AI_CONFIG_KEY,
+    AiConfigPayload,
+    Provider,
+    ProviderConfig,
+    _load_config,
+    _provider_creds,
+)
 from flows_funds.api.db.models import UserSetting
 from flows_funds.api.db.session import SessionDep
 
+# Re-exported so any caller that previously imported these names from
+# `routes.ai` still works. The real definitions live in `_ai_config`.
+__all__ = [
+    "AI_CONFIG_KEY",
+    "AiConfigPayload",
+    "Provider",
+    "ProviderConfig",
+    "_load_config",
+    "_provider_creds",
+    "router",
+]
+
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/ai", tags=["ai"])
-
-AI_CONFIG_KEY = "ai.config"
 
 LITELLM_PRICING_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm/main/"
     "model_prices_and_context_window.json"
 )
 _PRICING_TTL_SECONDS = 3600
-
-
-Provider = Literal["anthropic", "openai", "unigpt"]
-
-
-# --------------------------------------------------------------------------
-# Config payload
-# --------------------------------------------------------------------------
-
-
-class ProviderConfig(BaseModel):
-    api_key: str | None = None
-    # Only meaningful for UniGPT / LibreChat — left present for symmetry so
-    # the frontend doesn't need a special-case shape.
-    base_url: str | None = None
-
-
-class AiConfigPayload(BaseModel):
-    system_prompt: str = ""
-    anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
-    openai: ProviderConfig = Field(default_factory=ProviderConfig)
-    unigpt: ProviderConfig = Field(default_factory=ProviderConfig)
-    selected_provider: Provider | None = None
-    selected_model: str | None = None
-
-
-def _load_config(row: UserSetting | None) -> AiConfigPayload:
-    if row is None or not isinstance(row.value_json, dict):
-        return AiConfigPayload()
-    return AiConfigPayload.model_validate(row.value_json)
 
 
 @router.get("/config", response_model=AiConfigPayload)
@@ -104,20 +91,6 @@ class ModelInfo(BaseModel):
 
 class FetchModelsResponse(BaseModel):
     models: list[ModelInfo]
-
-
-async def _provider_creds(
-    session: SessionDep, provider: Provider
-) -> tuple[str, str | None]:
-    row = await session.get(UserSetting, AI_CONFIG_KEY)
-    cfg = _load_config(row)
-    p = getattr(cfg, provider)
-    if not p.api_key:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No API key configured for {provider!r}. Save one in Settings → AI first.",
-        )
-    return p.api_key, p.base_url
 
 
 def _iso_to_epoch(s: Any) -> int | None:
@@ -373,32 +346,31 @@ async def _stream_anthropic(
         body["system"] = cfg.system_prompt
 
     timeout = httpx.Timeout(120.0, connect=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream(
-            "POST",
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": p.api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json=body,
-        ) as r:
-            if not r.is_success:
-                raw = await r.aread()
-                yield _sse({"error": f"Anthropic {r.status_code}: {raw.decode()[:300]}"})
-                return
-            async for line in r.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                try:
-                    evt = json.loads(line[5:].strip())
-                except json.JSONDecodeError:
-                    continue
-                if evt.get("type") == "content_block_delta":
-                    delta = evt.get("delta", {})
-                    if delta.get("type") == "text_delta" and delta.get("text"):
-                        yield _sse({"delta": delta["text"]})
+    async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
+        "POST",
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": p.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json=body,
+    ) as r:
+        if not r.is_success:
+            raw = await r.aread()
+            yield _sse({"error": f"Anthropic {r.status_code}: {raw.decode()[:300]}"})
+            return
+        async for line in r.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            try:
+                evt = json.loads(line[5:].strip())
+            except json.JSONDecodeError:
+                continue
+            if evt.get("type") == "content_block_delta":
+                delta = evt.get("delta", {})
+                if delta.get("type") == "text_delta" and delta.get("text"):
+                    yield _sse({"delta": delta["text"]})
     yield _sse({"done": True})
 
 
@@ -415,30 +387,29 @@ async def _stream_openai_compat(
 
     timeout = httpx.Timeout(120.0, connect=10.0)
     url = f"{base_url.rstrip('/')}/chat/completions"
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream(
-            "POST",
-            url,
-            headers={"Authorization": f"Bearer {api_key}", "content-type": "application/json"},
-            json={"model": cfg.selected_model, "messages": msgs, "stream": True},
-        ) as r:
-            if not r.is_success:
-                raw = await r.aread()
-                yield _sse({"error": f"{r.status_code}: {raw.decode()[:300]}"})
-                return
-            async for line in r.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                raw_str = line[5:].strip()
-                if raw_str == "[DONE]":
-                    break
-                try:
-                    evt = json.loads(raw_str)
-                except json.JSONDecodeError:
-                    continue
-                choices = evt.get("choices", [])
-                if choices:
-                    content = choices[0].get("delta", {}).get("content") or ""
-                    if content:
-                        yield _sse({"delta": content})
+    async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
+        "POST",
+        url,
+        headers={"Authorization": f"Bearer {api_key}", "content-type": "application/json"},
+        json={"model": cfg.selected_model, "messages": msgs, "stream": True},
+    ) as r:
+        if not r.is_success:
+            raw = await r.aread()
+            yield _sse({"error": f"{r.status_code}: {raw.decode()[:300]}"})
+            return
+        async for line in r.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            raw_str = line[5:].strip()
+            if raw_str == "[DONE]":
+                break
+            try:
+                evt = json.loads(raw_str)
+            except json.JSONDecodeError:
+                continue
+            choices = evt.get("choices", [])
+            if choices:
+                content = choices[0].get("delta", {}).get("content") or ""
+                if content:
+                    yield _sse({"delta": content})
     yield _sse({"done": True})

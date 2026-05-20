@@ -1,0 +1,55 @@
+id: complexity
+name: Complexity
+version: 1.0.0
+category: advanced
+description: EPA-based complexity measures — variant/sequence entropy (with linear and exponential forgetting), Lempel-Ziv, affinity, structure, Pentland's task and process complexity, plus an enriched-EPA variant when trace/event attributes from the IEEE XES standard are present.
+author: E. Langer
+license: MIT
+default_enabled: true
+
+requirements:
+  event_log:
+    required_columns:
+      - case_id
+      - activity
+      - timestamp
+    min_events: 50
+    min_cases: 2
+
+provides:
+  - complexity.metrics
+  - complexity.enriched
+
+consumes:
+  - log.imported
+
+dependencies:
+  python:
+    requires-python: ">=3.12"
+    packages: []
+    inherit:
+      - pm4py
+      - pandas
+      - duckdb
+    isolation: in_process
+
+frontend:
+  panel: ./panel/index.tsx
+
+permissions:
+  - read:event_log
+  - write:module_results
+
+config_schema:
+  properties:
+    exponential_k:
+      type: number
+      title: Exponential forgetting k
+      description: Coefficient k for the exponential-forgetting sequence entropy term. The original paper uses k=1.
+      minimum: 0.1
+      maximum: 10.0
+      step: 0.1
+      default: 1.0
+      ui:
+        widget: number
+        affects: compute

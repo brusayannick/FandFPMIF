@@ -6,9 +6,11 @@ ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
-# Java runtime — required by the process_complexity module (SPMF)
+# git — required by the module install + AI-refactor flows when the source
+# is a git URL (shell-out via `asyncio.create_subprocess_exec("git", ...)`).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openjdk-21-jre-headless \
+    git \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # uv binary

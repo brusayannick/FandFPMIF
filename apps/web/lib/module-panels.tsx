@@ -28,13 +28,12 @@ const PANELS: Record<string, ComponentType<ModulePanelProps>> = {
     () => import("@modules/performance/panel").then((m) => m.PerformancePanel),
     { ssr: false, loading: () => <PanelSkeleton /> },
   ),
-  process_complexity: dynamic(
-    () =>
-      import("@modules/process_complexity/panel").then((m) => m.ProcessComplexityPanel),
-    { ssr: false, loading: () => <PanelSkeleton /> },
-  ),
   cv4cdd: dynamic(
     () => import("@modules/cv4cdd/panel").then((m) => m.Cv4cddPanel),
+    { ssr: false, loading: () => <PanelSkeleton /> },
+  ),
+  complexity: dynamic(
+    () => import("@modules/complexity/panel").then((m) => m.ComplexityPanel),
     { ssr: false, loading: () => <PanelSkeleton /> },
   ),
 };

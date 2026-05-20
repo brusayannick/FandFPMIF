@@ -114,8 +114,13 @@ async def _import_handler(handle: JobHandle) -> None:
 
     df["case_id"] = df["case_id"].astype(str)
     df["activity"] = df["activity"].astype(str)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=False)
+    # `utc=True` so logs that mix UTC offsets (e.g. XES with summer- and
+    # winter-time events) collapse to a single tz-aware dtype instead of
+    # pandas picking one offset and silently NaT-ing the rest. We then drop
+    # the tz to keep the parquet / SQLite `DateTime` column shape unchanged.
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
     df = df.dropna(subset=["timestamp"])
+    df["timestamp"] = df["timestamp"].dt.tz_localize(None)
     df = df.sort_values(["case_id", "timestamp"], kind="mergesort").reset_index(drop=True)
 
     await handle.progress(

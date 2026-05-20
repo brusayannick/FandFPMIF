@@ -38,9 +38,6 @@ import {
   useUpdateModuleConfig,
 } from "@/lib/queries";
 
-// ---------------------------------------------------------------------------
-// Types mirroring the manifest config_schema shape
-// ---------------------------------------------------------------------------
 interface PropSchema {
   type?: string;
   title?: string;
@@ -56,9 +53,6 @@ interface ConfigSchema {
   properties?: Record<string, PropSchema>;
 }
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
 export default function ModuleDetailPage() {
   const router = useRouter();
   const { moduleId } = useParams<{ moduleId: string }>();
@@ -74,13 +68,11 @@ export default function ModuleDetailPage() {
   const properties = schema?.properties ?? {};
   const hasSchema = Object.keys(properties).length > 0;
 
-  // Local enabled state — synced from server
   const [enabled, setEnabled] = useState<boolean>(true);
   useEffect(() => {
     if (cfg !== undefined) setEnabled(cfg.enabled);
   }, [cfg]);
 
-  // Local config draft — synced from server
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   useEffect(() => {
     if (cfg !== undefined) setDraft(cfg.config ?? {});
@@ -142,11 +134,10 @@ export default function ModuleDetailPage() {
         </Link>
       </Button>
 
-      {/* Info + enable toggle */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-4">
-            <CardTitle className="text-base flex items-center gap-2">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
               {m.name}
               <Badge variant="secondary" className="h-5 px-2 py-0 text-[9px] font-medium uppercase tracking-wide">
                 {m.category.replace("_", " ")}
@@ -173,7 +164,6 @@ export default function ModuleDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Configuration */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Configuration</CardTitle>
@@ -206,7 +196,6 @@ export default function ModuleDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Danger zone */}
       <Card className="border-destructive/30">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Danger zone</CardTitle>
@@ -251,9 +240,6 @@ export default function ModuleDetailPage() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Generic config form — renders fields from config_schema.properties
-// ---------------------------------------------------------------------------
 function ConfigForm({
   properties,
   values,
@@ -263,7 +249,6 @@ function ConfigForm({
   values: Record<string, unknown>;
   onChange: (key: string, value: unknown) => void;
 }) {
-  // Group fields by ui.group (ungrouped fields get an implicit "" group)
   const groups = new Map<string, [string, PropSchema][]>();
   for (const [key, prop] of Object.entries(properties)) {
     const group = prop.ui?.group ?? "";
@@ -364,9 +349,6 @@ function ConfigField({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Shared
-// ---------------------------------------------------------------------------
 function Section({ label, items }: { label: string; items: string[] }) {
   return (
     <div>

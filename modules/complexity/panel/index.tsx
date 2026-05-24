@@ -26,7 +26,7 @@ export function ComplexityPanel({ logId }: { logId: string; moduleId: string }) 
   if (q.isError || !q.data) {
     return (
       <Card>
-        <CardContent className="p-6 text-sm text-muted-foreground">
+        <CardContent className="text-sm text-muted-foreground">
           Could not load complexity metrics. Re-import the log or check the
           module's logs.
         </CardContent>
@@ -119,7 +119,7 @@ function EntropyTable({ metrics }: { metrics: ComplexityMetrics }) {
 
   return (
     <Card>
-      <CardContent className="p-4">
+      <CardContent>
         <h3 className="mb-3 text-sm font-semibold">Entropy measures</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -220,7 +220,7 @@ function StructuralTable({ metrics }: { metrics: ComplexityMetrics }) {
 
   return (
     <Card>
-      <CardContent className="p-4">
+      <CardContent>
         <h3 className="mb-3 text-sm font-semibold">Selected measures</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

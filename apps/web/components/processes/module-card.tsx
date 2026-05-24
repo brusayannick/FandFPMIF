@@ -57,7 +57,9 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
         }
       }}
       className={cn(
-        "group relative flex h-full flex-col transition-all",
+        // Tile-style card: drop the default outer py/gap so CardContent's
+        // p-4 fully owns the card's padding.
+        "group relative flex h-full flex-col gap-0 py-0 transition-all",
         isAvailable && "cursor-pointer hover:-translate-y-0.5 hover:shadow-md",
         isDegraded && "cursor-pointer hover:shadow-md",
         (isUnavailable || isDisabled) && "cursor-not-allowed opacity-60",

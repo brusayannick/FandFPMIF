@@ -182,7 +182,7 @@ function Header({
 }) {
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader>
         <CardTitle className="text-base">Concept drift detection</CardTitle>
         <CardAction>
           <Button
@@ -260,7 +260,7 @@ function ImageCard({
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader>
         <CardTitle className="text-base">Drift map</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -322,7 +322,7 @@ function DriftsCard({
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader>
         <CardTitle className="text-base">Detected drifts</CardTitle>
         {(threshold !== undefined || nWindows) && (
           <CardAction>

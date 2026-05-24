@@ -265,7 +265,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
 
       {file && (
         <Card>
-          <CardContent className="space-y-4 p-6">
+          <CardContent className="space-y-4">
             <div className="grid gap-2">
               <Label htmlFor="display-name">Display name</Label>
               <Input
@@ -362,7 +362,7 @@ function UrlImportForm({ onSuccess }: ImportFormProps) {
 
   return (
     <Card>
-      <CardContent className="space-y-4 p-6">
+      <CardContent className="space-y-4">
         <div className="grid gap-2">
           <Label htmlFor="url-input">
             URL <span className="text-destructive">*</span>
@@ -828,7 +828,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
 
   return (
     <Card>
-      <CardContent className="space-y-4 p-6">
+      <CardContent className="space-y-4">
         <div className="grid gap-2">
           <Label htmlFor="folder-name">Folder name</Label>
           <Input

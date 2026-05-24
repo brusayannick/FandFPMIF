@@ -30,7 +30,6 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/empty-state";
-import { CapabilityGraph } from "@/components/settings/capability-graph";
 import { ModuleLogsTail } from "@/components/settings/module-logs-tail";
 import {
   useModules,
@@ -137,7 +136,7 @@ export default function ModuleDetailPage() {
       </Button>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <div className="flex items-center justify-between gap-4">
             <CardTitle className="text-base flex flex-wrap items-center gap-2">
               {m.name}
@@ -163,15 +162,11 @@ export default function ModuleDetailPage() {
           {m.description && <p className="text-muted-foreground">{m.description}</p>}
           <Section label="Provides" items={m.provides.length ? m.provides : ["—"]} />
           <Section label="Consumes" items={m.consumes.length ? m.consumes : ["—"]} />
-          <div className="space-y-2">
-            <h4 className="text-xs font-medium text-muted-foreground">Capability graph</h4>
-            <CapabilityGraph focusedModuleId={m.id} />
-          </div>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Configuration</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -203,7 +198,7 @@ export default function ModuleDetailPage() {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Logs</CardTitle>
         </CardHeader>
         <CardContent>
@@ -212,7 +207,7 @@ export default function ModuleDetailPage() {
       </Card>
 
       <Card className="border-destructive/30">
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Danger zone</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">

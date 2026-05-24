@@ -34,7 +34,7 @@ export default function AboutPage() {
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">About ATLAS Hub</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
@@ -52,7 +52,7 @@ export default function AboutPage() {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Onboarding</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
@@ -72,7 +72,7 @@ export default function AboutPage() {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Diagnostics</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">

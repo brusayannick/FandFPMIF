@@ -31,7 +31,7 @@ export default function GeneralSettingsPage() {
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Appearance</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -57,7 +57,7 @@ export default function GeneralSettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Notifications</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -74,7 +74,7 @@ export default function GeneralSettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Locale &amp; imports</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
@@ -131,7 +131,7 @@ export default function GeneralSettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Data &amp; storage</CardTitle>
         </CardHeader>
         <CardContent>
@@ -140,7 +140,7 @@ export default function GeneralSettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Jobs</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -157,7 +157,7 @@ export default function GeneralSettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Telemetry</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">

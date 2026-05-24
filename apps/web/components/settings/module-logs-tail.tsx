@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { Check, Copy } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,13 +17,20 @@ interface LogEntry {
   fields: Record<string, unknown>;
 }
 
-const MAX_LINES = 50;
+const MAX_LINES = 100;
 const LEVEL_COLORS: Record<string, string> = {
   debug: "text-muted-foreground",
   info: "text-foreground",
   warning: "text-amber-600 dark:text-amber-400",
   error: "text-destructive",
 };
+
+function formatEntryForCopy(e: LogEntry): string {
+  const ts = new Date(e.ts * 1000).toISOString();
+  const fields =
+    Object.keys(e.fields).length > 0 ? ` ${JSON.stringify(e.fields)}` : "";
+  return `${ts} [${e.level.toUpperCase()}] ${e.event}${fields}`;
+}
 
 /**
  * Tail the last `MAX_LINES` log lines emitted by `moduleId` (§7.6.2).
@@ -32,15 +41,12 @@ const LEVEL_COLORS: Record<string, string> = {
  */
 export function ModuleLogsTail({ moduleId }: { moduleId: string }) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [paused, setPaused] = useState(false);
-  const pausedRef = useRef(paused);
-  pausedRef.current = paused;
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const sub = subscribeBus<{ module_id: string; event: string; fields: Record<string, unknown> }>(
       ["module.log.*"],
       (env) => {
-        if (pausedRef.current) return;
         if (env.payload.module_id !== moduleId) return;
         const level = env.topic.split(".").pop() as LogEntry["level"];
         setEntries((prev) => {
@@ -55,30 +61,44 @@ export function ModuleLogsTail({ moduleId }: { moduleId: string }) {
     return () => sub.close();
   }, [moduleId]);
 
+  const onCopy = async () => {
+    if (entries.length === 0) return;
+    try {
+      const text = entries.map(formatEntryForCopy).join("\n");
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      // Brief visual confirmation, then revert to the copy icon.
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Failed to copy logs to clipboard");
+    }
+  };
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="text-xs text-muted-foreground">
           Last {entries.length} of {MAX_LINES} lines · live stream
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="cursor-pointer text-xs"
-            onClick={() => setPaused((p) => !p)}
-          >
-            {paused ? "Resume" : "Pause"}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="cursor-pointer text-xs"
-            onClick={() => setEntries([])}
-          >
-            Clear
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="cursor-pointer gap-1.5 text-xs"
+          onClick={onCopy}
+          disabled={entries.length === 0}
+        >
+          {copied ? (
+            <>
+              <Check className="h-3.5 w-3.5" />
+              Copied
+            </>
+          ) : (
+            <>
+              <Copy className="h-3.5 w-3.5" />
+              Copy
+            </>
+          )}
+        </Button>
       </div>
       <ScrollArea className="h-48 rounded-md border bg-muted/30 px-3 py-2 font-mono text-[11px]">
         {entries.length === 0 ? (

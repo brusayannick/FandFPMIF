@@ -185,7 +185,7 @@ export default function AiSettingsPage() {
       ))}
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-base">Default model</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
@@ -317,7 +317,7 @@ function SystemPromptCard({
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">System prompt</CardTitle>
           <div className="flex items-center gap-2">
@@ -405,7 +405,7 @@ function ProviderCard({
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader>
         <CardTitle className="text-base">{meta.label}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">

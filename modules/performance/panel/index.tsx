@@ -68,7 +68,7 @@ export function PerformancePanel({ logId }: { logId: string; moduleId: string })
 
       {/* Cycle time distribution */}
       <Card>
-        <CardContent className="space-y-3 p-[var(--card-padding)]">
+        <CardContent className="space-y-3">
           <div className="flex items-baseline justify-between gap-3">
             <h3 className="text-sm font-semibold">Cycle time distribution</h3>
             {histo.data && (
@@ -90,7 +90,7 @@ export function PerformancePanel({ logId }: { logId: string; moduleId: string })
 
       {/* Bottlenecks */}
       <Card>
-        <CardContent className="space-y-3 p-[var(--card-padding)]">
+        <CardContent className="space-y-3">
           <div className="flex items-baseline justify-between gap-3">
             <h3 className="text-sm font-semibold">Critical bottlenecks</h3>
             <span className="text-xs text-muted-foreground">
@@ -129,7 +129,7 @@ function KpiCard({
 }) {
   return (
     <Card>
-      <CardContent className="p-[var(--card-padding)]">
+      <CardContent>
         <div className="flex items-center justify-between gap-2 text-muted-foreground">
           <span className="text-[10px] uppercase tracking-wide">{title}</span>
           <Icon className="h-3.5 w-3.5" />

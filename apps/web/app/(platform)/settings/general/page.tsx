@@ -10,12 +10,23 @@ import {
   RadioGroupItem,
 } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useUi } from "@/lib/stores/ui";
+import { StorageGauge } from "@/components/settings/storage-gauge";
 
 export default function GeneralSettingsPage() {
   const { theme = "system", setTheme } = useTheme();
   const muted = useUi((s) => s.notificationsMuted);
   const setMuted = useUi((s) => s.setNotificationsMuted);
+  const timezone = useUi((s) => s.timezone);
+  const setTimezone = useUi((s) => s.setTimezone);
+  const dateFormat = useUi((s) => s.dateFormat);
+  const setDateFormat = useUi((s) => s.setDateFormat);
+  const csvDelimiter = useUi((s) => s.csvDelimiter);
+  const setCsvDelimiter = useUi((s) => s.setCsvDelimiter);
+  const csvTimestampFormat = useUi((s) => s.csvTimestampFormat);
+  const setCsvTimestampFormat = useUi((s) => s.setCsvTimestampFormat);
 
   return (
     <div className="space-y-4">
@@ -59,6 +70,72 @@ export default function GeneralSettingsPage() {
             </span>
             <Switch checked={muted} onCheckedChange={setMuted} className="cursor-pointer" />
           </Label>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Locale &amp; imports</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="timezone">Timezone</Label>
+              <Input
+                id="timezone"
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                placeholder="UTC"
+              />
+              <p className="text-[11px] text-muted-foreground">IANA name, e.g. <code className="rounded bg-muted px-1">Europe/Zurich</code>.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="date-format">Date format</Label>
+              <Select value={dateFormat} onValueChange={(v) => setDateFormat(v as "iso" | "us" | "eu")}>
+                <SelectTrigger id="date-format">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="iso">ISO — 2026-05-20</SelectItem>
+                  <SelectItem value="us">US — 05/20/2026</SelectItem>
+                  <SelectItem value="eu">EU — 20/05/2026</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="csv-delim">CSV delimiter (import default)</Label>
+              <Select value={csvDelimiter} onValueChange={(v) => setCsvDelimiter(v as "," | ";" | "\t" | "|")}>
+                <SelectTrigger id="csv-delim">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value=",">Comma (,)</SelectItem>
+                  <SelectItem value=";">Semicolon (;)</SelectItem>
+                  <SelectItem value={"\t"}>Tab</SelectItem>
+                  <SelectItem value="|">Pipe (|)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="csv-ts">CSV timestamp format (import default)</Label>
+              <Input
+                id="csv-ts"
+                value={csvTimestampFormat}
+                onChange={(e) => setCsvTimestampFormat(e.target.value)}
+                placeholder="(blank — auto-detect)"
+              />
+              <p className="text-[11px] text-muted-foreground">strftime pattern; leave blank to let pandas guess.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Data &amp; storage</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <StorageGauge />
         </CardContent>
       </Card>
 

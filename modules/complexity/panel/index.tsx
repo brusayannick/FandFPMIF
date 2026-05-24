@@ -1,21 +1,6 @@
 "use client";
 
-import {
-  Activity,
-  BarChart2,
-  Braces,
-  Clock,
-  GitFork,
-  Hash,
-  Info,
-  Layers,
-  Network,
-  Sigma,
-  Timer,
-  TrendingUp,
-  Workflow,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { Info } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -32,7 +17,8 @@ export function ComplexityPanel({ logId }: { logId: string; moduleId: string }) 
     return (
       <div className="space-y-4">
         <Skeleton className="h-8 w-48" />
-        <KpiGridSkeleton />
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-96 w-full" />
       </div>
     );
   }
@@ -98,125 +84,9 @@ export function ComplexityPanel({ logId }: { logId: string; moduleId: string }) 
 function MetricsView({ metrics }: { metrics: ComplexityMetrics }) {
   return (
     <div className="space-y-4">
-      <HighlightGrid metrics={metrics} />
       <EntropyTable metrics={metrics} />
       <StructuralTable metrics={metrics} />
     </div>
-  );
-}
-
-function HighlightGrid({ metrics }: { metrics: ComplexityMetrics }) {
-  const cards: { icon: LucideIcon; title: string; value: string; subline?: string }[] = [
-    {
-      icon: Hash,
-      title: "Magnitude",
-      value: formatNumber(metrics.magnitude),
-      subline: "Total events",
-    },
-    {
-      icon: Layers,
-      title: "Support",
-      value: formatNumber(metrics.support),
-      subline: "Cases",
-    },
-    {
-      icon: GitFork,
-      title: "Variety",
-      value: formatNumber(metrics.variety),
-      subline: "Distinct activities",
-    },
-    {
-      icon: BarChart2,
-      title: "Level of detail",
-      value: fmt(metrics.level_of_detail, 2),
-      subline: "Avg distinct activities per case",
-    },
-    {
-      icon: Timer,
-      title: "Time granularity",
-      value: formatDuration(metrics.time_granularity_s),
-      subline: "Mean per-case min inter-event gap",
-    },
-    {
-      icon: Network,
-      title: "Structure",
-      value: fmt(metrics.structure, 3),
-      subline: "1 − |DF edges| / variety²",
-    },
-    {
-      icon: Workflow,
-      title: "Affinity",
-      value: fmt(metrics.affinity, 3),
-      subline: "Weighted Jaccard on DF patterns",
-    },
-    {
-      icon: Activity,
-      title: "Distinct traces",
-      value: `${fmt(metrics.distinct_traces_pct, 1)}%`,
-      subline: "Unique variants / cases",
-    },
-    {
-      icon: Clock,
-      title: "Trace length",
-      value: `${fmt(metrics.trace_length_min, 0)} / ${fmt(
-        metrics.trace_length_avg,
-        1,
-      )} / ${fmt(metrics.trace_length_max, 0)}`,
-      subline: "min / avg / max",
-    },
-    {
-      icon: TrendingUp,
-      title: "Deviation from random",
-      value: fmt(metrics.deviation_from_random, 3),
-      subline: "1 − ‖transition – uniform‖",
-    },
-    {
-      icon: Braces,
-      title: "Lempel-Ziv",
-      value: formatNumber(metrics.lempel_ziv),
-      subline: "LZ76 phrases (time-ordered)",
-    },
-    {
-      icon: Sigma,
-      title: "Pentland process",
-      value: fmt(metrics.pentland_process, 2),
-      subline: `Task complexity ${formatNumber(metrics.pentland_task)}`,
-    },
-  ];
-
-  return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-      {cards.map((c) => (
-        <KpiCard key={c.title} {...c} />
-      ))}
-    </div>
-  );
-}
-
-function KpiCard({
-  icon: Icon,
-  title,
-  value,
-  subline,
-}: {
-  icon: LucideIcon;
-  title: string;
-  value: string;
-  subline?: string;
-}) {
-  return (
-    <Card>
-      <CardContent className="p-[var(--card-padding,1rem)]">
-        <div className="flex items-center justify-between gap-2 text-muted-foreground">
-          <span className="text-[10px] uppercase tracking-wide">{title}</span>
-          <Icon className="h-3.5 w-3.5" />
-        </div>
-        <div className="mt-1.5 text-2xl font-semibold tabular-nums">{value}</div>
-        {subline ? (
-          <div className="mt-1 text-[11px] text-muted-foreground">{subline}</div>
-        ) : null}
-      </CardContent>
-    </Card>
   );
 }
 
@@ -277,40 +147,74 @@ function EntropyTable({ metrics }: { metrics: ComplexityMetrics }) {
 }
 
 function StructuralTable({ metrics }: { metrics: ComplexityMetrics }) {
-  const rows: { label: string; value: string }[] = [
-    { label: "Magnitude", value: formatNumber(metrics.magnitude) },
-    { label: "Support", value: formatNumber(metrics.support) },
-    { label: "Variety", value: formatNumber(metrics.variety) },
-    { label: "Level of detail", value: fmt(metrics.level_of_detail, 3) },
+  const rows: { label: string; value: string; description: string }[] = [
+    {
+      label: "Magnitude",
+      value: formatNumber(metrics.magnitude),
+      description: "Total events",
+    },
+    {
+      label: "Support",
+      value: formatNumber(metrics.support),
+      description: "Cases",
+    },
+    {
+      label: "Variety",
+      value: formatNumber(metrics.variety),
+      description: "Distinct activities",
+    },
+    {
+      label: "Level of detail",
+      value: fmt(metrics.level_of_detail, 3),
+      description: "Avg distinct activities per case",
+    },
     {
       label: "Time granularity",
       value: formatDuration(metrics.time_granularity_s),
+      description: "Mean per-case min inter-event gap",
     },
-    { label: "Structure", value: fmt(metrics.structure, 3) },
-    { label: "Affinity", value: fmt(metrics.affinity, 3) },
+    {
+      label: "Structure",
+      value: fmt(metrics.structure, 3),
+      description: "1 − |DF edges| / variety²",
+    },
+    {
+      label: "Affinity",
+      value: fmt(metrics.affinity, 3),
+      description: "Weighted Jaccard on DF patterns",
+    },
     {
       label: "Trace length",
       value: `${fmt(metrics.trace_length_min, 0)} / ${fmt(
         metrics.trace_length_avg,
         2,
       )} / ${fmt(metrics.trace_length_max, 0)}`,
+      description: "min / avg / max",
     },
     {
       label: "Distinct traces",
       value: `${fmt(metrics.distinct_traces_pct, 2)} %`,
+      description: "Unique variants / cases",
     },
     {
       label: "Deviation from random",
       value: fmt(metrics.deviation_from_random, 3),
+      description: "1 − ‖transition – uniform‖",
     },
-    { label: "Lempel-Ziv complexity", value: formatNumber(metrics.lempel_ziv) },
+    {
+      label: "Lempel-Ziv complexity",
+      value: formatNumber(metrics.lempel_ziv),
+      description: "LZ76 phrases (time-ordered)",
+    },
     {
       label: "Pentland's task complexity",
       value: formatNumber(metrics.pentland_task),
+      description: "Sum of leaf-state frequencies in prefix automaton",
     },
     {
       label: "Pentland's process complexity",
       value: fmt(metrics.pentland_process, 3),
+      description: "10^(0.08·(1 + |DF edges| − variety))",
     },
   ];
 
@@ -320,11 +224,21 @@ function StructuralTable({ metrics }: { metrics: ComplexityMetrics }) {
         <h3 className="mb-3 text-sm font-semibold">Selected measures</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
+            <thead className="text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="py-1.5 pr-4 font-medium">Measure</th>
+                <th className="py-1.5 pr-4 font-medium tabular-nums">Value</th>
+                <th className="py-1.5 font-medium">Description</th>
+              </tr>
+            </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.label} className="border-t border-border/60">
-                  <td className="py-1.5 pr-4 text-muted-foreground">{r.label}</td>
-                  <td className="py-1.5 tabular-nums">{r.value}</td>
+                  <td className="py-1.5 pr-4">{r.label}</td>
+                  <td className="py-1.5 pr-4 tabular-nums">{r.value}</td>
+                  <td className="py-1.5 text-xs text-muted-foreground">
+                    {r.description}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -346,14 +260,4 @@ function fmt(v: number | null | undefined, d: number): string {
 function formatK(k: number | undefined): string {
   if (k === undefined || k === null || Number.isNaN(k)) return "1";
   return Number.isInteger(k) ? k.toString() : k.toFixed(2);
-}
-
-function KpiGridSkeleton() {
-  return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-      {Array.from({ length: 12 }).map((_, i) => (
-        <Skeleton key={i} className="h-24 w-full" />
-      ))}
-    </div>
-  );
 }

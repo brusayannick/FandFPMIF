@@ -30,6 +30,11 @@ class Settings(BaseSettings):
 
     log_level: Literal["debug", "info", "warning", "error"] = "info"
 
+    env: Literal["dev", "prod"] = Field(
+        default="prod",
+        description="Set to 'dev' to enable watchdog hot-reload of modules/ (§5.3 #7).",
+    )
+
     # Job queue — minimal config for phase 3; the full set lands in phase 4.
     worker_concurrency: int = Field(default=2, ge=1, le=8)
     progress_persist_every: int = Field(

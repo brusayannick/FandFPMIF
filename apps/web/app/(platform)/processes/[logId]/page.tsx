@@ -15,6 +15,7 @@ import { EventsTab } from "@/components/processes/events-tab";
 import { VariantsTab } from "@/components/processes/variants-tab";
 import { ActivitiesTab } from "@/components/processes/activities-tab";
 import { SettingsTab } from "@/components/processes/settings-tab";
+import { FormatBadge } from "@/components/processes/format-badge";
 import { useEventLog } from "@/lib/queries";
 import { formatDateRange, formatNumber, formatRelative } from "@/lib/format";
 
@@ -89,11 +90,7 @@ export default function ProcessDetailPage() {
       <header className="space-y-3 pb-6">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">{log.name}</h1>
-          {log.source_format && (
-            <Badge variant="outline" className="border-0 bg-muted text-[10px] uppercase tracking-wide text-muted-foreground">
-              {log.source_format}
-            </Badge>
-          )}
+          <FormatBadge format={log.source_format} />
           {log.last_edited_at && (
             <Badge variant="outline" className="border-0 bg-muted text-[10px] uppercase tracking-wide text-muted-foreground">
               edited {formatRelative(log.last_edited_at)}

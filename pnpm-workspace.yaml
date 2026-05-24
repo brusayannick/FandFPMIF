@@ -13,3 +13,6 @@ packages:
 allowBuilds:
   sharp: true
   unrs-resolver: true
+  # esbuild needs its postinstall to fetch the platform binary used by
+  # apps/web/scripts/bundle-modules.mjs.
+  esbuild: true

@@ -30,6 +30,30 @@ class Base(DeclarativeBase):
     type_annotation_map = {dict[str, Any]: JSON}
 
 
+class Folder(Base):
+    """Hierarchical folder for organising event logs on /processes.
+
+    Folders can nest arbitrarily; `parent_id` is null for top-level folders.
+    `position` orders siblings within the same parent (lower = first).
+    """
+
+    __tablename__ = "process_folders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    parent_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("process_folders.id", ondelete="CASCADE"),
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        Index("ix_process_folders_parent_id", "parent_id"),
+    )
+
+
 class EventLog(Base):
     """A user-facing process log. The `id` is also the directory name in
     `data/event_logs/{id}/` and the URL identifier in `/processes/{logId}`.
@@ -57,6 +81,12 @@ class EventLog(Base):
     description: Mapped[str | None] = mapped_column(Text)
     column_overrides: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
+    folder_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("process_folders.id", ondelete="SET NULL"),
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     imported_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_edited_at: Mapped[datetime | None] = mapped_column(DateTime)
@@ -65,6 +95,7 @@ class EventLog(Base):
     __table_args__ = (
         Index("ix_process_logs_status", "status"),
         Index("ix_process_logs_created_at", "created_at"),
+        Index("ix_process_logs_folder_id", "folder_id"),
     )
 
 

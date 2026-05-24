@@ -24,6 +24,7 @@ import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -156,9 +157,39 @@ class JobRuntime:
         self._paused.set()  # set = NOT paused (we wait while it's clear)
         self._cancel_tokens: dict[str, CancelToken] = {}
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._process_pool: ProcessPoolExecutor | None = None
 
     def _ensure_bus(self) -> EventBus:
         return self._bus if self._bus is not None else get_event_bus()
+
+    def _ensure_process_pool(self) -> ProcessPoolExecutor:
+        """Lazily build a `ProcessPoolExecutor` for CPU-bound module work
+        (§8.3). Sized to match `worker_concurrency` so heavy parallel mining
+        on a multi-core box doesn't starve other workers. We don't create
+        the pool eagerly because not every deployment uses module CPU
+        offloading — paying the fork cost on every boot would be wasteful.
+        """
+        if self._process_pool is None:
+            self._process_pool = ProcessPoolExecutor(
+                max_workers=max(1, self.settings.worker_concurrency)
+            )
+        return self._process_pool
+
+    async def run_in_process(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        """Run `fn(*args, **kwargs)` in the platform's `ProcessPoolExecutor`.
+
+        Exposed to module authors via `ctx.run_in_process`. Standard pickling
+        rules apply: `fn` must be importable by qualified name, and all
+        args/return values must be picklable. For non-CPU-bound async I/O,
+        prefer `asyncio.to_thread` (or just `await`); the process pool only
+        wins when GIL contention is the bottleneck.
+        """
+        pool = self._ensure_process_pool()
+        loop = asyncio.get_running_loop()
+        if kwargs:
+            from functools import partial
+            return await loop.run_in_executor(pool, partial(fn, *args, **kwargs))
+        return await loop.run_in_executor(pool, fn, *args)
 
     def register(self, type_: str, handler: JobHandler) -> None:
         if type_ in self._handlers:
@@ -189,6 +220,9 @@ class JobRuntime:
         for tok in self._cancel_tokens.values():
             tok.cancel()
         self._cancel_tokens.clear()
+        if self._process_pool is not None:
+            self._process_pool.shutdown(cancel_futures=True)
+            self._process_pool = None
         log.info("job_runtime.stopped")
 
     @contextlib.asynccontextmanager

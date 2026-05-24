@@ -14,9 +14,11 @@ We use `uv venv` + `uv pip install` rather than `uv sync` to avoid writing
 a lock file, which fails on macOS Docker Desktop bind mounts due to atomic-
 write restrictions on the VirtioFS layer.
 
-`subprocess` isolation is recognised but currently a no-op — the loader
-warns and falls back to in_process. (See INSTRUCTIONS.md §5.4 — promoting a
-module to subprocess is a future deliverable.)
+When `manifest.dependencies.python.isolation == "subprocess"` the loader
+spawns a worker from the module's own venv via
+`flows_funds.api.modules.subprocess_host.SubprocessBridge` (§5.4). The
+installer itself doesn't care about the mode — it just guarantees the
+venv exists; choosing in-process vs. subprocess is the loader's call.
 """
 
 from __future__ import annotations
@@ -99,13 +101,6 @@ async def install_module(folder: Path, manifest: Manifest, *, force: bool = Fals
     Returns the venv site-packages path, or None when no Python deps are
     declared or installation failed.
     """
-    if manifest.dependencies.python.isolation == "subprocess":
-        log.warning(
-            "modules.installer.subprocess_not_implemented",
-            module_id=manifest.id,
-            note="Falling back to in_process. subprocess isolation lands in a future phase.",
-        )
-
     py = manifest.dependencies.python
     if not py.packages and not (folder / "pyproject.toml").exists():
         return None

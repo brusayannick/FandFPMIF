@@ -1,13 +1,35 @@
 "use client";
 
-import { RotateCcw } from "lucide-react";
+import { useState } from "react";
+import { Check, Copy, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useOnboarding } from "@/lib/stores/onboarding";
+import { api } from "@/lib/api";
+import { toastError } from "@/lib/toast";
 
 export default function AboutPage() {
   const resetOnboarding = useOnboarding((s) => s.reset);
+  const [copying, setCopying] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const onCopyDiagnostics = async () => {
+    setCopying(true);
+    try {
+      const blob = await api<Record<string, unknown>>("/api/v1/system/diagnostics");
+      const text = JSON.stringify(blob, null, 2);
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      toast.success("Diagnostics copied to clipboard");
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      toastError(`Could not copy diagnostics: ${(err as Error).message}`);
+    } finally {
+      setCopying(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -55,11 +77,17 @@ export default function AboutPage() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>
-            <em>Copy diagnostics</em> bundles the platform version, module
-            list, and recent error excerpts. Not implemented yet.
+            Bundle platform version, system info, and installed-module
+            metadata into one JSON blob to paste into a support thread.
           </p>
-          <Button variant="outline" disabled className="cursor-not-allowed gap-2">
-            Copy diagnostics
+          <Button
+            variant="outline"
+            className="cursor-pointer gap-2"
+            disabled={copying}
+            onClick={onCopyDiagnostics}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? "Copied" : copying ? "Copying…" : "Copy diagnostics"}
           </Button>
         </CardContent>
       </Card>

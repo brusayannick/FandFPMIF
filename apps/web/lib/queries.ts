@@ -16,8 +16,10 @@ import type {
   EventLogUpdatePayload,
   EventsPage,
   FilterEntry,
+  FolderSummary,
   JobDetail,
   ModuleSummary,
+  ReorderItem,
   VariantCasesPage,
   VariantDetail,
   VariantsPage,
@@ -42,6 +44,7 @@ export interface VariantsListParams {
 }
 
 export const queryKeys = {
+  folders: () => ["folders"] as const,
   eventLogs: () => ["event-logs"] as const,
   eventLog: (id: string) => ["event-logs", id] as const,
   events: (logId: string, params: EventsListParams) =>
@@ -120,13 +123,37 @@ export function useModules(logId?: string | null) {
 export function useImportEventLog() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { file: File; name?: string; csvMapping?: unknown }) => {
+    mutationFn: async (input: {
+      file: File;
+      name?: string;
+      csvMapping?: unknown;
+      folderId?: string | null;
+    }) => {
       const fd = new FormData();
       fd.append("file", input.file);
       if (input.name) fd.append("name", input.name);
       if (input.csvMapping) fd.append("csv_mapping", JSON.stringify(input.csvMapping));
+      if (input.folderId) fd.append("folder_id", input.folderId);
       return api<EventLogCreateResponse>("/api/v1/event-logs", { method: "POST", body: fd });
     },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
+    },
+  });
+}
+
+export function useImportEventLogFromUrl() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { url: string; name?: string; csvMapping?: unknown }) =>
+      api<EventLogCreateResponse>("/api/v1/event-logs/from-url", {
+        method: "POST",
+        json: {
+          url: input.url,
+          name: input.name || undefined,
+          csv_mapping: input.csvMapping ? JSON.stringify(input.csvMapping) : undefined,
+        },
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
     },
@@ -139,6 +166,82 @@ export function useDeleteEventLog() {
     mutationFn: (id: string) =>
       api<void>(`/api/v1/event-logs/${id}`, { method: "DELETE" }),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
+    },
+  });
+}
+
+export function useDuplicateEventLog() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<EventLogDetail>(`/api/v1/event-logs/${id}/duplicate`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
+    },
+  });
+}
+
+// ── Folders ──────────────────────────────────────────────────────────────────
+
+export function useFolders() {
+  return useQuery({
+    queryKey: queryKeys.folders(),
+    queryFn: () => api<FolderSummary[]>("/api/v1/folders"),
+  });
+}
+
+export function useCreateFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string; parent_id?: string | null }) =>
+      api<FolderSummary>("/api/v1/folders", {
+        method: "POST",
+        json: { name: input.name, parent_id: input.parent_id ?? null },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.folders() });
+    },
+  });
+}
+
+export function useRenameFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; name: string }) =>
+      api<FolderSummary>(`/api/v1/folders/${input.id}`, {
+        method: "PATCH",
+        json: { name: input.name },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.folders() });
+    },
+  });
+}
+
+export function useDeleteFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<void>(`/api/v1/folders/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.folders() });
+      // Folder delete promotes children to root, so log placement changes.
+      qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
+    },
+  });
+}
+
+export function useReorderTree() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (items: ReorderItem[]) =>
+      api<void>("/api/v1/folders/reorder", {
+        method: "POST",
+        json: { items },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.folders() });
       qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
     },
   });

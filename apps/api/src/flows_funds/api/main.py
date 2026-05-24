@@ -30,6 +30,8 @@ from flows_funds.api.events import EventBus, set_event_bus
 from flows_funds.api.ingest.dispatch import register_import_handler
 from flows_funds.api.jobs.runtime import JobRuntime, set_job_runtime
 from flows_funds.api.modules import CapabilityRegistry, ModuleLoader, set_module_loader
+from flows_funds.api.modules.hot_reload import HotReload, sweep_stale_workdirs
+from flows_funds.api.modules.install_jobs import register_module_install_handlers
 from flows_funds.api.routes import v1
 from flows_funds.api.schemas.common import HealthResponse
 
@@ -71,6 +73,7 @@ async def lifespan(app: FastAPI):
         api_app=app,
     )
     set_module_loader(loader)
+    register_module_install_handlers(runtime, loader)
     try:
         await loader.load_all()
     except Exception:
@@ -78,12 +81,25 @@ async def lifespan(app: FastAPI):
         # Bad manifests are logged inside the loader.
         pass
 
+    # Sweep any `ff-mod-*` temp dirs older than 24h that earlier crashes left
+    # behind (the per-invocation cleanup in `_invoke_handler` handles the
+    # happy path; this catches SIGKILL/restart leaks).
+    sweep_stale_workdirs()
+
+    # Dev-only watchdog so module edits hot-reload without a restart (§5.3 #7).
+    hot_reload: HotReload | None = None
+    if settings.env == "dev":
+        hot_reload = HotReload(loader)
+        hot_reload.start()
+
     # Touch the DuckDB pool so the first request doesn't pay the init cost.
     get_duckdb_pool()
 
     try:
         yield
     finally:
+        if hot_reload is not None:
+            hot_reload.stop()
         await loader.unload_all()
         set_module_loader(None)
         await runtime.stop()

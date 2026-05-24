@@ -42,8 +42,23 @@ COPY --from=builder /repo/apps/web/.next/standalone /app/
 COPY --from=builder /repo/apps/web/.next/static /app/apps/web/.next/static
 COPY --from=builder /repo/apps/web/public /app/apps/web/public
 
+# Module bundler runs at container start to esbuild any modules under the
+# host-mounted /app/modules into modules/<id>/.dist/ (§5.4). Next's
+# standalone output is a tightly traced tree we don't want to perturb, so
+# install the bundler in its own /opt/ff-bundler/ dir with its own
+# node_modules. The script picks up MODULES_DIR + RUNTIME_EXTERNALS via env.
+RUN mkdir -p /opt/ff-bundler \
+    && cd /opt/ff-bundler \
+    && printf '{"name":"ff-bundler","private":true,"type":"module","dependencies":{"esbuild":"^0.24","yaml":"^2"}}\n' > package.json \
+    && npm install --no-fund --no-audit
+COPY apps/web/scripts/bundle-modules.mjs /opt/ff-bundler/bundle-modules.mjs
+COPY apps/web/lib/runtime-externals.json /opt/ff-bundler/runtime-externals.json
+ENV FF_MODULES_DIR=/app/modules \
+    FF_RUNTIME_EXTERNALS=/opt/ff-bundler/runtime-externals.json
+
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 --start-period=5s \
   CMD wget -q --spider http://localhost:3000/processes || exit 1
 
-CMD ["node", "apps/web/server.js"]
+# Bundle all installed modules, then hand off to Next's standalone server.
+CMD ["sh", "-c", "node /opt/ff-bundler/bundle-modules.mjs && node /app/apps/web/server.js"]

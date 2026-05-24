@@ -49,6 +49,20 @@ class ProgressReporterProtocol(Protocol):
 
 
 @runtime_checkable
+class RunInProcessProtocol(Protocol):
+    """Offload a pure function to the platform's ProcessPoolExecutor (§8.3).
+
+    Use for CPU-bound work where the GIL is the bottleneck (e.g. pm4py
+    inductive mining on a million-event log). `fn` must be importable by
+    qualified name; args + return must be picklable. For I/O-bound or
+    GIL-releasing work (numpy / pandas / duckdb), `asyncio.to_thread` is
+    cheaper.
+    """
+
+    async def __call__(self, fn: Any, /, *args: Any, **kwargs: Any) -> Any: ...
+
+
+@runtime_checkable
 class ModuleConfigProtocol(Protocol):
     @property
     def value(self) -> dict[str, Any]: ...
@@ -93,3 +107,4 @@ class ModuleContext:
     progress: ProgressReporterProtocol
     logger: structlog.BoundLogger
     workdir: Path
+    run_in_process: RunInProcessProtocol

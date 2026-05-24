@@ -21,6 +21,9 @@ node_modules/
 .turbo/
 out/
 
+# Modules as they are loaded from sciebo
+modules/
+
 # Module per-folder install artefacts (manifest.yaml + uv.lock are committed)
 modules/*/.venv/
 modules/*/.dist/

@@ -76,13 +76,21 @@ export default function ModulePage() {
         </div>
       </header>
 
-      <ModulePanelSlot logId={logId} moduleId={mod.id} />
+      <ModulePanelSlot logId={logId} moduleId={mod.id} hasFrontend={mod.has_frontend} />
     </section>
   );
 }
 
-function ModulePanelSlot({ logId, moduleId }: { logId: string; moduleId: string }) {
-  const Panel = getModulePanel(moduleId);
+function ModulePanelSlot({
+  logId,
+  moduleId,
+  hasFrontend,
+}: {
+  logId: string;
+  moduleId: string;
+  hasFrontend: boolean;
+}) {
+  const Panel = getModulePanel(moduleId, { hasFrontend });
   if (Panel) {
     return <Panel logId={logId} moduleId={moduleId} />;
   }

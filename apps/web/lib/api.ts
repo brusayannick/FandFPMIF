@@ -67,3 +67,9 @@ export function wsUrl(path: string): string {
   const base = typeof window === "undefined" ? SERVER_BASE : PUBLIC_BASE;
   return `${base.replace(/^http/, "ws")}${path}`;
 }
+
+/** Build an absolute URL pointing at the backend. Use for `<img src>`, `<a href>`,
+ * and any other browser-side reference that bypasses the `api()` helper. */
+export function apiUrl(path: string): string {
+  return `${apiBase()}${path}`;
+}

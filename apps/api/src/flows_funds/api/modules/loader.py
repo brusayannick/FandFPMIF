@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import inspect
+import shutil
 import sys
 import tempfile
 from collections.abc import Awaitable, Callable
@@ -41,6 +42,7 @@ from flows_funds.api.modules.event_log_access import EventLogAccess
 from flows_funds.api.modules.finder import get_finder, module_namespace, reset_finder
 from flows_funds.api.modules.installer import install_module
 from flows_funds.api.modules.registry import CapabilityRegistry
+from flows_funds.api.modules.subprocess_host import SubprocessBridge
 from flows_funds.sdk.context import ModuleContext
 from flows_funds.sdk.decorators import (
     JobSpec,
@@ -143,6 +145,77 @@ class _ModuleConfigAdapter:
         return self._value.get(key, default)
 
 
+class _BusForwardingLogger:
+    """Wraps a structlog `BoundLogger` so every log call also fans out to the
+    event bus as `module.log.<level>` — the per-module logs tail in Settings
+    (§7.6.2) subscribes to that topic and filters by payload.module_id.
+
+    We keep the structlog output too so server-side log aggregators stay
+    untouched.
+    """
+
+    def __init__(self, base, bus: EventBus, module_id: str) -> None:
+        self._base = base
+        self._bus = bus
+        self._module_id = module_id
+
+    def bind(self, **kwargs: Any) -> "_BusForwardingLogger":
+        return _BusForwardingLogger(self._base.bind(**kwargs), self._bus, self._module_id)
+
+    def _emit(self, level: str, event: str, **kwargs: Any) -> None:
+        getattr(self._base, level)(event, **kwargs)
+        # Best-effort: never let a logging side-effect break the handler.
+        try:
+            asyncio.create_task(
+                self._bus.publish(
+                    f"module.log.{level}",
+                    {"module_id": self._module_id, "event": event, "fields": kwargs},
+                )
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def debug(self, event: str, **kw: Any) -> None:
+        self._emit("debug", event, **kw)
+
+    def info(self, event: str, **kw: Any) -> None:
+        self._emit("info", event, **kw)
+
+    def warning(self, event: str, **kw: Any) -> None:
+        self._emit("warning", event, **kw)
+
+    def error(self, event: str, **kw: Any) -> None:
+        self._emit("error", event, **kw)
+
+    def exception(self, event: str, **kw: Any) -> None:
+        self._emit("error", event, exc_info=True, **kw)
+
+
+def _resolve_dynamic(
+    value: Any, log_id: str, module_id: str, fallback: str
+) -> str:
+    """Resolve a `@job(title=...)` value that may be a callable.
+
+    Authors can pass either a plain string or `(ctx_stub, payload) -> str`
+    for runtime-formatted titles like *"Discovery — model.bpmn vs Order-to-
+    Cash 2024"*. We feed the callable a minimal stub instead of the real
+    ModuleContext (which doesn't exist yet at submission time — the job
+    hasn't run) and the in-flight payload.
+    """
+    if value is None or isinstance(value, str):
+        return str(value) if isinstance(value, str) else fallback
+    if not callable(value):
+        return fallback
+    ctx_stub = {"log_id": log_id, "module_id": module_id}
+    payload = {"log_id": log_id, "module_id": module_id}
+    try:
+        out = value(ctx_stub, payload)
+        return str(out) if out is not None else fallback
+    except Exception:  # noqa: BLE001
+        log.exception("modules.job.dynamic_title_failed", module_id=module_id)
+        return fallback
+
+
 def _extra_handler_params(bound_method: Callable[..., Any]) -> list[inspect.Parameter]:
     """Return a handler's parameters after `ctx`.
 
@@ -209,6 +282,7 @@ class ModuleLoader:
         self.loaded: dict[str, LoadedModule] = {}
         self._mount_router: APIRouter | None = None
         self._sub_event_tasks: list[asyncio.Task] = []
+        self._bridges: dict[str, SubprocessBridge] = {}
 
     async def load_all(self) -> list[LoadedModule]:
         discovered = discover(self.modules_dir)
@@ -233,7 +307,7 @@ class ModuleLoader:
                 continue
 
             try:
-                instance = self._import_module_class(d)
+                instance = await self._instantiate(d)
             except Exception as exc:
                 log.exception("modules.loader.import_failed", module_id=d.id, error=str(exc))
                 continue
@@ -263,6 +337,13 @@ class ModuleLoader:
         await asyncio.gather(*self._sub_event_tasks, return_exceptions=True)
         self._sub_event_tasks.clear()
 
+        for bridge in self._bridges.values():
+            try:
+                await bridge.stop()
+            except Exception:  # noqa: BLE001
+                log.exception("modules.subprocess.stop_failed")
+        self._bridges.clear()
+
         for loaded in self.loaded.values():
             self.registry.remove_module(loaded.id)
         self.loaded.clear()
@@ -290,7 +371,7 @@ class ModuleLoader:
             )
 
         d = DiscoveredModule(folder=folder, manifest=manifest)
-        instance = self._import_module_class(d)
+        instance = await self._instantiate(d)
         loaded = LoadedModule(
             discovered=d,
             instance=instance,
@@ -318,6 +399,12 @@ class ModuleLoader:
         loaded = self.loaded.pop(module_id, None)
         if loaded is None:
             return False
+        bridge = self._bridges.pop(module_id, None)
+        if bridge is not None:
+            try:
+                await bridge.stop()
+            except Exception:  # noqa: BLE001
+                log.exception("modules.subprocess.stop_failed", module_id=module_id)
         # Cancel any per-module event subscriptions. We restart the lot since
         # we don't track ownership per task; phase-9 minimum.
         for task in self._sub_event_tasks:
@@ -382,6 +469,61 @@ class ModuleLoader:
         }
 
     # -- internal -----------------------------------------------------------
+
+    async def _instantiate(self, d: DiscoveredModule) -> Module:
+        """Build a `Module` instance — either in-process or via a subprocess
+        bridge depending on the manifest's `isolation` setting (§5.4)."""
+        if d.manifest.dependencies.python.isolation == "subprocess":
+            bridge = SubprocessBridge(d.manifest, d.folder)
+            instance = await bridge.start()
+            self._bridges[d.id] = bridge
+        else:
+            instance = self._import_module_class(d)
+        # Pick up any Pydantic event schemas the module ships (§5.7a). Done
+        # post-instantiate so the in-process import side effects have run.
+        self._register_module_events(d)
+        return instance
+
+    def _register_module_events(self, d: DiscoveredModule) -> None:
+        """Optionally import `<folder>/events.py` and register its
+        `EVENT_SCHEMAS: dict[str, type[BaseModel]]` mapping on the bus.
+
+        Modules without an `events.py` are silently skipped — schema
+        enforcement is opt-in. A malformed `EVENT_SCHEMAS` value logs a
+        warning but does not abort the module load.
+        """
+        events_path = d.folder / "events.py"
+        if not events_path.exists():
+            return
+        ns = f"{module_namespace(d.id)}.events"
+        try:
+            spec = importlib.util.spec_from_file_location(ns, events_path)
+            if spec is None or spec.loader is None:
+                return
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[ns] = mod
+            spec.loader.exec_module(mod)
+        except Exception:  # noqa: BLE001
+            log.exception("modules.events.import_failed", module_id=d.id)
+            return
+        schemas = getattr(mod, "EVENT_SCHEMAS", None)
+        if not isinstance(schemas, dict):
+            return
+        from pydantic import BaseModel as _BaseModel
+        for topic, model in schemas.items():
+            if not (isinstance(topic, str) and isinstance(model, type) and issubclass(model, _BaseModel)):
+                log.warning(
+                    "modules.events.invalid_entry",
+                    module_id=d.id,
+                    topic=topic,
+                )
+                continue
+            try:
+                self.bus.register_schema(topic, model)
+            except Exception:  # noqa: BLE001
+                log.exception(
+                    "modules.events.schema_conflict", module_id=d.id, topic=topic
+                )
 
     def _import_module_class(self, d: DiscoveredModule) -> Module:
         ns = module_namespace(d.id)
@@ -455,15 +597,11 @@ class ModuleLoader:
             async def _endpoint(**kwargs: Any) -> Any:
                 log_id = kwargs.pop("log_id", None)
                 ctx = await self._make_context(module_id, log_id or "")
-                # FastAPI handles sync→threadpool for sync handlers automatically
-                # when registered as routes; for async we await directly.
-                if inspect.iscoroutinefunction(bound_method):
-                    return await bound_method(ctx, **kwargs)
-                return await asyncio.to_thread(lambda: bound_method(ctx, **kwargs))
+                return await self._invoke_handler(bound_method, ctx, **kwargs)
 
             _endpoint.__signature__ = _build_endpoint_signature(extras)  # type: ignore[attr-defined]
         else:
-            title_default = (
+            static_title_default = (
                 job_spec.title
                 if isinstance(job_spec.title, str)
                 else f"{module_id}.{spec.path.lstrip('/').replace('/', '.')}"
@@ -478,20 +616,31 @@ class ModuleLoader:
                         ctx_log_id,
                         progress=_JobProgressAdapter(handle),
                     )
-                    if inspect.iscoroutinefunction(bound_method):
-                        await bound_method(ctx)
-                    else:
-                        await asyncio.to_thread(bound_method, ctx)
+                    await self._invoke_handler(bound_method, ctx)
 
                 # Register a one-shot handler under a unique type tag.
                 job_type = f"module.{module_id}.{spec.path.lstrip('/').replace('/', '.') or 'root'}"
                 if job_type not in self.runtime._handlers:  # type: ignore[attr-defined]
                     self.runtime.register(job_type, _job_handler)
 
+                # Resolve callable title/subtitle at submission time (§5.6).
+                # The author's callable receives a stub ctx-like dict + the
+                # payload so it can format e.g. the log's display name into
+                # the job toast.
+                resolved_title = _resolve_dynamic(
+                    job_spec.title, ctx_log_id, module_id, static_title_default
+                )
+                resolved_subtitle = _resolve_dynamic(
+                    job_spec.subtitle,
+                    ctx_log_id,
+                    module_id,
+                    f"{module_id} · {spec.path}",
+                )
+
                 job_id = await self.runtime.submit(
                     type_=job_type,
-                    title=title_default,
-                    subtitle=str(job_spec.subtitle or f"{module_id} · {spec.path}"),
+                    title=resolved_title,
+                    subtitle=resolved_subtitle,
                     module_id=module_id,
                     payload={"log_id": ctx_log_id},
                     priority=job_spec.priority,
@@ -526,10 +675,7 @@ class ModuleLoader:
                                 ctx = await self._make_context(
                                     module_id, env.payload.get("log_id", "")
                                 )
-                                if inspect.iscoroutinefunction(bound_method):
-                                    await bound_method(ctx, env.payload)
-                                else:
-                                    await asyncio.to_thread(bound_method, ctx, env.payload)
+                                await self._invoke_handler(bound_method, ctx, env.payload)
                             except Exception:
                                 log.exception(
                                     "modules.event_handler_failed",
@@ -553,37 +699,33 @@ class ModuleLoader:
                 handle.payload.get("log_id", ""),
                 progress=_JobProgressAdapter(handle),
             )
-            if inspect.iscoroutinefunction(bound_method):
-                await bound_method(ctx, event_payload)
-            else:
-                await asyncio.to_thread(bound_method, ctx, event_payload)
+            await self._invoke_handler(bound_method, ctx, event_payload)
 
         if job_type not in self.runtime._handlers:  # type: ignore[attr-defined]
             self.runtime.register(job_type, _job_handler)
 
-        title_default = (
-            job_spec.title
-            if isinstance(job_spec.title, str)
-            else f"{module_id}.{topic}"
-        )
-        subtitle_default = (
-            job_spec.subtitle
-            if isinstance(job_spec.subtitle, str)
-            else f"{module_id} · on {topic}"
-        )
+        static_title_default = f"{module_id}.{topic}"
+        static_subtitle_default = f"{module_id} · on {topic}"
 
         async def _runner() -> None:
             try:
                 async with self.bus.subscribe([topic]) as stream:
                     async for env in stream:
                         try:
+                            log_id = env.payload.get("log_id", "")
+                            resolved_title = _resolve_dynamic(
+                                job_spec.title, log_id, module_id, static_title_default
+                            )
+                            resolved_subtitle = _resolve_dynamic(
+                                job_spec.subtitle, log_id, module_id, static_subtitle_default
+                            )
                             await self.runtime.submit(
                                 type_=job_type,
-                                title=title_default,
-                                subtitle=subtitle_default,
+                                title=resolved_title,
+                                subtitle=resolved_subtitle,
                                 module_id=module_id,
                                 payload={
-                                    "log_id": env.payload.get("log_id", ""),
+                                    "log_id": log_id,
                                     "_event_payload": env.payload,
                                 },
                                 priority=job_spec.priority,
@@ -598,6 +740,23 @@ class ModuleLoader:
                 return
 
         self._sub_event_tasks.append(asyncio.create_task(_runner()))
+
+    async def _invoke_handler(
+        self,
+        bound_method: Callable[..., Any],
+        ctx: ModuleContext,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        # _make_context mkdtemps a fresh workdir per invocation; delete it
+        # once the handler is done so per-call scratch space doesn't pile up
+        # (§5.5 "workdir: scratch space, auto-cleaned on completion").
+        try:
+            if inspect.iscoroutinefunction(bound_method):
+                return await bound_method(ctx, *args, **kwargs)
+            return await asyncio.to_thread(bound_method, ctx, *args, **kwargs)
+        finally:
+            shutil.rmtree(ctx.workdir, ignore_errors=True)
 
     async def _make_context(
         self,
@@ -630,8 +789,13 @@ class ModuleLoader:
             cache=ResultCache(log_id, module_id) if log_id else _UnboundCache(),  # type: ignore[arg-type]
             config=_ModuleConfigAdapter(cfg_json),
             progress=progress or _NoopProgress(),
-            logger=log.bind(module_id=module_id, log_id=log_id),
+            logger=_BusForwardingLogger(  # type: ignore[arg-type]
+                log.bind(module_id=module_id, log_id=log_id),
+                self.bus,
+                module_id,
+            ),
             workdir=workdir,
+            run_in_process=self.runtime.run_in_process,  # type: ignore[arg-type]
         )
 
 

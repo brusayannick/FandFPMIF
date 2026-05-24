@@ -30,7 +30,11 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      # First boot installs every module's Python deps before the HTTP server
+      # comes up — cv4cdd alone pulls TensorFlow (~500 MB). Subsequent boots
+      # reuse the wheels in /app/data/uv-python and start in seconds, but the
+      # initial grace period needs to cover the worst case.
+      start_period: 600s
     restart: unless-stopped
 
   web:
@@ -43,6 +47,11 @@ services:
         # reach the api — for local docker-compose that's the host's port 8000.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     container_name: flows-funds-web
+    volumes:
+      # Same modules/ bind-mount as the api container so the entrypoint can
+      # esbuild each module's panel into modules/<id>/.dist/ at container
+      # start — the API serves those bundles at /api/v1/modules/{id}/assets/.
+      - ./modules:/app/modules
     environment:
       INTERNAL_API_URL: http://api:8000
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}

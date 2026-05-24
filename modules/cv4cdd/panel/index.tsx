@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
+import { apiUrl } from "@/lib/api";
 import { subscribeBus } from "@/lib/ws";
 import { cn } from "@/lib/cn";
 
@@ -246,10 +247,9 @@ function ImageCard({
   nonce: number;
   running: boolean;
 }) {
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-  const src = `${apiBase}/api/v1/modules/cv4cdd/image?log_id=${encodeURIComponent(
-    logId,
-  )}&t=${nonce}`;
+  const src = apiUrl(
+    `/api/v1/modules/cv4cdd/image?log_id=${encodeURIComponent(logId)}&t=${nonce}`,
+  );
   const imgRef = useRef<HTMLImageElement>(null);
   const [errored, setErrored] = useState(false);
 

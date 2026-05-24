@@ -2,12 +2,77 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.mark.asyncio
+async def test_bus_schema_enforcement() -> None:
+    """Topics with a registered Pydantic schema must reject malformed
+    payloads at publish time (§5.7a). Topics without a schema pass through
+    untouched so platform-emitted `job.*` events don't have to round-trip.
+    """
+    from pydantic import BaseModel
+
+    from flows_funds.api.events.bus import EventBus, EventSchemaError
+
+    class KpiPayload(BaseModel):
+        log_id: str
+        rate: float
+
+    bus = EventBus()
+    bus.register_schema("kpi.computed", KpiPayload)
+
+    # Valid — passes through and gets re-normalised by Pydantic.
+    await bus.publish("kpi.computed", {"log_id": "abc", "rate": 1.5})
+
+    # Missing required field — clear error at the publish site.
+    with pytest.raises(EventSchemaError):
+        await bus.publish("kpi.computed", {"log_id": "abc"})
+
+    # Wrong type — same outcome.
+    with pytest.raises(EventSchemaError):
+        await bus.publish("kpi.computed", {"log_id": "abc", "rate": "fast"})
+
+    # Untyped topic — bus stays out of the way.
+    await bus.publish("anything.goes", {"whatever": 1})
+
+    # Re-registering with a different model is a hard error.
+    class Other(BaseModel):
+        x: int
+
+    with pytest.raises(EventSchemaError, match="already has a schema"):
+        bus.register_schema("kpi.computed", Other)
+
+
+@pytest.mark.asyncio
+async def test_runtime_run_in_process_uses_worker_pid() -> None:
+    """`JobRuntime.run_in_process` must execute the callable in a different
+    process so GIL-bound work parallelises (§8.3). We compare PIDs as the
+    direct evidence — `os.getpid` is picklable and returns the worker's PID
+    when run inside the executor.
+    """
+    from flows_funds.api.jobs.runtime import JobRuntime
+
+    rt = JobRuntime()
+    try:
+        worker_pid = await rt.run_in_process(os.getpid)
+        assert worker_pid != os.getpid()
+        # Second call should reuse the same warm worker (or another from the
+        # pool — both fine; we only assert it's not the main process).
+        again = await rt.run_in_process(os.getpid)
+        assert again != os.getpid()
+        # kwargs path: max(a, b, key=...) is awkward to pickle; use a simple
+        # picklable case to confirm kwargs route through.
+        rounded = await rt.run_in_process(round, 1.55555, ndigits=2)
+        assert rounded == 1.56
+    finally:
+        await rt.stop()
 
 
 async def _wait(client: AsyncClient, log_id: str, target: str = "ready", timeout: float = 5.0) -> dict:

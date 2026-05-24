@@ -60,6 +60,8 @@ class EventLogSummary(BaseModel):
     date_min: datetime | None = None
     date_max: datetime | None = None
     error: str | None = None
+    folder_id: str | None = None
+    position: int = 0
     created_at: datetime
     imported_at: datetime | None = None
     last_edited_at: datetime | None = None
@@ -79,3 +81,44 @@ class EventLogUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     column_overrides: dict[str, Any] | None = None
+    folder_id: str | None = Field(default=None, description="Pass null to move to root")
+    position: int | None = None
+
+
+# ── Folders ───────────────────────────────────────────────────────────────────
+
+
+class FolderSummary(BaseModel):
+    """Row shape for `GET /folders`."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    parent_id: str | None = None
+    position: int = 0
+    created_at: datetime
+
+
+class FolderCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    parent_id: str | None = None
+
+
+class FolderUpdate(BaseModel):
+    name: str | None = None
+    parent_id: str | None = Field(default=None, description="Pass null to move to root")
+    position: int | None = None
+
+
+class ReorderItem(BaseModel):
+    """One entry in a bulk-reorder payload."""
+
+    kind: Literal["folder", "log"]
+    id: str
+    parent_id: str | None = None  # parent folder for both folders and logs
+    position: int
+
+
+class ReorderRequest(BaseModel):
+    items: list[ReorderItem]

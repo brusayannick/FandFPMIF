@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
+from pydantic import BaseModel, ValidationError
 
 log = structlog.get_logger(__name__)
 
@@ -65,12 +66,46 @@ class _Subscription:
     drops: int = 0
 
 
+class EventSchemaError(ValueError):
+    """Raised by `EventBus.publish` when a payload fails the registered
+    Pydantic schema for its topic (§5.7a). Surfacing fast at the publish
+    site keeps producer bugs out of subscriber queues — subscribers only
+    ever see validated payloads.
+    """
+
+
 class EventBus:
     def __init__(self) -> None:
         self._subs: list[_Subscription] = []
         self._lock = asyncio.Lock()
+        # Topic → Pydantic model. Modules register via `events.py` at load
+        # time (see loader._register_module_events); the platform-emitted
+        # `job.*` and `log.imported` topics are left unregistered so they
+        # don't need to round-trip through Pydantic.
+        self._schemas: dict[str, type[BaseModel]] = {}
+
+    def register_schema(self, topic: str, model: type[BaseModel]) -> None:
+        """Register a Pydantic model for `topic`. Exact-match only — wildcard
+        patterns are deliberately unsupported here (they'd make multi-match
+        ambiguous). Re-registering the same topic with a different model
+        raises.
+        """
+        existing = self._schemas.get(topic)
+        if existing is not None and existing is not model:
+            raise EventSchemaError(
+                f"Topic {topic!r} already has a schema registered: {existing!r}."
+            )
+        self._schemas[topic] = model
 
     async def publish(self, topic: str, payload: dict[str, Any]) -> None:
+        schema = self._schemas.get(topic)
+        if schema is not None:
+            try:
+                payload = schema.model_validate(payload).model_dump()
+            except ValidationError as exc:
+                raise EventSchemaError(
+                    f"Event {topic!r} payload failed schema validation: {exc}"
+                ) from exc
         envelope = EventEnvelope(topic=topic, payload=payload)
         async with self._lock:
             subs = list(self._subs)

@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Inbox, Plug, Plus, Upload, ChevronDown } from "lucide-react";
+import { FolderPlus, Inbox, Plug, Plus, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,29 +12,28 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
-import { ProcessesTable } from "@/components/processes/processes-table";
+import {
+  NewFolderDialog,
+  ProcessesTable,
+} from "@/components/processes/processes-table";
 import { useEventLogs } from "@/lib/queries";
 
 export default function ProcessesPage() {
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
   return (
     <section className="mx-auto max-w-7xl px-6 py-8">
-      <Header />
+      <Header onNewFolder={() => setNewFolderOpen(true)} />
       <Suspense fallback={<ListSkeleton />}>
         <ProcessList />
       </Suspense>
+      <NewFolderDialog open={newFolderOpen} onOpenChange={setNewFolderOpen} />
     </section>
   );
 }
 
-function Header() {
+function Header({ onNewFolder }: { onNewFolder: () => void }) {
   return (
     <header className="flex flex-wrap items-start justify-between gap-4 pb-6">
       <div className="space-y-1">
@@ -67,33 +66,17 @@ function Header() {
           </TooltipContent>
         </Tooltip>
 
+        <Button variant="outline" onClick={onNewFolder} className="gap-2 cursor-pointer">
+          <FolderPlus className="h-4 w-4" />
+          New folder
+        </Button>
+
         <Button asChild className="gap-2 cursor-pointer">
           <Link href="/processes/import">
             <Upload className="h-4 w-4" />
             Import event log
           </Link>
         </Button>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon"
-              className="cursor-pointer"
-              aria-label="More import options"
-            >
-              <ChevronDown className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem disabled className="cursor-not-allowed">
-              Import from URL
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled className="cursor-not-allowed">
-              Import demo log
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
     </header>
   );

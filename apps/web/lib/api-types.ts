@@ -20,9 +20,26 @@ export interface EventLogSummary {
   date_min: string | null;
   date_max: string | null;
   error: string | null;
+  folder_id: string | null;
+  position: number;
   created_at: string;
   imported_at: string | null;
   last_edited_at: string | null;
+}
+
+export interface FolderSummary {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  position: number;
+  created_at: string;
+}
+
+export interface ReorderItem {
+  kind: "folder" | "log";
+  id: string;
+  parent_id: string | null;
+  position: number;
 }
 
 export interface EventLogDetail extends EventLogSummary {
@@ -280,4 +297,6 @@ export interface EventLogUpdatePayload {
   name?: string;
   description?: string | null;
   column_overrides?: EventLogColumnOverrides | null;
+  folder_id?: string | null;
+  position?: number;
 }

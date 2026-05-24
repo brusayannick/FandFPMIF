@@ -30,7 +30,6 @@ A **locally-hosted, lightweight, modular** process analysis platform. State-of-t
 | Event-log storage | **Parquet** files | columnar, compressed, OLAP-friendly |
 | Analytics engine | **DuckDB** | embedded SQL over Parquet — sub-second queries on millions of events |
 | Process mining | `pm4py` | de facto standard |
-| BPMN parsing | `bpmn-python` | for the Conformance module |
 | Validation | Pydantic v2 | fast, JSON-schema generation |
 | Migrations | Alembic | works fine with SQLite |
 | Job queue | asyncio `Queue` + SQLite-persisted jobs | no broker, no extra container |
@@ -48,7 +47,6 @@ A **locally-hosted, lightweight, modular** process analysis platform. State-of-t
 | UI | shadcn/ui + Tailwind v4 |
 | Charts | Recharts + ECharts (heavier viz) |
 | Graph canvas | xyflow (React Flow) |
-| BPMN viewer | bpmn-js |
 | Realtime | native WebSocket client |
 | Validation | Zod (schemas mirrored from Pydantic) |
 | Type sync | `openapi-typescript` codegen from `/openapi.json` |
@@ -230,9 +228,9 @@ permissions:
 | Category | Purpose | Example |
 |---|---|---|
 | `foundation` | Always-relevant baseline | Discovery, Performance |
-| `attribute` | Mining beyond control-flow (org / time / cost / decisions) | Organizational, Cost Analysis |
-| `external_input` | Compares the log against an externally-supplied artefact | Conformance (BPMN) |
-| `advanced` | Specialised analytics | Temporal Dynamics |
+| `attribute` | Mining beyond control-flow (org / time / cost / decisions) | — (no built-in; the manifest schema still supports this category) |
+| `external_input` | Compares the log against an externally-supplied artefact | — (no built-in; the manifest schema still supports this category) |
+| `advanced` | Specialised analytics | — (no built-in; the manifest schema still supports this category) |
 | `other` | Catch-all (utility, integrations) | — |
 
 ### 5.3 Module loading (lifecycle)
@@ -242,11 +240,11 @@ permissions:
    - Also scan installed Python packages exposing the `flows_funds.modules` entry point — supports installable third-party modules without copying files.
    - Two modules declaring the same `id` is a startup error.
 2. **Validation.** Parse manifests, build dependency graph, abort startup on cycles or missing **hard** dependencies.
-3. **Materialise dependencies (per-module, isolated).** For each module whose `dependencies` block has changed since last boot (lockfile hash mismatch), run `uv sync` into `modules/<folder>/.venv/` and `pnpm/esbuild bundle` into `modules/<folder>/.dist/`. Cached on subsequent boots → near-instant. See §5.4.
+3. **Materialise dependencies (per-module, isolated).** The API container runs `uv venv && uv pip install` into `modules/<folder>/.venv/` when the manifest's `dependencies` hash changes — cached at `modules/<folder>/.installed-hash`, so subsequent boots are near-instant. The web container's bundler (`apps/web/scripts/bundle-modules.mjs`) esbuilds each module's `frontend.panel` + `frontend.widgets` into `modules/<folder>/.dist/` at container start (and watches in dev). The two containers share the bind-mounted `modules/` so they see each other's writes. See §5.4.
 4. **Topological load order.** Hard deps loaded first.
 5. **Mount.** Register routes at `/api/v1/modules/{id}/*` (FastAPI handles sync→threadpool natively), subscribe `@on_event` handlers on the bus, register `@job` handlers with the queue. The SDK wraps `@on_event` and `@job` handlers with the sync/async auto-wrap described in §5.5 — `@route` handlers ride FastAPI's existing threadpool. Either way, no handler can block the event loop regardless of whether the author used `async def` or plain `def`.
 6. **Runtime per-log gating.** When a log is opened, the platform re-evaluates `requirements.event_log` against that log's schema → module is **available** or **unavailable** for that log.
-7. **Hot reload (dev).** Watchdog on `modules/` re-loads changed modules without restart. Manifest dep changes trigger an in-place `uv sync` for that module only.
+7. **Hot reload (dev).** A `watchdog.Observer` on `modules/` re-loads changed modules without restart, gated on `settings.env == "dev"` so production boots always run with a known module set. 500 ms debounce, excluding writes inside `.venv/` / `.dist/` / `node_modules/`. Manifest dep changes trigger an in-place `uv pip install` for that module only. At startup the loader also calls `sweep_stale_workdirs()` to clean up `ff-mod-*` temp dirs older than 24 h that a previous SIGKILL / crash left behind.
 
 ### 5.4 Per-module dependencies & isolation
 
@@ -272,18 +270,29 @@ Each module declares its own runtime dependencies in the manifest. The platform 
 | Mode | When | How |
 |---|---|---|
 | `in_process` (default) | Pure-Python deps, or deps with no native conflicts with anything inherited / other modules. | The custom `MetaPathFinder` shims imports against `modules/<folder>/.venv/site-packages`. Fast, zero IPC. |
-| `subprocess` | Module needs a native lib version that conflicts with the platform's (e.g. `numpy 1.x` while platform ships `numpy 2.x`). | Platform spawns a long-lived worker subprocess from the module's venv. Communication via JSON-RPC over a Unix socket. Same `ModuleContext` interface; transport is hidden from author. Slower (IPC) but provides true isolation. |
+| `subprocess` | Module needs a native lib version that conflicts with the platform's (e.g. `numpy 1.x` while platform ships `numpy 2.x`). | Platform spawns a long-lived worker subprocess from the module's `.venv/bin/python` via [subprocess_host.py](apps/api/src/flows_funds/api/modules/subprocess_host.py). Communication is bidirectional JSON-RPC over a Unix socket: host → worker for handler calls, worker → host for every `ctx.*` access. Same `ModuleContext` interface; transport is hidden from author. Slower (IPC) but provides true isolation. |
 
-The platform auto-promotes a module to `subprocess` mode if its `inherit:` set is empty *and* it declares heavy native packages — but the manifest can also set it explicitly.
+The manifest sets `dependencies.python.isolation: subprocess` explicitly. Auto-promotion is not implemented — authors pick the mode.
+
+**Subprocess MVP limitations (v1):**
+
+- Only `@route.*` handlers are supported. `@on_event` / `@job`-decorated methods in a subprocess module raise at load time with a clear error pointing the author back to `in_process`.
+- DataFrame views (`ctx.event_log.pandas()` / `polars()` / `pm4py()`) raise inside the worker — shipping a DataFrame across the socket would need Parquet round-trip or Arrow IPC. Use `await ctx.event_log.duckdb_fetch(sql)` instead; it returns JSON-serialisable rows.
+- `ctx.registry.has()` (sync) raises; use `await ctx.registry.call(...)` instead.
+
+Both limitations are extension points — the wire protocol in [subprocess_worker.py](apps/api/src/flows_funds/api/modules/subprocess_worker.py) is the place to add them when a module actually needs DataFrame transfer.
 
 #### Frontend (JS / TS)
 
-Same story:
+Same story, with one architectural choice worth flagging: module bundles **must share the host's React, shadcn primitives, and TanStack Query instances** so hook context flows across module boundaries and modules pick up the host's theme automatically. We solve that with a shared runtime contract rather than bundling everything per-module.
 
-- Each module folder has its own `package.json` (or the platform synthesises one from `dependencies.npm`).
-- At startup the platform runs `pnpm install --dir modules/<folder>` and bundles the panel + widgets into `modules/<folder>/.dist/` using esbuild (one chunk per entry point declared in `frontend.panel` / `frontend.widgets`).
-- The Next.js app loads each module bundle dynamically at runtime — module bundles are served as static assets, not part of the platform's webpack/turbopack build.
-- Deletion: removing the folder removes the bundle. Nothing in `apps/web/package.json` to revert.
+- The web container runs [apps/web/scripts/bundle-modules.mjs](apps/web/scripts/bundle-modules.mjs) — esbuilds each module's `frontend.panel` (and any declared `frontend.widgets`) into `modules/<folder>/.dist/<entry>.js` as a **CJS** bundle with every shared dep marked as `external`. The dev script runs it in `--watch` mode alongside `next dev`; the production Docker image runs it once at container start.
+- **The shared runtime.** [apps/web/lib/module-runtime.ts](apps/web/lib/module-runtime.ts) lazily imports React, ReactDOM, TanStack Query, xyflow, lucide, recharts, sonner, radix, d3-hierarchy, elkjs, every shadcn primitive used by panels today, plus `@/lib/api`, `@/lib/cn`, `@/lib/format`, `@/lib/ws`, `@/lib/module-widgets`, `@/lib/module-layout`, and the visualization-settings store — and assigns them all to `window.__FF_RUNTIME__`. The list is authoritative: it lives in [apps/web/lib/runtime-externals.json](apps/web/lib/runtime-externals.json) and is read by both the bundler (as the `external:` array) and the runtime installer (which asserts the two stay in sync).
+- **Lazy install.** `installModuleRuntime()` returns a Promise and dynamic-imports its 30+ deps so non-module pages never pay the cost — important because some of those packages (xyflow, recharts) inject styles at import time and would otherwise force hydration mismatches on every page.
+- **Serving.** Built bundles are served by FastAPI under `/api/v1/modules/{id}/assets/<path>` ([apps/api/src/flows_funds/api/routes/modules.py](apps/api/src/flows_funds/api/routes/modules.py)) — strict path-traversal check, `application/javascript` MIME.
+- **Loader.** [apps/web/lib/module-panels.tsx](apps/web/lib/module-panels.tsx) fetches the bundle text, awaits `installModuleRuntime()`, then executes via `new Function(module, exports, require, source)` with a `require()` shim that reads from `window.__FF_RUNTIME__`. Picks `Panel`, `default`, or the first React-component-looking export. `getModulePanel(moduleId, { hasFrontend })` returns the wrapper for any module declaring `frontend.panel` and `null` otherwise (so the placeholder card renders without a 404 fetch).
+- **Cross-module widgets.** [apps/web/lib/module-widgets.tsx](apps/web/lib/module-widgets.tsx) exposes `useWidget(sourceModuleId, widgetId)` which resolves a widget bundle via the same loader. Re-exported from `@flows-funds/module-sdk-ts`.
+- **Deletion.** Removing the folder removes both `.venv/` and `.dist/`. Nothing in `apps/web/package.json` to revert.
 
 #### Conflict detection & lifecycle
 
@@ -306,15 +315,19 @@ The platform injects a `ModuleContext` into every entry point (route handlers, e
 ```python
 class ModuleContext:
     log_id: str                            # the log this invocation is scoped to
-    event_log: EventLogAccess              # lazy access — .duckdb / .pandas() / .polars() / .pm4py()
-    bus: EventBus                          # typed pub/sub
+    module_id: str                         # the calling module's manifest id
+    event_log: EventLogAccess              # lazy access — .duckdb_fetch / .pandas() / .polars() / .pm4py()
+    bus: EventBus                          # typed pub/sub (Pydantic enforcement opt-in via events.py — §5.7)
     registry: ModuleRegistry               # inspect + call other modules
     cache: ResultCache                     # per-(log_id, module_id) Parquet/JSON cache
     config: ModuleConfig                   # user-set config (validated against module's schema)
     progress: ProgressReporter             # progress.update(0.42, "Computing KPIs")
-    logger: structlog.BoundLogger
-    workdir: Path                          # scratch space, auto-cleaned on completion
+    logger: structlog.BoundLogger          # also fans out to module.log.<level> on the bus (§7.6.2)
+    workdir: Path                          # scratch space, rmtree'd by the loader after every invocation
+    run_in_process: RunInProcessProtocol   # await ctx.run_in_process(fn, *args) — ProcessPool offload, §8.3
 ```
+
+Workdir cleanup is enforced by the loader's `_invoke_handler` wrapping every handler call in try/finally + `shutil.rmtree(ctx.workdir)`, covering all four invocation sites (`@route` with and without `@job`, `@on_event` with and without `@job`). A startup `sweep_stale_workdirs()` mops up `ff-mod-*` temp dirs older than 24 h that a previous SIGKILL left behind.
 
 `EventLogAccess` is a thin wrapper that hands out the right view of the data on demand:
 
@@ -361,12 +374,12 @@ Notes:
 
 ### 5.6 Module entry point — `module.py`
 
-The two snippets below (`PerformanceModule`, `ConformanceModule` further down) are illustrative — neither is implemented in v1 (see §11). They show the SDK shape a future module author would write.
+`PerformanceModule` below is the actual class shipped under [modules/performance/](modules/performance/); the second snippet (`ExtensionModule`) is a synthetic illustration of the `@job` decorator. Both show the SDK shape any module author writes.
 
 ```python
 from flows_funds.sdk import Module, ModuleContext, on_event, route
 
-class PerformanceModule(Module):                  # illustrative — not implemented in v1
+class PerformanceModule(Module):
     id = "performance"
 
     @on_event("log.imported")
@@ -385,26 +398,26 @@ No registration boilerplate — the manifest **is** the registration.
 
 #### `@job` — opt-in for long-running operations
 
-For operations expected to run more than a few seconds (alignment-based conformance, discovery on large logs, exhaustive variant analysis), the SDK provides an optional `@job` decorator. It turns a route or event handler into a non-blocking job that integrates with the platform's job queue, progress streaming, and the bottom-left dock + drawer (§7.9).
+For operations expected to run more than a few seconds (discovery on large logs, exhaustive variant analysis, expensive aggregations), the SDK provides an optional `@job` decorator. It turns a route or event handler into a non-blocking job that integrates with the platform's job queue, progress streaming, and the bottom-left dock + drawer (§7.9).
 
 > **Why not just FastAPI's `BackgroundTasks`?** `BackgroundTasks` is in-process fire-and-forget — no persistence (lost on restart), no progress streaming, no cancellation, no queue ordering, no cross-request observability. The drawer, toasts and dock (§7.9) require **persisted, observable, cancellable** jobs. `@job` is the thin author-facing API on top of the platform's own queue (§8), and it's only needed for long-running work — short routes return their value directly, the way FastAPI users expect.
 
 ```python
 from flows_funds.sdk import Module, ModuleContext, route, job
 
-class ConformanceModule(Module):                  # illustrative — not implemented in v1
-    id = "conformance"
+class ExtensionModule(Module):                    # synthetic illustration only
+    id = "extension"
 
-    @route.post("/compute-fitness")
-    @job(progress=True, title="Conformance — token replay")
-    async def compute_fitness(self, ctx: ModuleContext):
+    @route.post("/expensive-aggregate")
+    @job(progress=True, title="Extension — heavy aggregation")
+    async def expensive_aggregate(self, ctx: ModuleContext):
         async with ctx.event_log as log:
-            await ctx.progress.update(0.1, "Loading model")
-            model = await self.load_model(ctx)
-            await ctx.progress.update(0.4, "Replaying tokens")
-            fitness = await self.replay(log, model)
+            await ctx.progress.update(0.1, "Loading inputs")
+            inputs = await self.load_inputs(ctx)
+            await ctx.progress.update(0.4, "Aggregating")
+            result = await self.aggregate(log, inputs)
             await ctx.progress.update(1.0, "Done")
-        return fitness
+        return result
 ```
 
 When `@job` is present:
@@ -422,11 +435,11 @@ Decorator parameters:
 | Parameter | Default | Purpose |
 |---|---|---|
 | `progress` | `False` | Enable progress streaming. When false, the job still runs async but emits only start/finish events. |
-| `title` | derived from handler name | Toast + drawer headline. Can also be a callable `(ctx, payload) -> str` for dynamic titles. |
-| `subtitle` | derived from `module_id` + route | Drawer subtitle. |
+| `title` | derived from handler name | Toast + drawer headline. Can also be a callable `(ctx_stub, payload) -> str` resolved at submission time (the loader passes a minimal `{log_id, module_id}` stub since the real `ModuleContext` doesn't exist yet — the job hasn't run). Any exception in the callable falls back to the static default. |
+| `subtitle` | derived from `module_id` + route | Drawer subtitle. Also supports the same callable form as `title`. |
 | `priority` | `0` | Higher = scheduled sooner; queued jobs are reorderable in the drawer. |
 | `cancellable` | `True` | Whether the *Cancel* button is enabled in the drawer. |
-| `result_url` | `None` | Optional template (`/processes/{log_id}/modules/conformance`) for the toast's *Open* action on success. |
+| `result_url` | `None` | Optional template (`/processes/{log_id}/modules/{module_id}`) for the toast's *Open* action on success. |
 
 ### 5.7 Module-to-module communication
 
@@ -443,15 +456,15 @@ await ctx.bus.emit("kpi.computed", KpiPayload(log_id=..., kpis=...))
 async def react(self, ctx, payload: KpiPayload): ...
 ```
 
-Events are typed via Pydantic schemas declared in the source module's `events.py`. The bus rejects untyped emits; subscribers receive validated payloads.
+Events are typed via Pydantic schemas declared in the source module's `events.py` — the loader looks for an `EVENT_SCHEMAS: dict[str, type[BaseModel]]` mapping in that file and registers each `(topic, model)` pair on the bus at load time. Enforcement is **opt-in per topic**: registered topics validate the payload at publish time and raise `EventSchemaError` on mismatch; unregistered topics (including the platform's `job.*` and `log.imported`) pass through untouched so internal events don't have to round-trip through Pydantic.
 
 **(b) Capability registry — typed RPC for synchronous queries.**
 
 ```python
-if ctx.registry.has("conformance"):
-    fitness = await ctx.registry.call("conformance.compute_fitness", log_id=ctx.log_id)
+if ctx.registry.has("discovery"):
+    dfg = await ctx.registry.call("discovery.dfg", log_id=ctx.log_id)
 else:
-    ctx.logger.warning("conformance module not present — skipping fitness annotation")
+    ctx.logger.warning("discovery module not present — falling back to raw activity strings")
 ```
 
 Capabilities are declared in `provides:`. The platform validates at startup that callers only call capabilities listed in their `consumes:` or `optional_modules:` — missing-dep bugs surface at boot, not at runtime.
@@ -460,9 +473,9 @@ Capabilities are declared in `provides:`. The platform validates at startup that
 
 When the user opens a process page:
 
-- The platform checks each module's `requirements.event_log` against the log's detected schema → **available / unavailable** (e.g. *"Cost Analysis needs a `cost` column on events"*).
-- The platform checks `requirements.modules` (hard) and `optional_modules` (soft) against the loaded module set → status badge on the module card (e.g. *"Decision Mining works better with Discovery — currently disabled"*).
-- Unavailable modules are rendered **greyed-out** with an inline tooltip explaining what is missing and (where applicable) how to fix it (upload a BPMN model, install the missing module, etc.).
+- The platform checks each module's `requirements.event_log` against the log's detected schema → **available / unavailable** (e.g. *"This module needs a `resource` column on events"*).
+- The platform checks `requirements.modules` (hard) and `optional_modules` (soft) against the loaded module set → status badge on the module card (e.g. *"This module works better with Discovery — currently disabled"*).
+- Unavailable modules are rendered **greyed-out** with an inline tooltip explaining what is missing and (where applicable) how to fix it (install the missing module, add the required column, etc.).
 
 ---
 
@@ -479,8 +492,16 @@ When the user opens a process page:
 | `GET /modules` | List manifests + per-log availability |
 | `GET /modules/{id}/manifest` | Full manifest |
 | `GET / PUT /modules/{id}/config` | User config |
+| `GET / PUT /modules/{id}/layout?log_id=...` | Per-(user, log, module) layout JSON for the widget grid (§7.7) |
+| `GET /modules/{id}/assets/{path}` | Serve `modules/<id>/.dist/<path>` — the bundled panel + widgets (§5.4) |
+| `POST /modules/install` | Multipart zip / tar.gz upload — returns `{ job_id }` |
+| `POST /modules/install/git` | `{ url, ref? }` — clone + install — returns `{ job_id }` |
+| `POST /modules/install/registry` | `{ source: "pypi", id, version? }` — `uv pip install` + re-scan entry points |
+| `DELETE /modules/{id}` | Uninstall — unloads, deletes the folder, emits `module.uninstalled` |
 | `*  /modules/{id}/...` | Module-defined routes |
-| `WS /events` | Subscribe to platform-wide events for live UI updates |
+| `GET /system/storage` | Filesystem totals + `data/` & `modules/` directory sizes for the Settings → General gauge |
+| `GET /system/diagnostics` | Single JSON blob for the *Copy diagnostics* button (§7.6.3) |
+| `WS /events` | Subscribe to platform-wide events for live UI updates (`?topic=` repeatable; `module.log.*` carries per-module log lines) |
 
 OpenAPI is generated by FastAPI; `apps/web` consumes the schema via `openapi-typescript` codegen — no hand-written API types.
 
@@ -591,13 +612,12 @@ Top-level shadcn `Tabs`: **General · Modules · About**.
 shadcn `Form` sections:
 
 - **Appearance.** Theme (`Light` / `Dark` / `System`, `RadioGroup`), Density (`Comfortable` / `Compact`, `RadioGroup`), Accent colour (`RadioGroup` over a small palette using CSS-variable presets), Reduced motion (`Switch`, defaults to system).
-- **Locale & formatting.** Language (`Select`), Date format, Timezone, Number format.
-- **Data & storage.** Data directory path (read-only display of the bind-mount), used disk space (gauge), *Open data folder* (where supported), *Backup now* button (zips `data/`).
-- **Imports.** Default CSV delimiter, default timestamp format, *Auto-derive missing columns* `Switch`.
-- **Jobs.** Worker concurrency (`Slider`, 1–8), keep finished jobs for *N* days.
-- **Telemetry.** Off by default; an opt-in `Switch` (the platform is local-first, no telemetry without consent).
+- **Locale & imports.** Timezone (IANA name, defaulted from `Intl.DateTimeFormat().resolvedOptions().timeZone`), date format (`iso` / `us` / `eu`), default CSV delimiter, default CSV timestamp format. The CSV defaults pre-fill the import form so users don't re-pick on every upload.
+- **Data & storage.** Live gauge powered by `GET /api/v1/system/storage` — filesystem total/used/free progress bar plus per-directory byte totals for `data/` and `modules/`, showing the absolute paths of each bind-mount.
+- **Jobs.** Worker concurrency (slider, currently displays the backend value; live-update path lands with the settings sync).
+- **Telemetry.** Off by default; an opt-in switch (the platform is local-first, no telemetry without consent).
 
-All settings persist to SQLite (`user_settings (key, value_json)`) and apply live without restart where possible.
+Most settings persist in the client-side zustand store (`useUi`, [apps/web/lib/stores/ui.ts](apps/web/lib/stores/ui.ts)) with the `persist` middleware writing to `localStorage`. Server-side persistence in `user_settings (key, value_json)` is reserved for future cross-device sync.
 
 #### 7.6.2 Modules
 
@@ -611,35 +631,34 @@ Each module's *Configure* opens the deep page (`/settings/modules/{moduleId}`):
 
 - **About:** rendered manifest (id, version, category, requires-python, author, license, link to docs if declared).
 - **Requirements:** event-log requirements + dep status (✓ / ✗ for each `requirements.modules` and `optional_modules`).
-- **Provides / consumes:** capability tables, with a small graph view showing which other installed modules reference this one.
+- **Provides / consumes:** capability tables, plus a live xyflow graph ([apps/web/components/settings/capability-graph.tsx](apps/web/components/settings/capability-graph.tsx)) showing which other installed modules reference this one (edges are `provides → consumes` with the capability name as label).
 - **Configuration:** the module's `config_schema` rendered as a shadcn `Form` with Zod validation. Save persists to `module_configs` in SQLite.
 - **Dependencies:** Python + npm packages from the manifest's `dependencies` block, with their resolved versions from the lockfile, install size, and a *Reinstall* button.
-- **Logs:** tail of recent module logs (server-streamed via `WS /events` filtered by `module_id`).
+- **Logs:** tail of the last 50 `ctx.logger.*` lines, streamed over `WS /api/v1/events` subscribed to `module.log.*` and filtered client-side by `payload.module_id`. The loader wraps every `ctx.logger` call to also publish onto that topic ([apps/web/components/settings/module-logs-tail.tsx](apps/web/components/settings/module-logs-tail.tsx)).
 - **Danger zone:** *Disable for all logs*, *Uninstall*.
   Removes the module folder, its venv, and any cached results. The platform's own dependencies are unaffected.
 
 ##### Importing a new module (`/settings/modules/import`)
 
 - Three input methods (`Tabs`):
-  1. **Upload `.zip` or `.tar.gz`** — drop zone (`Card` with dashed border, drag-and-drop). Server unpacks into `modules/<id>/`, validates `manifest.yaml`, runs `uv sync`, returns the new module's status.
-  2. **From git URL** — `Input` for repo URL + optional ref/tag; server clones into `modules/<id>/` then continues as above.
-  3. **From PyPI / npm** — module ID + version; resolved via the registry entry-point mechanism.
-- During install, a sticky `Card` shows live progress (manifest validation → dep resolution → `uv sync` → frontend bundle → mount) streamed over `WS /jobs/{job_id}/stream`.
+  1. **Upload `.zip` / `.tar.gz` / `.tar` / `.tgz`** — drop zone, posts multipart to `POST /api/v1/modules/install`. The route streams the upload to `data/module-uploads/`, submits a `module.install.upload` job that unpacks via `_safe_extract`, validates `manifest.yaml`, calls `loader.load_one()`.
+  2. **From git URL** — `POST /api/v1/modules/install/git` with `{ url, ref? }`. Job clones with `--depth 1` (optionally `--branch <ref>`), strips `.git/`, then same load path.
+  3. **From PyPI** — `POST /api/v1/modules/install/registry` with `{ source: "pypi", id, version? }`. Job runs `uv pip install <spec>` against the platform venv, then re-scans `importlib.metadata.entry_points(group="flows_funds.modules")` and loads any new module that declared one (§5.3 step 1). npm-source modules currently raise a clear error — no Python entry point to bind to.
+- All three return `{ "job_id": "..." }` so the frontend's existing dock/drawer surfaces progress and the toast actions work uniformly with import jobs.
 - On success, a toast + automatic redirect to `/settings/modules/{moduleId}`.
-- On failure, an inline error with the offending log lines, plus a "rollback" action that deletes the half-installed folder.
+- On failure, the dock row shows the offending stage + error message. The job handler `rmtree`s any half-extracted staging dir in `finally`.
 
 #### 7.6.3 About
 
-Platform version, build commit, license, links, and a one-click *Copy diagnostics* button (system info + module list + recent error excerpts) for support.
+Platform version, license, an "Onboarding → Restart" button, and a one-click *Copy diagnostics* button. The button hits `GET /api/v1/system/diagnostics` and writes the returned JSON blob (platform version, Python version, OS, settings, installed module summaries with isolation mode) to the clipboard for pasting into a support thread.
 
 ### 7.7 Per-module page customisation
 
 - Each module supplies a default `frontend.page_layout` in its manifest.
-- Users can drag, drop, resize and swap widgets from a layout editor on the module page (`Edit layout` button toggles into edit mode; uses `react-grid-layout` themed with shadcn tokens).
-- Layouts persist per-user in SQLite as JSON (`module_layouts (user_id, log_id, module_id, layout_json)`).
+- **Layout persistence is wired.** The `module_layouts (user_id, log_id, module_id, layout_json)` SQLite table is live, with `GET / PUT /api/v1/modules/{id}/layout?log_id=...` and a `useModuleLayout(moduleId, logId)` + `useSaveModuleLayout(...)` hook pair in [apps/web/lib/module-layout.ts](apps/web/lib/module-layout.ts) (re-exported from `@flows-funds/module-sdk-ts`). The drag-drop UI itself (`react-grid-layout`) is unrendered today because the shipping modules render monolithic panels rather than widget grids — once a module declares `frontend.widgets` and uses the hook to read/write its layout, the editor surface goes live without a server change.
 - Widgets share a small contract: `Widget(props: { logId, moduleId, config }) → ReactNode`.
-- **Cross-module widget reuse** — a widget exposed by one module can be embedded on another module's page, provided the source module is installed. The frontend SDK exposes `useWidget(moduleId, widgetId)` (e.g. `useWidget("some-module", "some-widget")`) that resolves the import lazily and renders a `Skeleton`, then a placeholder card if the source module is missing or disabled.
-- Common building blocks (process visualiser, KPI card, ECharts wrapper, `Table`, time-window picker) live in `packages/module-sdk-ts` so module authors don't reimplement them.
+- **Cross-module widget reuse** — a widget exposed by one module can be embedded on another module's page, provided the source module is installed. `useWidget(sourceModuleId, widgetId)` from `@flows-funds/module-sdk-ts` ([apps/web/lib/module-widgets.tsx](apps/web/lib/module-widgets.tsx)) resolves the bundle lazily via the same loader as panels, renders a `Skeleton`, then a placeholder card if the source module is missing or disabled. The bundler in [bundle-modules.mjs](apps/web/scripts/bundle-modules.mjs) already produces one bundle per `frontend.widgets[]` entry (`.dist/widget-<id>.js`).
+- **Public SDK surface.** [packages/module-sdk-ts/src/index.ts](packages/module-sdk-ts/src/index.ts) re-exports `useWidget`, `useModuleLayout`, `useSaveModuleLayout`, the `api` / `rawFetch` HTTP helpers, the `subscribeBus` / `subscribeJob` WS helpers, and `cn` / `formatDuration` / `formatNumber` so module authors import from one place rather than reaching into host `@/` aliases directly.
 
 ### 7.8 Persistent chrome (sidebar + topbar)
 
@@ -690,7 +709,7 @@ Opens from the dock click or via a global cmd-K command (*Show jobs*). Full-heig
 
 Each job row renders a shadcn `Card` (compact) with:
 
-- **Title.** The job's display title (e.g. *"Import — Order-to-Cash 2024"*; modules can supply their own job titles via the SDK, e.g. *"Conformance check — model.bpmn vs Order-to-Cash 2024"*).
+- **Title.** The job's display title (e.g. *"Import — Order-to-Cash 2024"*; modules can supply their own job titles via the SDK, e.g. *"Discovery — Inductive miner on Order-to-Cash 2024"*).
 - **Subtitle.** `{type} · {module_id?} · {target}` — short technical breadcrumb.
 - **Status badge.** `queued` / `running` / `paused` / `completed` / `failed` / `cancelled`, colour-coded against CSS variables.
 - **Progress.** shadcn `Progress` bar with `current / total` (e.g. *"94,210 / 184,620 events"*) and percentage.
@@ -749,7 +768,7 @@ The Job model in SQLite (§8) gains: `title`, `subtitle`, `module_id?`, `eta_sec
 | Type | When | Who creates | Module-scoped | Purpose |
 |---|---|---|---|---|
 | `import` | User uploads an event log via `/processes/import` | Platform (core) | No | Parse and normalise XES / CSV / XML / OCEL into Parquet. Multi-stage: `parsing` → `normalizing` → `indexing`. |
-| `module` | Module defines a `@job`-decorated route or event handler | Module (SDK `@job`) | Yes (module_id required) | Long-running module computation (discovery, conformance, cost analysis, etc.). Title supplied by the module's `@job(title=...)` decorator. |
+| `module` | Module defines a `@job`-decorated route or event handler | Module (SDK `@job`) | Yes (module_id required) | Long-running module computation (discovery on large logs, expensive aggregations, etc.). Title supplied by the module's `@job(title=...)` decorator. |
 
 **Notes:**
 - The `module_id` field is `NULL` for `import` jobs, required for `module` jobs.
@@ -762,7 +781,7 @@ The Job model in SQLite (§8) gains: `title`, `subtitle`, `module_id?`, `eta_sec
 - **Worker pool.** In-process asyncio tasks (configurable `WORKER_CONCURRENCY`, default 2). Progress is persisted to SQLite every N events (default 1000) and broadcast over the WebSocket fan-out.
 - **Stream.** WebSocket subscribes to a per-job `asyncio.Event`; falls back to SQLite polling if the connection drops.
 - **No Redis / Celery / RQ / Dramatiq.** Keeps the stack to two services and a single Python process per scale unit.
-- For heavy CPU work (e.g. alignment-based conformance on a million-event log), workers offload to a `ProcessPoolExecutor` — still no broker, still single binary.
+- For heavy CPU work (e.g. inductive mining on a million-event log), `JobRuntime` exposes a lazily-initialised `ProcessPoolExecutor` sized to `worker_concurrency`. Module authors offload via `await ctx.run_in_process(fn, *args, **kwargs)` ([context.py](packages/module-sdk-py/src/flows_funds/sdk/context.py)) — standard pickling rules apply (importable callable, picklable args/return), so authors typically declare a module-level pure function for the hot loop and call it from an otherwise-async handler. Still no broker, still single binary.
 
 ---
 
@@ -800,6 +819,8 @@ services:
 
   web:
     build: ./apps/web
+    volumes:
+      - ./modules:/app/modules           # same bind as api — bundler writes .dist/ here at container start
     environment:
       INTERNAL_API_URL: http://api:8000
       NEXT_PUBLIC_API_URL: http://localhost:8000
@@ -807,40 +828,20 @@ services:
     depends_on: [api]
 ```
 
-Two services. No Redis, no DB container, no Nginx in dev. The `data/` bind-mount is the user's persistent storage — back it up by copying the folder.
+Two services. No Redis, no DB container, no Nginx in dev. The `data/` bind-mount is the user's persistent storage — back it up by copying the folder. Both containers share the `modules/` bind-mount: the API serves bundled assets under `/api/v1/modules/{id}/assets/...`, and the web container's entrypoint runs the module bundler (esbuild via [bundle-modules.mjs](apps/web/scripts/bundle-modules.mjs)) before handing off to Next, so every installed module's `.dist/` is fresh by the time the first request hits.
 
 ---
 
-## 11. Planned Modules (design reference — not implemented in v1)
+## 11. Built-in modules
 
-**No modules ship with v1.** v1 delivers the *platform*: ingestion, storage, jobs, the module SDK, the manifest format, the dependency-isolation system, the Settings → Modules import flow, the empty Process detail page, and the Jobs drawer.
+Two foundation modules ship in `modules/` and are loaded at platform startup. They double as the **acceptance test** for the module SDK — both are authored through the same public SDK that any third-party module would use, with no platform-side privileges.
 
-The modules below are the **target catalogue** the platform is designed to host. They are listed here only as design checkpoints — to verify that the manifest schema, requirement system, category model and SDK can express each of them without future churn. Treat this section as a forward-looking specification, not a build list. Each row maps a future module to its planned `category` and outlines its scope.
-
-| Module id (planned) | Category | Scope |
+| Module id | Category | Scope |
 |---|---|---|
-| `discovery` | foundation | pm4py inductive / heuristics / alpha; outputs Petri net / BPMN / DFG / process tree / POWL |
+| `discovery` | foundation | pm4py inductive / heuristics / alpha; outputs Petri net / DFG / process tree / prefix tree |
 | `performance` | foundation | Lead / sojourn / wait time, throughput, bottleneck detection |
-| `organizational` | attribute | Resource & role mining, handover-of-work network, social network |
-| `lifecycle_timing` | attribute | Activity lifecycle (start / complete / suspend) timing analysis |
-| `cost_analysis` | attribute | Requires `cost` column; activity-based costing |
-| `decision_mining` | attribute | Splits at gateways → decision rules (DT / rule mining) |
-| `conformance` | external_input | Token-replay / alignment vs. user-supplied BPMN |
-| `temporal_dynamics` | advanced | Concept drift, seasonality, time-window stability |
 
-These modules are **not** scaffolded, not folder-stubbed, not registered, and not present in `modules/` for v1. They will be authored later through the same flow available to any user (§12 *Adding a New Module*) — this is also the v1 acceptance test for the platform: the core team builds the first module entirely through the public module SDK, with no platform-side privileges.
-
-### 11.1 Conformance module — design notes (future)
-
-When the `conformance` module is authored, the design assumes:
-
-- BPMN 2.0 XML upload via the module's own page (`/processes/{logId}/modules/{id}`).
-- Validation: parsed via `bpmn-python`; rejected if no start/end events or unsupported constructs.
-- Stored alongside the log under a module-owned subdirectory inside the module's result cache.
-- Computes: token-replay fitness, alignment-based fitness, precision, generalisation, simplicity.
-- Optional future inputs: PNML, DCR, Declare.
-
-This block is here so the platform can verify it provides the right primitives (per-module file storage, per-module pages, BPMN parsing as a module-declared dependency) — not because the module exists.
+Additional modules are installed via Settings → Modules → Import (§7.6.2): zip / tar.gz upload, git URL, or the `flows_funds.modules` entry point.
 
 ---
 
@@ -876,7 +877,7 @@ The platform discovers the module automatically. **No edits to `main.py`, no har
 The previous design document described a Postgres + JSONB graph with hardcoded built-in modules registered in `main.py`. The differences worth flagging:
 
 - **Postgres → SQLite + DuckDB + Parquet.** Dropped the second container; gained columnar analytics.
-- **Built-in modules in `main.py` → manifest-discovered modules, none shipped with v1.** Removed the registration boilerplate; modules are now extension-point packages, and v1 ships with `modules/` empty (see §11).
+- **Built-in modules in `main.py` → manifest-discovered modules.** Removed the registration boilerplate; modules are now extension-point packages, and the two foundation modules (Discovery, Performance) are authored through the same public SDK any third-party module would use (see §11).
 - **Hardcoded frontend module registry → manifest-driven dynamic imports.** Frontend no longer needs edits per module.
 - **Event-log workspace + per-process detail.** The old `/discover` workspace and any analytics shipped with the platform are not carried over — analytics is the responsibility of (future) modules that live alongside the platform, not inside it.
 - **Job + progress system.** Was implicit; now first-class with WebSocket streaming and a bottom-left progress dock.
@@ -887,7 +888,7 @@ The previous design document described a Postgres + JSONB graph with hardcoded b
 
 ## 15. Out of Scope (for v1)
 
-- **Any analytics modules.** v1 is the *platform only*: ingestion, storage, jobs, the module SDK, the manifest format, dependency isolation, the Settings → Modules import flow, the (intentionally empty) Process detail grid, and the Jobs drawer. The 9 modules in §11 are a forward-looking specification, not a v1 deliverable. A fresh install has zero modules; the user installs them via Settings → Modules → Import.
+- **Most analytics modules.** v1 ships only Discovery and Performance (see §11); any other analytics — organizational mining, conformance, decision mining, cost analysis, lifecycle timing, temporal dynamics, etc. — are deferred and would be authored through the same module SDK any third party uses.
 - Multi-user authentication / RBAC. Single-user local mode only.
 - Cloud deployment / Kubernetes manifests.
 - Streaming / real-time event ingestion. v1 is batch-import only.

@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
-import { FileBox } from "lucide-react";
+import { FileBox, Plus } from "lucide-react";
 import { useModules } from "@/lib/queries";
 
 export default function ModulesSettingsPage() {
@@ -28,13 +28,28 @@ export default function ModulesSettingsPage() {
       <EmptyState
         icon={FileBox}
         title="No modules installed"
-        description="Drop a module folder under modules/ on disk to make it available here."
+        description="Upload a .zip / .tar.gz or clone from a git URL to install one."
+        primaryAction={
+          <Button asChild className="cursor-pointer">
+            <Link href="/settings/modules/import">
+              <Plus className="mr-1.5 h-3.5 w-3.5" /> Install a module
+            </Link>
+          </Button>
+        }
       />
     );
   }
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button asChild variant="outline" size="sm" className="cursor-pointer">
+          <Link href="/settings/modules/import">
+            <Plus className="mr-1.5 h-3.5 w-3.5" /> Install a module
+          </Link>
+        </Button>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {modules.map((m) => (
         <Card key={m.id}>
           <CardContent className="space-y-3 p-4">
@@ -60,6 +75,7 @@ export default function ModulesSettingsPage() {
           </CardContent>
         </Card>
       ))}
+      </div>
     </div>
   );
 }

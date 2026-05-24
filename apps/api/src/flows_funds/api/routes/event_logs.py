@@ -6,13 +6,16 @@ import json
 import shutil
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import unquote, urlparse
 
 import aiofiles
+import httpx
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel, HttpUrl
 from sqlalchemy import select
 
-from flows_funds.api.db.models import EventLog
+from flows_funds.api.db.models import EventLog, Folder
 from flows_funds.api.db.session import SessionDep
 from flows_funds.api.ingest.dispatch import IMPORT_JOB_TYPE, detect_format
 from flows_funds.api.ingest.storage import log_paths
@@ -49,6 +52,7 @@ async def create_event_log(
     file: Annotated[UploadFile, File(description="XES, XES.GZ, or CSV upload")],
     name: Annotated[str | None, Form()] = None,
     csv_mapping: Annotated[str | None, Form(description="JSON-encoded CsvColumnMapping")] = None,
+    folder_id: Annotated[str | None, Form()] = None,
 ) -> EventLogCreateResponse:
     if file.filename is None:
         raise HTTPException(status_code=400, detail="Upload is missing a filename.")
@@ -64,6 +68,11 @@ async def create_event_log(
             parsed_mapping = CsvColumnMapping.model_validate(json.loads(csv_mapping))
         except (ValueError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=422, detail=f"Invalid csv_mapping: {exc}") from exc
+
+    if folder_id is not None:
+        folder = await session.get(Folder, folder_id)
+        if folder is None or folder.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="Folder not found.")
 
     log_id = uuid7_str()
     paths = log_paths(log_id)
@@ -85,6 +94,7 @@ async def create_event_log(
             source_format=source_format,
             source_filename=file.filename,
             status="importing",
+            folder_id=folder_id,
             created_at=datetime.now(UTC).replace(tzinfo=None),
         )
     )
@@ -107,6 +117,109 @@ async def create_event_log(
         log_id=log_id,
         job_id=job_id,
         source_format=source_format,
+    )
+    return EventLogCreateResponse(log_id=log_id, job_id=job_id)
+
+
+class ImportFromUrlRequest(BaseModel):
+    url: HttpUrl
+    name: str | None = None
+    csv_mapping: str | None = None  # JSON-encoded CsvColumnMapping
+
+
+@router.post(
+    "/from-url",
+    response_model=EventLogCreateResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_event_log_from_url(
+    body: ImportFromUrlRequest,
+    session: SessionDep,
+    runtime: _RuntimeDep,
+) -> EventLogCreateResponse:
+    """Download a remote XES / XES.GZ / CSV and queue it for import."""
+    url_str = str(body.url)
+    # Derive a filename from the URL path so detect_format can sniff the extension.
+    url_path = unquote(urlparse(url_str).path)
+    filename = url_path.rsplit("/", 1)[-1] or "import"
+
+    try:
+        source_format = detect_format(filename)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Cannot determine file format from URL path ({filename!r}). "
+            "Make sure the URL ends with .xes, .xes.gz, or .csv.",
+        ) from exc
+
+    parsed_mapping: CsvColumnMapping | None = None
+    if body.csv_mapping:
+        try:
+            parsed_mapping = CsvColumnMapping.model_validate(json.loads(body.csv_mapping))
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid csv_mapping: {exc}") from exc
+
+    # Download the remote file.
+    try:
+        async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+            resp = await client.get(url_str)
+            if resp.status_code >= 400:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Remote server returned HTTP {resp.status_code} for the given URL.",
+                )
+            raw = resp.content
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch URL: {exc}") from exc
+
+    log_id = uuid7_str()
+    paths = log_paths(log_id)
+    paths.ensure()
+
+    ext = source_format if source_format != "xes.gz" else "xes.gz"
+    original_path = paths.original_for(ext)
+
+    async with aiofiles.open(original_path, "wb") as out:
+        await out.write(raw)
+
+    display_name = (body.name or filename).strip() or filename
+    # Strip the extension from auto-derived names to keep things clean.
+    if not body.name:
+        for suffix in (".xes.gz", ".xes", ".csv", ".xml"):
+            if display_name.lower().endswith(suffix):
+                display_name = display_name[: -len(suffix)]
+                break
+
+    session.add(
+        EventLog(
+            id=log_id,
+            name=display_name,
+            source_format=source_format,
+            source_filename=filename,
+            status="importing",
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+    )
+    await session.commit()
+
+    job_id = await runtime.submit(
+        type_=IMPORT_JOB_TYPE,
+        title=f"Import — {display_name}",
+        subtitle=f"event_log.import · {source_format} (url)",
+        payload={
+            "log_id": log_id,
+            "source_format": source_format,
+            "original_path": str(original_path),
+            "csv_mapping": parsed_mapping.model_dump() if parsed_mapping else None,
+        },
+    )
+
+    log.info(
+        "event_log.created_from_url",
+        log_id=log_id,
+        job_id=job_id,
+        source_format=source_format,
+        url=url_str,
     )
     return EventLogCreateResponse(log_id=log_id, job_id=job_id)
 
@@ -173,6 +286,16 @@ async def update_event_log(
     if payload.column_overrides is not None:
         # Pydantic already enforces dict shape; the schema is open-ended (labels/order/hidden).
         row.column_overrides = payload.column_overrides
+    # `folder_id` is explicitly nullable — model_fields_set distinguishes
+    # "key wasn't sent" from "explicitly set to null (move to root)".
+    if "folder_id" in payload.model_fields_set:
+        if payload.folder_id is not None:
+            folder = await session.get(Folder, payload.folder_id)
+            if folder is None or folder.deleted_at is not None:
+                raise HTTPException(status_code=404, detail="Folder not found.")
+        row.folder_id = payload.folder_id
+    if payload.position is not None:
+        row.position = payload.position
     await session.commit()
     return EventLogDetail.model_validate(row)
 
@@ -245,3 +368,65 @@ async def reimport_event_log(
     )
     log.info("event_log.reimport_started", log_id=log_id, job_id=job_id)
     return EventLogCreateResponse(log_id=log_id, job_id=job_id)
+
+
+@router.post(
+    "/{log_id}/duplicate",
+    response_model=EventLogDetail,
+    status_code=status.HTTP_201_CREATED,
+)
+async def duplicate_event_log(log_id: str, session: SessionDep) -> EventLogDetail:
+    """Fast-clone an event log by copying its on-disk directory.
+
+    Cheaper than re-importing because the parquet outputs already exist; we
+    just clone the bytes into a fresh log id and persist a new metadata row
+    in the same folder, immediately after the source log.
+    """
+    src = await session.get(EventLog, log_id)
+    if src is None or src.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Event log not found.")
+    if src.status != "ready":
+        raise HTTPException(
+            status_code=409,
+            detail="Only ready event logs can be duplicated.",
+        )
+
+    src_paths = log_paths(log_id)
+    if not src_paths.exists():
+        raise HTTPException(
+            status_code=409,
+            detail="Source data is missing on disk — cannot duplicate.",
+        )
+
+    new_id = uuid7_str()
+    new_paths = log_paths(new_id)
+    try:
+        shutil.copytree(src_paths.root, new_paths.root)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Copy failed: {exc}") from exc
+
+    # Sit the duplicate right after the source within the same folder.
+    now = datetime.now(UTC).replace(tzinfo=None)
+    duplicate = EventLog(
+        id=new_id,
+        name=f"{src.name} (copy)",
+        source_format=src.source_format,
+        source_filename=src.source_filename,
+        status="ready",
+        events_count=src.events_count,
+        cases_count=src.cases_count,
+        variants_count=src.variants_count,
+        date_min=src.date_min,
+        date_max=src.date_max,
+        detected_schema=src.detected_schema,
+        description=src.description,
+        column_overrides=src.column_overrides,
+        folder_id=src.folder_id,
+        position=src.position + 1,
+        created_at=now,
+        imported_at=now,
+    )
+    session.add(duplicate)
+    await session.commit()
+    log.info("event_log.duplicated", source_log_id=log_id, new_log_id=new_id)
+    return EventLogDetail.model_validate(duplicate)

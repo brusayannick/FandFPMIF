@@ -30,6 +30,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { CapabilityGraph } from "@/components/settings/capability-graph";
+import { ModuleLogsTail } from "@/components/settings/module-logs-tail";
 import {
   useModules,
   useModuleConfig,
@@ -161,6 +163,10 @@ export default function ModuleDetailPage() {
           {m.description && <p className="text-muted-foreground">{m.description}</p>}
           <Section label="Provides" items={m.provides.length ? m.provides : ["—"]} />
           <Section label="Consumes" items={m.consumes.length ? m.consumes : ["—"]} />
+          <div className="space-y-2">
+            <h4 className="text-xs font-medium text-muted-foreground">Capability graph</h4>
+            <CapabilityGraph focusedModuleId={m.id} />
+          </div>
         </CardContent>
       </Card>
 
@@ -193,6 +199,15 @@ export default function ModuleDetailPage() {
               This module has no configurable parameters.
             </p>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Logs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ModuleLogsTail moduleId={m.id} />
         </CardContent>
       </Card>
 

@@ -10,9 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
-import { AiGuidanceCard } from "@/components/ai/ai-guidance-card";
 import { ModuleGrid } from "@/components/processes/module-grid";
-import { ProcessGuidancePane } from "@/components/processes/process-guidance-pane";
 import { EventsTab } from "@/components/processes/events-tab";
 import { VariantsTab } from "@/components/processes/variants-tab";
 import { ActivitiesTab } from "@/components/processes/activities-tab";
@@ -121,16 +119,6 @@ export default function ProcessDetailPage() {
           Import failed: {log.error ?? "Unknown error"}
         </div>
       )}
-      {ready && (
-        <div className="mb-6">
-          <AiGuidanceCard
-            kind="import-quality"
-            logId={logId}
-            ctaLabel="Check data quality"
-          />
-        </div>
-      )}
-
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="overview" className="cursor-pointer">Overview</TabsTrigger>
@@ -140,7 +128,6 @@ export default function ProcessDetailPage() {
           <TabsTrigger value="settings" className="cursor-pointer">Settings</TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="pt-6">
-          {ready && <ProcessGuidancePane logId={logId} />}
           <ModuleGrid logId={logId} />
           <p className="mt-6 text-xs text-muted-foreground">
             Need a module that isn&apos;t installed?{" "}

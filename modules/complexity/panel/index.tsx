@@ -2,7 +2,6 @@
 
 import { Info } from "lucide-react";
 
-import { AiGuidanceCard } from "@/components/ai/ai-guidance-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -76,8 +75,6 @@ export function ComplexityPanel({ logId }: { logId: string; moduleId: string }) 
       ) : (
         <MetricsView metrics={basic} />
       )}
-
-      <AiGuidanceCard kind="module" logId={logId} moduleId="complexity" />
     </div>
   );
 }

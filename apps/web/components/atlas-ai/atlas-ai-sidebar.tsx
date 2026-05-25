@@ -3,21 +3,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
+  Activity,
   AlertTriangle,
   ArrowUp,
   FileText,
   Lightbulb,
+  ListChecks,
   RotateCcw,
+  ShieldCheck,
   Sparkles,
+  Waves,
+  Workflow,
   X,
   Zap,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { rawFetch } from "@/lib/api";
 import { useAiConfig } from "@/lib/ai-queries";
+import { useModules } from "@/lib/queries";
 import { useUi } from "@/lib/stores/ui";
 import { useTrack } from "@/lib/analytics/hooks";
 import { EV } from "@/lib/analytics/events";
@@ -28,7 +35,14 @@ interface Message {
   isError?: boolean;
 }
 
-const SUGGESTIONS = [
+interface Starter {
+  icon: LucideIcon;
+  title: string;
+  subtitle: string;
+}
+
+// Starters shown when there's no process context (landing, settings, etc.).
+const DEFAULT_STARTERS: Starter[] = [
   {
     icon: FileText,
     title: "Summarize this process",
@@ -45,6 +59,118 @@ const SUGGESTIONS = [
     subtitle: "Highlight the slowest steps across cases",
   },
 ];
+
+// Process-level starters — shown on /processes/{logId} when no module is active.
+// These replace the inline "Generate AI overview" and "Check data quality" cards.
+const PROCESS_STARTERS: Starter[] = [
+  {
+    icon: Sparkles,
+    title: "Generate an AI overview of this process",
+    subtitle: "Cross-module summary of the key findings",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Check data quality for this log",
+    subtitle: "Surface import or event issues worth fixing first",
+  },
+  {
+    icon: Zap,
+    title: "Find bottlenecks across the process",
+    subtitle: "Highlight the slowest steps and rework loops",
+  },
+];
+
+// Per-module starters — these replace each module's inline "Get AI insights" card.
+const MODULE_STARTERS: Record<string, Starter[]> = {
+  complexity: [
+    {
+      icon: Sparkles,
+      title: "Interpret these complexity metrics",
+      subtitle: "Translate entropy and Pentland values into plain language",
+    },
+    {
+      icon: AlertTriangle,
+      title: "Flag unusual complexity signals",
+      subtitle: "Point out values that deviate from a typical process",
+    },
+    {
+      icon: ListChecks,
+      title: "Suggest next analysis steps",
+      subtitle: "Where to dig deeper based on these results",
+    },
+  ],
+  performance: [
+    {
+      icon: Zap,
+      title: "Find the worst bottlenecks",
+      subtitle: "Activities and handovers dragging cycle time",
+    },
+    {
+      icon: Activity,
+      title: "Explain the cycle-time distribution",
+      subtitle: "What median, p90, and lead time tell us here",
+    },
+    {
+      icon: ListChecks,
+      title: "Suggest performance improvements",
+      subtitle: "Prioritised actions based on the KPIs",
+    },
+  ],
+  cv4cdd: [
+    {
+      icon: Waves,
+      title: "Summarise detected drifts",
+      subtitle: "What kind of changes were found and when",
+    },
+    {
+      icon: AlertTriangle,
+      title: "Highlight high-confidence drifts",
+      subtitle: "Which drift points warrant attention first",
+    },
+    {
+      icon: ListChecks,
+      title: "Recommend root-cause checks",
+      subtitle: "Where to look in the data for each drift",
+    },
+  ],
+  discovery: [
+    {
+      icon: Workflow,
+      title: "Walk me through the process model",
+      subtitle: "Main paths from start to end",
+    },
+    {
+      icon: Lightbulb,
+      title: "Explain the most common variants",
+      subtitle: "Which flows account for most cases",
+    },
+    {
+      icon: AlertTriangle,
+      title: "Flag suspicious rework or loops",
+      subtitle: "Highlight unusual structures in the model",
+    },
+  ],
+};
+
+function genericModuleStarters(moduleName: string): Starter[] {
+  return [
+    {
+      icon: Sparkles,
+      title: `Interpret the ${moduleName} results`,
+      subtitle: "Plain-language summary of this module's output",
+    },
+    {
+      icon: AlertTriangle,
+      title: `Flag anomalies in ${moduleName}`,
+      subtitle: "Point out values that look off compared to a healthy process",
+    },
+    {
+      icon: ListChecks,
+      title: "Suggest next analysis steps",
+      subtitle: "Where to dig deeper based on these results",
+    },
+  ];
+}
 
 // --------------------------------------------------------------------------
 // Sub-components
@@ -160,6 +286,24 @@ export function AtlasAiSidebar() {
   const { data: aiConfig } = useAiConfig();
   const pathname = usePathname();
   const chatContext = useMemo(() => deriveChatContext(pathname), [pathname]);
+
+  const activeModuleId = chatContext?.module_ids?.[0];
+  const { data: modules } = useModules(chatContext?.log_id ?? null);
+  const activeModule = useMemo(
+    () => (activeModuleId ? modules?.find((m) => m.id === activeModuleId) : undefined),
+    [activeModuleId, modules],
+  );
+
+  const starters = useMemo<Starter[]>(() => {
+    if (activeModuleId) {
+      return (
+        MODULE_STARTERS[activeModuleId] ??
+        genericModuleStarters(activeModule?.name ?? "this module")
+      );
+    }
+    if (chatContext?.log_id) return PROCESS_STARTERS;
+    return DEFAULT_STARTERS;
+  }, [activeModuleId, activeModule, chatContext]);
 
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -302,16 +446,6 @@ export function AtlasAiSidebar() {
             >
               Beta
             </Badge>
-            {chatContext?.log_id && (
-              <Badge
-                variant="secondary"
-                className="h-4 gap-1 border-0 bg-primary/10 px-1.5 text-[10px] font-medium uppercase tracking-wide text-primary"
-                title="Replies grounded in this process's cached module outputs"
-              >
-                <Sparkles className="h-2.5 w-2.5" />
-                Process-aware
-              </Badge>
-            )}
           </div>
           {hasMessages && (
             <button
@@ -348,7 +482,11 @@ export function AtlasAiSidebar() {
               </div>
               <h2 className="text-base font-semibold tracking-tight">How can I help?</h2>
               <p className="mt-1.5 text-xs text-sidebar-foreground/60">
-                Ask me anything about your processes, variants, or modules.
+                {activeModule
+                  ? `Ask me about the ${activeModule.name} results, or pick a starter below.`
+                  : chatContext?.log_id
+                  ? "Ask me about this process, or pick a starter below."
+                  : "Ask me anything about your processes, variants, or modules."}
               </p>
 
               {!isConfigured && aiConfig !== undefined && (
@@ -365,7 +503,7 @@ export function AtlasAiSidebar() {
               )}
 
               <div className="mt-6 w-full space-y-2">
-                {SUGGESTIONS.map((s) => {
+                {starters.map((s) => {
                   const Icon = s.icon;
                   return (
                     <button

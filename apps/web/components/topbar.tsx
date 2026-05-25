@@ -3,11 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Search, Sparkles } from "lucide-react";
+import { Search, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import { Badge } from "@/components/ui/badge";
 import { useUi } from "@/lib/stores/ui";
 import {
   Breadcrumb,
@@ -18,8 +17,6 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { CommandPalette } from "@/components/cmdk";
-import { useShallow } from "zustand/react/shallow";
-import { selectCounts, useJobsStore } from "@/lib/stores/jobs";
 import { useEventLogs } from "@/lib/queries";
 
 function isMac() {
@@ -100,8 +97,6 @@ export function Topbar() {
         </BreadcrumbList>
       </Breadcrumb>
 
-<JobsTopbarButton />
-
       <AtlasTopbarButton />
 
       <Button
@@ -145,33 +140,3 @@ function AtlasTopbarButton() {
   );
 }
 
-function JobsTopbarButton() {
-  const counts = useJobsStore(useShallow(selectCounts));
-  const setOpen = useJobsStore((s) => s.setDrawerOpen);
-  const active = counts.running + counts.queued;
-  const running = counts.running;
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className={cn(
-        "relative cursor-pointer gap-1.5 overflow-hidden text-muted-foreground",
-        active > 0 && "text-foreground",
-      )}
-      onClick={() => setOpen(true)}
-      aria-label={active ? `${active} active jobs` : "Open jobs drawer"}
-    >
-      <Activity className={cn("h-3.5 w-3.5", running > 0 && "animate-heartbeat")} />
-      <span className="hidden md:inline">Jobs</span>
-      {active > 0 && (
-        <>
-          <Badge className="ml-1 h-4 min-w-4 border-0 bg-foreground/10 px-1 text-[10px] tabular-nums text-foreground">
-            {active}
-          </Badge>
-          <span className={cn("absolute inset-x-0 bottom-0 h-[2px] bg-primary/70", running > 0 && "animate-heartbeat")} />
-        </>
-      )}
-    </Button>
-  );
-}

@@ -3,9 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  Loader2,
-  Play,
-  RotateCcw,
   Sparkles,
   TrendingDown,
   TrendingUp,
@@ -14,8 +11,6 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import { AiGuidanceCard } from "@/components/ai/ai-guidance-card";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
@@ -35,10 +30,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
 import { apiUrl } from "@/lib/api";
-import { subscribeBus } from "@/lib/ws";
-import { cn } from "@/lib/cn";
 
-import { useCv4cddResults, useRunCv4cdd, type Cv4cddDrift } from "./queries";
+import { useCv4cddResults, type Cv4cddDrift } from "./queries";
 
 // ── Drift-type metadata ───────────────────────────────────────────────────────
 
@@ -76,57 +69,9 @@ const DRIFT_META: Record<
 
 export function Cv4cddPanel({ logId }: { logId: string; moduleId: string }) {
   const resultsQ = useCv4cddResults(logId);
-  const run = useRunCv4cdd(logId);
-
-  // Tracks an in-flight detection so we can show the "running" state and a
-  // progress hint until the WebSocket bus pushes `job.completed`.
-  const [runningJobId, setRunningJobId] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{ pct: number; msg: string } | null>(
-    null,
-  );
 
   // Cache-buster for the <img> src so the browser refetches after each run.
-  const [imageNonce, setImageNonce] = useState<number>(() => Date.now());
-
-  // Subscribe to job events; flip the running state off + refetch when our job
-  // wraps up. Cleanup the socket on unmount so we don't keep an idle handle open.
-  useEffect(() => {
-    if (!runningJobId) return;
-    const sub = subscribeBus<Record<string, unknown>>(["job.*"], (env) => {
-      if ((env.payload?.id as string | undefined) !== runningJobId) return;
-
-      if (env.topic === "job.progress") {
-        const current = Number(env.payload.current ?? 0);
-        const total = Number(env.payload.total ?? 100) || 100;
-        setProgress({
-          pct: total > 0 ? (current / total) * 100 : 0,
-          msg: String(env.payload.message ?? ""),
-        });
-        return;
-      }
-      if (
-        env.topic === "job.completed" ||
-        env.topic === "job.failed" ||
-        env.topic === "job.cancelled"
-      ) {
-        setRunningJobId(null);
-        setProgress(null);
-        setImageNonce(Date.now());
-        void resultsQ.refetch();
-      }
-    });
-    return () => sub.close();
-  }, [runningJobId, resultsQ]);
-
-  const onRun = async () => {
-    try {
-      const { job_id } = await run.mutateAsync();
-      setRunningJobId(job_id);
-      setProgress({ pct: 0, msg: "Starting…" });
-    } catch {
-      // Errors are surfaced via the global toast in the api wrapper.
-    }
-  };
+  const [imageNonce] = useState<number>(() => Date.now());
 
   const data = resultsQ.data;
   const drifts: Cv4cddDrift[] = data?.drifts ?? [];
@@ -134,124 +79,31 @@ export function Cv4cddPanel({ logId }: { logId: string; moduleId: string }) {
 
   return (
     <div className="space-y-6">
-      <Header
-        running={Boolean(runningJobId)}
-        onRun={onRun}
-        progress={progress}
-        hasResults={hasResults}
-      />
-
       {resultsQ.isLoading ? (
         <Skeleton className="h-96 w-full" />
-      ) : !hasResults && !runningJobId ? (
+      ) : !hasResults ? (
         <EmptyState
           icon={Sparkles}
           title="No drifts detected yet"
-          description="Run the CV4CDD detector on this event log. A fine-tuned computer-vision model will scan a similarity-matrix encoding of the log for sudden, gradual, incremental, and recurring concept drifts."
+          description="A fine-tuned computer-vision model scans a similarity-matrix encoding of the log for sudden, gradual, incremental, and recurring concept drifts. Detection runs automatically as a background job — the module tile greys out on the process page while it's in flight."
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.2fr]">
           <DriftsCard
             drifts={drifts}
-            running={Boolean(runningJobId)}
             threshold={data?.confidence_threshold}
             nWindows={data?.n_windows}
           />
-          <ImageCard
-            logId={logId}
-            nonce={imageNonce}
-            running={Boolean(runningJobId)}
-          />
+          <ImageCard logId={logId} nonce={imageNonce} />
         </div>
-      )}
-
-      {hasResults && (
-        <AiGuidanceCard kind="module" logId={logId} moduleId="cv4cdd" />
       )}
     </div>
   );
 }
 
-// ── Header / run controls ─────────────────────────────────────────────────────
-
-function Header({
-  running,
-  onRun,
-  progress,
-  hasResults,
-}: {
-  running: boolean;
-  onRun: () => void;
-  progress: { pct: number; msg: string } | null;
-  hasResults: boolean;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Concept drift detection</CardTitle>
-        <CardAction>
-          <Button
-            onClick={onRun}
-            disabled={running}
-            size="sm"
-            className="shrink-0 gap-1.5"
-          >
-            {running ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Detecting…
-              </>
-            ) : hasResults ? (
-              <>
-                <RotateCcw className="h-3.5 w-3.5" />
-                Re-run detection
-              </>
-            ) : (
-              <>
-                <Play className="h-3.5 w-3.5" />
-                Run detection
-              </>
-            )}
-          </Button>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-xs text-muted-foreground">
-          Kraus & van der Aa (2024) — CV4CDD-4D. The log is encoded as a
-          window-pair similarity matrix; an object-detection model trained
-          on synthetic drifts localises the drift bounding boxes.
-        </p>
-        {running && progress && (
-          <div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full bg-primary transition-[width] duration-200"
-                style={{ width: `${Math.max(2, Math.min(100, progress.pct))}%` }}
-              />
-            </div>
-            {progress.msg && (
-              <p className="mt-1.5 text-[11px] text-muted-foreground">
-                {progress.msg}
-              </p>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 // ── Overlay image ─────────────────────────────────────────────────────────────
 
-function ImageCard({
-  logId,
-  nonce,
-  running,
-}: {
-  logId: string;
-  nonce: number;
-  running: boolean;
-}) {
+function ImageCard({ logId, nonce }: { logId: string; nonce: number }) {
   const src = apiUrl(
     `/api/v1/modules/cv4cdd/image?log_id=${encodeURIComponent(logId)}&t=${nonce}`,
   );
@@ -274,10 +126,7 @@ function ImageCard({
           shown as coloured bounding boxes — the x-axis is time.
         </p>
         <div
-          className={cn(
-            "relative w-[70%] overflow-hidden rounded-md border bg-muted/30",
-            running && "opacity-60",
-          )}
+          className="relative w-[70%] overflow-hidden rounded-md border bg-muted/30"
           style={{ aspectRatio: "1 / 1" }}
         >
           {errored ? (
@@ -295,11 +144,6 @@ function ImageCard({
               onError={() => setErrored(true)}
             />
           )}
-          {running && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-foreground/70" />
-            </div>
-          )}
         </div>
       </CardContent>
     </Card>
@@ -310,12 +154,10 @@ function ImageCard({
 
 function DriftsCard({
   drifts,
-  running,
   threshold,
   nWindows,
 }: {
   drifts: Cv4cddDrift[];
-  running: boolean;
   threshold?: number;
   nWindows?: number;
 }) {
@@ -364,9 +206,7 @@ function DriftsCard({
 
         {drifts.length === 0 ? (
           <p className="py-6 text-center text-xs text-muted-foreground">
-            {running
-              ? "Detection running — drifts will appear here."
-              : "The model didn't find any drifts above the confidence threshold."}
+            The model didn&apos;t find any drifts above the confidence threshold.
           </p>
         ) : (
           <div className="rounded-md border">

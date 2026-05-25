@@ -250,6 +250,25 @@ export const selectFinishedJobs = (s: State): LiveJob[] => {
   return out.sort((a, b) => (a.finished_at ?? a.created_at) > (b.finished_at ?? b.created_at) ? -1 : 1);
 };
 
+/**
+ * True if there is a queued/running/paused job for the given (logId, moduleId).
+ * Used by the module grid and module panels to disable interactions while a
+ * module's job is in flight. Reads `payload_json.log_id` since the JobDetail
+ * shape doesn't surface log_id at the top level.
+ */
+export const hasActiveModuleJob = (
+  s: State,
+  logId: string,
+  moduleId: string,
+): boolean => {
+  for (const j of s.byId.values()) {
+    if (j.module_id !== moduleId) continue;
+    if ((j.payload_json as { log_id?: string } | null)?.log_id !== logId) continue;
+    if (ACTIVE.has(j.status)) return true;
+  }
+  return false;
+};
+
 export const selectCounts = (s: State) => {
   let running = 0;
   let queued = 0;

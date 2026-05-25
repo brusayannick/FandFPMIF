@@ -4,7 +4,6 @@ import { useState } from "react";
 import { Activity, Clock, Gauge, TrendingUp, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import { AiGuidanceCard } from "@/components/ai/ai-guidance-card";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDuration, formatNumber } from "@/lib/format";
@@ -112,7 +111,6 @@ export function PerformancePanel({ logId }: { logId: string; moduleId: string })
         </CardContent>
       </Card>
 
-      <AiGuidanceCard kind="module" logId={logId} moduleId="performance" />
     </div>
   );
 }

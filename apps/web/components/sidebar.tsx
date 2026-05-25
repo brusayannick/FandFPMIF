@@ -3,13 +3,24 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { Cog, FolderKanban, Monitor, Moon, PanelLeftClose, Pickaxe, Sun } from "lucide-react";
+import {
+  Activity,
+  Cog,
+  FolderKanban,
+  Monitor,
+  Moon,
+  PanelLeftClose,
+  Pickaxe,
+  Sun,
+} from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 
 import { cn } from "@/lib/cn";
 import { useUi } from "@/lib/stores/ui";
 import { Button } from "@/components/ui/button";
 import { useTrack } from "@/lib/analytics/hooks";
 import { EV } from "@/lib/analytics/events";
+import { selectCounts, useJobsStore } from "@/lib/stores/jobs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -136,6 +147,7 @@ export function Sidebar() {
         )}
       >
         <ThemeToggle collapsed={collapsed} />
+        <JobsSidebarButton collapsed={collapsed} />
       </div>
       {!collapsed && (
         <div className="border-t border-sidebar-border px-4 py-2 text-[10px] uppercase tracking-wide text-sidebar-foreground/40">
@@ -143,6 +155,46 @@ export function Sidebar() {
         </div>
       )}
     </aside>
+  );
+}
+
+function JobsSidebarButton({ collapsed }: { collapsed: boolean }) {
+  const counts = useJobsStore(useShallow(selectCounts));
+  const setOpen = useJobsStore((s) => s.setDrawerOpen);
+  const active = counts.running + counts.queued;
+  const running = counts.running;
+
+  const button = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label={active ? `${active} active jobs` : "Open jobs drawer"}
+      onClick={() => setOpen(true)}
+      className={cn(
+        "relative h-8 w-8 cursor-pointer text-sidebar-foreground/70",
+        active > 0 && "text-sidebar-foreground",
+      )}
+    >
+      <Activity className={cn("h-4 w-4", running > 0 && "animate-heartbeat")} />
+      {active > 0 && (
+        <span
+          aria-hidden
+          className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-medium leading-none tabular-nums text-primary-foreground"
+        >
+          {active > 9 ? "9+" : active}
+        </span>
+      )}
+    </Button>
+  );
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side={collapsed ? "right" : "top"}>
+        {active ? `${active} active job${active === 1 ? "" : "s"}` : "Jobs"}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

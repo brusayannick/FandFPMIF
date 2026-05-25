@@ -9,6 +9,7 @@ import {
   FolderOpen,
   Link2,
   Loader2,
+  Sparkles,
   X,
   XCircle,
 } from "lucide-react";
@@ -33,7 +34,11 @@ import {
   useImportEventLog,
   useImportEventLogFromUrl,
 } from "@/lib/queries";
+import { useAiConfig } from "@/lib/ai-queries";
+import { useImportColumnMapping } from "@/lib/ai-guidance";
 import { useUi } from "@/lib/stores/ui";
+import { useTrack } from "@/lib/analytics/hooks";
+import { EV } from "@/lib/analytics/events";
 import { cn } from "@/lib/cn";
 
 type DetectedFormat = "xes" | "xes.gz" | "csv" | "unsupported";
@@ -52,6 +57,13 @@ async function readFirstLine(file: File): Promise<string> {
   const blob = file.slice(0, 4096);
   const text = await blob.text();
   return text.split(/\r?\n/, 1)[0] ?? "";
+}
+
+async function readSampleLines(file: File, lineCount: number): Promise<string[]> {
+  // Read a 32 KB prefix so we get enough rows even on wide schemas.
+  const blob = file.slice(0, 32 * 1024);
+  const text = await blob.text();
+  return text.split(/\r?\n/).filter((l) => l.length > 0).slice(0, lineCount);
 }
 
 function parseCsvHeader(line: string, delimiter: string): string[] {
@@ -196,6 +208,9 @@ export function ImportForm({ onSuccess }: ImportFormProps = {}) {
 function FileImportForm({ onSuccess }: ImportFormProps) {
   const router = useRouter();
   const importer = useImportEventLog();
+  const { data: aiConfig } = useAiConfig();
+  const aiMapping = useImportColumnMapping();
+  const track = useTrack();
 
   const defaultDelimiter = useUi((s) => s.csvDelimiter);
   const defaultTsFormat = useUi((s) => s.csvTimestampFormat);
@@ -205,9 +220,11 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
   const [headers, setHeaders] = useState<string[]>([]);
   const [delimiter, setDelimiter] = useState<string>(defaultDelimiter);
   const [mapping, setMapping] = useState<Partial<CsvMapping>>({});
+  const [aiSuggested, setAiSuggested] = useState<Set<keyof CsvMapping>>(new Set());
   const [tsFormat, setTsFormat] = useState<string>(defaultTsFormat);
 
   const fmt = file ? detect(file) : null;
+  const aiConfigured = Boolean(aiConfig?.selected_provider && aiConfig?.selected_model);
 
   const onDrop = useCallback(
     async (f: File) => {
@@ -218,17 +235,53 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
       }
       setFile(f);
       setName((current) => current || f.name.replace(/\.(xes|xes\.gz|csv)$/i, ""));
+      setAiSuggested(new Set());
       if (detected === "csv") {
-        const header = await readFirstLine(f);
-        const cols = parseCsvHeader(header, delimiter);
+        const sample = await readSampleLines(f, 11);
+        const headerLine = sample[0] ?? "";
+        const cols = parseCsvHeader(headerLine, delimiter);
         setHeaders(cols);
-        setMapping(autoMap(cols));
+        const base = autoMap(cols);
+        setMapping(base);
+
+        // Best-effort AI fill for fields autoMap left blank. Silently no-ops
+        // if the user hasn't configured AI; surfaces nothing if the call
+        // fails — autoMap's coverage is fine on its own.
+        if (aiConfigured && cols.length > 0) {
+          const sampleRows = sample
+            .slice(1, 11)
+            .map((line) => parseCsvHeader(line, delimiter));
+          try {
+            const res = await aiMapping.mutateAsync({
+              headers: cols,
+              sample_rows: sampleRows,
+            });
+            const filled: Partial<CsvMapping> = { ...base };
+            const newlySuggested = new Set<keyof CsvMapping>();
+            for (const [key, header] of Object.entries(res.suggestions) as [
+              keyof CsvMapping,
+              string,
+            ][]) {
+              if (!filled[key] && header && cols.includes(header)) {
+                filled[key] = header;
+                newlySuggested.add(key);
+              }
+            }
+            if (newlySuggested.size > 0) {
+              setMapping(filled);
+              setAiSuggested(newlySuggested);
+            }
+          } catch {
+            // Drop silently — autoMap is the source of truth and the user
+            // can map manually below.
+          }
+        }
       } else {
         setHeaders([]);
         setMapping({});
       }
     },
-    [delimiter],
+    [delimiter, aiConfigured, aiMapping],
   );
 
   const ready = useMemo(() => {
@@ -241,6 +294,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
 
   const submit = async () => {
     if (!file) return;
+    track(EV.PROCESS_IMPORT_STARTED, { source: "file", format: fmt });
     try {
       const csvMapping = fmt === "csv" ? { ...mapping, delimiter, timestamp_format: tsFormat || undefined } : undefined;
       const resp = await importer.mutateAsync({
@@ -248,6 +302,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
         name: name || file.name,
         csvMapping,
       });
+      track(EV.PROCESS_IMPORT_FINISHED, { source: "file", format: fmt, ok: true });
       toast.success("Import queued");
       if (onSuccess) {
         onSuccess(resp.log_id);
@@ -255,6 +310,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
         router.push(`/processes?focus=${resp.log_id}`);
       }
     } catch (err: unknown) {
+      track(EV.PROCESS_IMPORT_FINISHED, { source: "file", format: fmt, ok: false });
       toastError(`Import failed: ${(err as Error).message}`);
     }
   };
@@ -277,23 +333,51 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
             </div>
 
             {fmt === "csv" && (
-              <CsvMappingFields
-                headers={headers}
-                mapping={mapping}
-                setMapping={setMapping}
-                delimiter={delimiter}
-                setDelimiter={async (d) => {
-                  setDelimiter(d);
-                  if (file) {
-                    const header = await readFirstLine(file);
-                    const cols = parseCsvHeader(header, d);
-                    setHeaders(cols);
-                    setMapping(autoMap(cols));
-                  }
-                }}
-                tsFormat={tsFormat}
-                setTsFormat={setTsFormat}
-              />
+              <>
+                {aiConfig !== undefined && !aiConfigured && (
+                  <div className="flex items-start gap-2 rounded-md border border-dashed border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                    <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      Tip: configure an AI provider in{" "}
+                      <a
+                        href="/settings/ai"
+                        className="font-medium underline underline-offset-2"
+                      >
+                        Settings → AI
+                      </a>{" "}
+                      to auto-fill the column mapping for unfamiliar headers.
+                    </span>
+                  </div>
+                )}
+                {aiMapping.isPending && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Asking AI for column suggestions…
+                  </div>
+                )}
+                <CsvMappingFields
+                  headers={headers}
+                  mapping={mapping}
+                  setMapping={(m) => {
+                    setMapping(m);
+                    setAiSuggested(new Set());
+                  }}
+                  aiSuggested={aiSuggested}
+                  delimiter={delimiter}
+                  setDelimiter={async (d) => {
+                    setDelimiter(d);
+                    if (file) {
+                      const header = await readFirstLine(file);
+                      const cols = parseCsvHeader(header, d);
+                      setHeaders(cols);
+                      setMapping(autoMap(cols));
+                      setAiSuggested(new Set());
+                    }
+                  }}
+                  tsFormat={tsFormat}
+                  setTsFormat={setTsFormat}
+                />
+              </>
             )}
 
             <div className="flex justify-end gap-2 border-t border-border pt-4">
@@ -491,6 +575,7 @@ function CsvMappingFields({
   headers,
   mapping,
   setMapping,
+  aiSuggested,
   delimiter,
   setDelimiter,
   tsFormat,
@@ -499,6 +584,7 @@ function CsvMappingFields({
   headers: string[];
   mapping: Partial<CsvMapping>;
   setMapping: (m: Partial<CsvMapping>) => void;
+  aiSuggested: Set<keyof CsvMapping>;
   delimiter: string;
   setDelimiter: (d: string) => void;
   tsFormat: string;
@@ -537,6 +623,7 @@ function CsvMappingFields({
           onChange={set("case_id")}
           options={headers.map((h) => ({ value: h, label: h }))}
           required
+          aiSuggested={aiSuggested.has("case_id")}
         />
         <FieldSelect
           label="activity"
@@ -544,6 +631,7 @@ function CsvMappingFields({
           onChange={set("activity")}
           options={headers.map((h) => ({ value: h, label: h }))}
           required
+          aiSuggested={aiSuggested.has("activity")}
         />
         <FieldSelect
           label="timestamp"
@@ -551,24 +639,28 @@ function CsvMappingFields({
           onChange={set("timestamp")}
           options={headers.map((h) => ({ value: h, label: h }))}
           required
+          aiSuggested={aiSuggested.has("timestamp")}
         />
         <FieldSelect
           label="end_timestamp"
           value={mapping.end_timestamp ?? "__none__"}
           onChange={set("end_timestamp")}
           options={[{ value: "__none__", label: "—" }, ...headers.map((h) => ({ value: h, label: h }))]}
+          aiSuggested={aiSuggested.has("end_timestamp")}
         />
         <FieldSelect
           label="resource"
           value={mapping.resource ?? "__none__"}
           onChange={set("resource")}
           options={[{ value: "__none__", label: "—" }, ...headers.map((h) => ({ value: h, label: h }))]}
+          aiSuggested={aiSuggested.has("resource")}
         />
         <FieldSelect
           label="cost"
           value={mapping.cost ?? "__none__"}
           onChange={set("cost")}
           options={[{ value: "__none__", label: "—" }, ...headers.map((h) => ({ value: h, label: h }))]}
+          aiSuggested={aiSuggested.has("cost")}
         />
       </div>
     </div>
@@ -581,18 +673,25 @@ function FieldSelect({
   onChange,
   options,
   required,
+  aiSuggested,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
   required?: boolean;
+  aiSuggested?: boolean;
 }) {
   return (
     <div className="grid gap-1.5">
-      <Label className="text-xs">
-        {label}
-        {required && <span className="text-destructive"> *</span>}
+      <Label className="text-xs flex items-center gap-1.5">
+        <span>{label}</span>
+        {required && <span className="text-destructive">*</span>}
+        {aiSuggested && (
+          <span className="rounded-sm bg-primary/10 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-primary">
+            AI
+          </span>
+        )}
       </Label>
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger className="cursor-pointer">

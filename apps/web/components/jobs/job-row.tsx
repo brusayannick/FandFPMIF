@@ -1,13 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import {
-  Copy,
-  Info,
-  Loader2,
-  RefreshCcw,
-  X,
-} from "lucide-react";
+import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import { Copy, Loader2, RefreshCcw, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
@@ -25,6 +19,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { useCancelJob, useRetryJob } from "@/lib/queries";
 import { formatDuration, formatNumber, formatRelative } from "@/lib/format";
 import { parseJobTitle, type LiveJob } from "@/lib/stores/jobs";
+import { cn } from "@/lib/cn";
 
 interface JobRowProps {
   job: LiveJob;
@@ -43,103 +38,122 @@ export function JobRow({ job }: JobRowProps) {
   const eta = job.eta_seconds ?? job.eta_local ?? null;
   const rate = job.rate ?? job.rate_local ?? null;
 
-  const isActive = job.status === "running" || job.status === "queued" || job.status === "paused";
+  const isActive =
+    job.status === "running" || job.status === "queued" || job.status === "paused";
   const isFailed = job.status === "failed";
-  const isCompleted = job.status === "completed";
 
   const subtitle = job.subtitle ?? (job.module_id ? job.module_id : "");
   const { name: cleanTitle, badge: typeCategory } = parseJobTitle(job);
 
+  // Action buttons live on the card; clicks on them must not also open the
+  // details dialog (the rest of the card surface is the dialog trigger).
+  const stop = (e: MouseEvent) => e.stopPropagation();
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setDetailsOpen(true);
+    }
+  };
+
   return (
-    <Card className="space-y-3 p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 min-w-0">
-            <Badge variant="outline" className="h-5 shrink-0 whitespace-nowrap border-0 bg-muted px-1.5 text-[10px]">
-              {typeCategory}
-            </Badge>
-            <div className="truncate text-sm font-medium leading-tight">{cleanTitle}</div>
+    <>
+      <Card
+        role="button"
+        tabIndex={0}
+        aria-label={`Open job details: ${cleanTitle}`}
+        onClick={() => setDetailsOpen(true)}
+        onKeyDown={onKeyDown}
+        className={cn(
+          "cursor-pointer space-y-2 p-3 transition-colors",
+          "hover:border-primary/40 hover:bg-accent/40",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        )}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <Badge
+                variant="outline"
+                className="h-5 shrink-0 whitespace-nowrap border-0 bg-muted px-1.5 text-[10px]"
+              >
+                {typeCategory}
+              </Badge>
+              <div className="truncate text-sm font-medium leading-tight">{cleanTitle}</div>
+            </div>
+            {subtitle && (
+              <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
+            )}
           </div>
-          {subtitle && <div className="truncate text-xs text-muted-foreground">{subtitle}</div>}
+          <div className="flex items-center gap-1 shrink-0">
+            <StatusBadge status={job.status} />
+            {isActive && (
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label="Cancel"
+                className="h-6 w-6 cursor-pointer p-0"
+                onClick={(e) => {
+                  stop(e);
+                  cancel.mutate(job.id);
+                }}
+                disabled={cancel.isPending}
+              >
+                {cancel.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <X className="h-3 w-3" />
+                )}
+              </Button>
+            )}
+            {isFailed && (
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label="Retry"
+                className="h-6 w-6 cursor-pointer p-0"
+                onClick={(e) => {
+                  stop(e);
+                  retry.mutate(job.id);
+                }}
+                disabled={retry.isPending}
+              >
+                {retry.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <RefreshCcw className="h-3 w-3" />
+                )}
+              </Button>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <StatusBadge status={job.status} />
-        </div>
-      </div>
 
-      <div className="space-y-0.5">
-        <Progress
-          value={pct ?? undefined}
-          className={pct === null && isActive ? "h-1 animate-pulse" : "h-1"}
-        />
-        <div className="flex items-center justify-between text-[11px] text-muted-foreground tabular-nums">
-          <span>
-            {pct === null
-              ? job.progress_current
-                ? `${formatNumber(job.progress_current)} processed`
-                : "Estimating…"
-              : `${formatNumber(job.progress_current)} / ${formatNumber(total)} (${pct}%)`}
-          </span>
-          <span>
-            {rate && Number.isFinite(rate)
-              ? `${Math.round(rate).toLocaleString()}/s · ETA ${formatDuration(eta)}`
-              : "—"}
-          </span>
-        </div>
-      </div>
-
-      {(job.stage || job.message) && (
-        <p className="text-[11px] text-muted-foreground">
-          {job.stage && <span className="font-medium uppercase tracking-wide">{job.stage}</span>}
-          {job.stage && job.message && <span className="mx-1">·</span>}
-          {job.message}
-        </p>
-      )}
-
-      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
-        <span>
-          {job.started_at ? `Started ${formatRelative(job.started_at)}` : `Created ${formatRelative(job.created_at)}`}
-        </span>
-        <div className="flex items-center gap-0.5">
-          {isActive && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 cursor-pointer gap-0.5 px-2 text-xs"
-              onClick={() => cancel.mutate(job.id)}
-              disabled={cancel.isPending}
-            >
-              <X className="h-3 w-3" />
-              Cancel
-            </Button>
-          )}
-          {isFailed && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 cursor-pointer gap-0.5 px-2 text-xs"
-              onClick={() => retry.mutate(job.id)}
-              disabled={retry.isPending}
-            >
-              <RefreshCcw className="h-3 w-3" />
-              Retry
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 cursor-pointer gap-0.5 px-2 text-xs"
-            onClick={() => setDetailsOpen(true)}
-          >
-            <Info className="h-3 w-3" />
-            Details
-          </Button>
-          {isActive && cancel.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
-        </div>
-      </div>
+        {isActive && (
+          <div className="space-y-0.5">
+            <Progress
+              value={pct ?? undefined}
+              className={pct === null ? "h-1 animate-pulse" : "h-1"}
+            />
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground tabular-nums">
+              <span>
+                {pct === null
+                  ? job.progress_current
+                    ? `${formatNumber(job.progress_current)} processed`
+                    : "Estimating…"
+                  : `${formatNumber(job.progress_current)} / ${formatNumber(total)} (${pct}%)`}
+              </span>
+              <span>
+                {rate && Number.isFinite(rate)
+                  ? `${Math.round(rate).toLocaleString()}/s · ETA ${formatDuration(eta)}`
+                  : ""}
+              </span>
+            </div>
+          </div>
+        )}
+      </Card>
 
       <JobDetailsDialog job={job} open={detailsOpen} onOpenChange={setDetailsOpen} />
-    </Card>
+    </>
   );
 }
 

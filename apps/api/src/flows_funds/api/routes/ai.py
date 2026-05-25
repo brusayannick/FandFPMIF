@@ -160,12 +160,12 @@ async def fetch_models(
                     ]
                 )
 
-            # UniGPT / LibreChat — treat as an OpenAI-compatible backend at the
-            # user-supplied base URL.
+            # UniGPT / LibreChat / Custom — treat as an OpenAI-compatible
+            # backend at the user-supplied base URL.
             if not base_url:
                 raise HTTPException(
                     status_code=400,
-                    detail="UniGPT requires a base URL in addition to the API key.",
+                    detail=f"{provider!r} requires a base URL in addition to the API key.",
                 )
             url = _openai_compat_models_url(base_url)
             r = await client.get(
@@ -280,12 +280,101 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class ChatContext(BaseModel):
+    """Optional process-aware context for the ATLAS sidebar.
+
+    When set, the server fetches cached outputs for the given module ids on
+    the given log and prepends them to the system prompt so the chat can
+    answer questions like "what's the worst bottleneck?" with grounded data.
+    """
+
+    log_id: str | None = None
+    module_ids: list[str] = []
+
+
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
+    context: ChatContext | None = None
 
 
 def _sse(data: dict[str, Any]) -> str:
     return f"data: {json.dumps(data)}\n\n"
+
+
+_CONTEXT_CHAR_BUDGET = 12_000
+
+
+async def _build_context_block(context: ChatContext | None) -> str:
+    if context is None or not context.log_id:
+        return ""
+    # Local imports keep `routes/ai.py` free of module-loader symbols at import
+    # time (which would otherwise tie this module to the loader's lifecycle).
+    from flows_funds.api.modules import get_module_loader
+    from flows_funds.api.modules.cache import ResultCache
+
+    try:
+        loader = get_module_loader()
+    except HTTPException:
+        return ""
+
+    # An empty module_ids list means "every module the loader knows about that
+    # exposes guidance_payload" — the natural default when the frontend just
+    # detected it's on a process page.
+    module_ids = context.module_ids or [
+        mid
+        for mid, loaded in loader.loaded.items()
+        if callable(getattr(loaded.instance, "guidance_payload", None))
+    ]
+    if not module_ids:
+        return ""
+
+    parts: list[str] = ["Current process context (cached module outputs):"]
+    remaining = _CONTEXT_CHAR_BUDGET
+    for mid in module_ids:
+        loaded = loader.loaded.get(mid)
+        if loaded is None:
+            continue
+        fn = getattr(loaded.instance, "guidance_payload", None)
+        if not callable(fn):
+            continue
+        # Prefer the module's curated payload over scanning raw cache keys.
+        try:
+            ctx = await loader._make_context(mid, context.log_id)
+        except Exception:
+            continue
+        try:
+            data = await fn(ctx) if asyncio.iscoroutinefunction(fn) else await asyncio.to_thread(fn, ctx)
+        except Exception:
+            data = None
+        finally:
+            import shutil as _shutil
+
+            _shutil.rmtree(ctx.workdir, ignore_errors=True)
+        if data is None:
+            # Fall back to dumping every JSON cache entry the module wrote.
+            cache = ResultCache(context.log_id, mid)
+            try:
+                files = list(cache.dir.glob("*.json"))
+            except OSError:
+                files = []
+            data = {}
+            for path in files:
+                if path.name.startswith("__"):
+                    continue
+                try:
+                    data[path.stem] = json.loads(path.read_text())
+                except (OSError, json.JSONDecodeError):
+                    continue
+            if not data:
+                continue
+        body = json.dumps(data, default=str)[:remaining]
+        parts.append(f"### Module: {mid}\n```json\n{body}\n```")
+        remaining -= len(body)
+        if remaining <= 0:
+            break
+    if len(parts) == 1:
+        return ""
+    return "\n\n".join(parts)
 
 
 @router.post("/chat")
@@ -303,6 +392,23 @@ async def chat(payload: ChatRequest, session: SessionDep) -> StreamingResponse:
         raise HTTPException(
             status_code=400,
             detail=f"No API key configured for {cfg.selected_provider!r}. Go to Settings → AI.",
+        )
+    if cfg.selected_provider in ("unigpt", "custom") and not p.base_url:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{cfg.selected_provider!r} requires a base URL. Go to Settings → AI.",
+        )
+
+    context_block = await _build_context_block(payload.context)
+    if context_block:
+        # Prepend the context to the user's saved system prompt for this call
+        # only — we do NOT persist the augmented prompt.
+        cfg = cfg.model_copy(
+            update={
+                "system_prompt": (
+                    context_block + ("\n\n" + cfg.system_prompt if cfg.system_prompt else "")
+                ),
+            }
         )
 
     return StreamingResponse(

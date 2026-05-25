@@ -212,3 +212,61 @@ class EventEdit(Base):
     __table_args__ = (
         Index("ix_event_edits_log_id_edited_at", "log_id", "edited_at"),
     )
+
+
+class AnalyticsSession(Base):
+    """Aggregate row per browser session — one per visit/idle-timeout window.
+
+    Updated via UPSERT on each ingested batch so `GET /analytics/summary` can
+    answer "sessions in the last 30 days" without scanning the events table.
+    """
+
+    __tablename__ = "analytics_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    anon_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    entry_path: Mapped[str | None] = mapped_column(String(512))
+    event_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    __table_args__ = (
+        Index("ix_analytics_sessions_anon_user_id", "anon_user_id"),
+        Index("ix_analytics_sessions_last_seen_at", "last_seen_at"),
+    )
+
+
+class AnalyticsEvent(Base):
+    """Append-only behaviour-tracking event row.
+
+    Capture is gated by the ``analytics.config`` UserSetting on both client
+    and server. No PII is stored — see ``routes/analytics.py`` for the
+    server-side enabled-gate and the explicit "never capture" list in the
+    Privacy settings copy.
+    """
+
+    __tablename__ = "analytics_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    anon_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    path: Mapped[str | None] = mapped_column(String(512))
+    referrer: Mapped[str | None] = mapped_column(String(512))
+    properties: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    viewport_w: Mapped[int | None] = mapped_column(Integer)
+    viewport_h: Mapped[int | None] = mapped_column(Integer)
+    ua_class: Mapped[str | None] = mapped_column(String(32))
+    locale: Mapped[str | None] = mapped_column(String(16))
+    tz: Mapped[str | None] = mapped_column(String(64))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    server_received_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_analytics_events_session", "session_id", "occurred_at"),
+        Index("ix_analytics_events_type_name", "event_type", "event_name"),
+        Index("ix_analytics_events_occurred", "occurred_at"),
+    )

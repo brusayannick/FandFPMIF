@@ -19,7 +19,7 @@ from flows_funds.api.db.models import UserSetting
 
 AI_CONFIG_KEY = "ai.config"
 
-Provider = Literal["anthropic", "openai", "unigpt"]
+Provider = Literal["anthropic", "openai", "unigpt", "custom"]
 
 
 class ProviderConfig(BaseModel):
@@ -32,6 +32,7 @@ class AiConfigPayload(BaseModel):
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     unigpt: ProviderConfig = Field(default_factory=ProviderConfig)
+    custom: ProviderConfig = Field(default_factory=ProviderConfig)
     selected_provider: Provider | None = None
     selected_model: str | None = None
 

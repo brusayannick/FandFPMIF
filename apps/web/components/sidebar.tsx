@@ -8,6 +8,8 @@ import { Cog, FolderKanban, Monitor, Moon, PanelLeftClose, Pickaxe, Sun } from "
 import { cn } from "@/lib/cn";
 import { useUi } from "@/lib/stores/ui";
 import { Button } from "@/components/ui/button";
+import { useTrack } from "@/lib/analytics/hooks";
+import { EV } from "@/lib/analytics/events";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +48,11 @@ export function Sidebar() {
   const collapsed = useUi((s) => s.sidebarCollapsed);
   const toggle = useUi((s) => s.toggleSidebar);
   const pathname = usePathname();
+  const track = useTrack();
+  const onToggle = () => {
+    track(EV.SIDEBAR_TOGGLED, { collapsed_after: !collapsed });
+    toggle();
+  };
 
   return (
     <aside
@@ -74,7 +81,7 @@ export function Sidebar() {
         )}
         <button
           type="button"
-          onClick={toggle}
+          onClick={onToggle}
           className={cn(
             "cursor-pointer rounded-md p-1.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
             !collapsed && "ml-auto",

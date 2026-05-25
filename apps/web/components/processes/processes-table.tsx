@@ -852,9 +852,6 @@ function LogRow({
         </ContextMenuTrigger>
 
         <ContextMenuContent>
-          <ContextMenuItem disabled={!ready} onSelect={onOpen}>
-            Open
-          </ContextMenuItem>
           <ContextMenuItem disabled={importing} onSelect={() => setRenameOpen(true)}>
             <Pencil className="mr-2 h-3.5 w-3.5" />
             Rename

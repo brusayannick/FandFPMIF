@@ -9,6 +9,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { useUi } from "@/lib/stores/ui";
 import { useVizSettings } from "@/lib/stores/visualization-settings";
 import { useOnboarding } from "@/lib/stores/onboarding";
+import { useAnalytics } from "@/lib/stores/analytics";
+import { AnalyticsProvider } from "@/lib/analytics/provider";
 
 function makeQueryClient() {
   return new QueryClient({
@@ -45,14 +47,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
     useUi.persist.rehydrate();
     useVizSettings.persist.rehydrate();
     useOnboarding.persist.rehydrate();
+    useAnalytics.persist.rehydrate();
   }, []);
 
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <QueryClientProvider client={getQueryClient()}>
         <TooltipProvider delayDuration={300}>
-          {children}
-          <Toaster richColors closeButton position="bottom-right" />
+          <AnalyticsProvider>
+            {children}
+            <Toaster richColors closeButton position="bottom-right" />
+          </AnalyticsProvider>
         </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>

@@ -35,6 +35,26 @@ MODEL_DIR = Path(__file__).parent / "model" / "20240922-233643_winsim_sgd_model_
 class Cv4cddModule(Module):
     id = "cv4cdd"
 
+    guidance_system_prompt = (
+        "You are a process-mining analyst interpreting concept-drift detections "
+        "in an event log. Each drift has a type (sudden/gradual/incremental/"
+        "recurring), a confidence score, and a time window. Explain what kind "
+        "of change the model is signalling, flag low-confidence detections as "
+        "uncertain, and suggest where the analyst should investigate first."
+    )
+
+    async def guidance_payload(self, ctx: ModuleContext) -> dict[str, Any] | None:
+        if not await ctx.cache.exists("detections"):
+            return None
+        detections = await ctx.cache.get("detections")
+        if not isinstance(detections, dict):
+            return None
+        return {
+            "drifts": detections.get("drifts", []),
+            "n_windows": detections.get("n_windows"),
+            "confidence_threshold": detections.get("confidence_threshold"),
+        }
+
     # ── Triggers ──────────────────────────────────────────────────────────────
 
     @on_event("log.imported")

@@ -161,8 +161,8 @@ export default function GeneralSettingsPage() {
           <CardTitle className="text-base">Telemetry</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          Off by default. The platform is local-first; no telemetry is collected
-          without consent. (Opt-in switch lands when the telemetry pipeline does.)
+          Off by default. The platform is local-first; data never leaves your
+          machine. Manage what gets captured in <a href="/settings/privacy" className="underline">Settings → Privacy</a>.
         </CardContent>
       </Card>
     </div>

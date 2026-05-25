@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import {
   AlertTriangle,
   ArrowUp,
@@ -18,6 +19,8 @@ import { cn } from "@/lib/cn";
 import { rawFetch } from "@/lib/api";
 import { useAiConfig } from "@/lib/ai-queries";
 import { useUi } from "@/lib/stores/ui";
+import { useTrack } from "@/lib/analytics/hooks";
+import { EV } from "@/lib/analytics/events";
 
 interface Message {
   role: "user" | "assistant";
@@ -132,14 +135,36 @@ function AssistantBubble({
 // Main sidebar
 // --------------------------------------------------------------------------
 
+// Detect process / module ids from the current URL so the chat can be
+// grounded in cached module outputs without the user pasting context in.
+const PROCESS_RE = /\/processes\/([^/?#]+)(?:\/modules\/([^/?#]+))?/;
+
+function deriveChatContext(pathname: string | null): {
+  log_id?: string;
+  module_ids?: string[];
+} | undefined {
+  if (!pathname) return undefined;
+  const m = pathname.match(PROCESS_RE);
+  if (!m) return undefined;
+  const log_id = decodeURIComponent(m[1]!);
+  // Reserved sub-routes like /processes/import or /processes/new aren't real
+  // log ids — skip them so the chat doesn't try to load nonexistent state.
+  if (log_id === "import" || log_id === "new") return undefined;
+  const module_id = m[2] ? decodeURIComponent(m[2]) : null;
+  return { log_id, module_ids: module_id ? [module_id] : [] };
+}
+
 export function AtlasAiSidebar() {
   const open = useUi((s) => s.atlasOpen);
   const setOpen = useUi((s) => s.setAtlasOpen);
   const { data: aiConfig } = useAiConfig();
+  const pathname = usePathname();
+  const chatContext = useMemo(() => deriveChatContext(pathname), [pathname]);
 
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
+  const track = useTrack();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -162,6 +187,14 @@ export function AtlasAiSidebar() {
   const submit = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isStreaming) return;
+
+    track(EV.AI_CHAT_SENT, {
+      provider: aiConfig?.selected_provider ?? null,
+      model: aiConfig?.selected_model ?? null,
+      message_chars: trimmed.length,
+      turn: messages.length + 1,
+      has_context: !!chatContext,
+    });
 
     const userMsg: Message = { role: "user", content: trimmed };
     const history: Message[] = [...messages, userMsg];
@@ -187,7 +220,9 @@ export function AtlasAiSidebar() {
     try {
       const res = await rawFetch("/api/v1/ai/chat", {
         method: "POST",
-        json: { messages: apiMessages },
+        json: chatContext
+          ? { messages: apiMessages, context: chatContext }
+          : { messages: apiMessages },
       });
 
       if (!res.ok) {
@@ -267,6 +302,16 @@ export function AtlasAiSidebar() {
             >
               Beta
             </Badge>
+            {chatContext?.log_id && (
+              <Badge
+                variant="secondary"
+                className="h-4 gap-1 border-0 bg-primary/10 px-1.5 text-[10px] font-medium uppercase tracking-wide text-primary"
+                title="Replies grounded in this process's cached module outputs"
+              >
+                <Sparkles className="h-2.5 w-2.5" />
+                Process-aware
+              </Badge>
+            )}
           </div>
           {hasMessages && (
             <button

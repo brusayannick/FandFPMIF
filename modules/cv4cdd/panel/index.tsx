@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import { AiGuidanceCard } from "@/components/ai/ai-guidance-card";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -162,6 +163,10 @@ export function Cv4cddPanel({ logId }: { logId: string; moduleId: string }) {
             running={Boolean(runningJobId)}
           />
         </div>
+      )}
+
+      {hasResults && (
+        <AiGuidanceCard kind="module" logId={logId} moduleId="cv4cdd" />
       )}
     </div>
   );

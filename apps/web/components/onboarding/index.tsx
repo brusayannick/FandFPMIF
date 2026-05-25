@@ -7,19 +7,27 @@ import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { useOnboarding } from "@/lib/stores/onboarding";
+import { useAnalytics } from "@/lib/stores/analytics";
+import { useUpdateAnalyticsConfig, useAnalyticsConfig } from "@/lib/analytics-queries";
 
 import { WelcomeStep } from "./steps/welcome-step";
+import { PrivacyStep } from "./steps/privacy-step";
 import { UploadStep } from "./steps/upload-step";
 import { ModulesStep } from "./steps/modules-step";
 
-const STEP_COUNT = 3;
+const STEP_COUNT = 4;
+type Step = 0 | 1 | 2 | 3;
 
 export function OnboardingOverlay() {
   const router = useRouter();
   const completed = useOnboarding((s) => s.completed);
   const complete = useOnboarding((s) => s.complete);
+  const promptResolved = useAnalytics((s) => s.promptResolved);
+  const resolvePrompt = useAnalytics((s) => s.resolvePrompt);
+  const cfgQuery = useAnalyticsConfig();
+  const updateMut = useUpdateAnalyticsConfig();
 
-  const [step, setStep] = useState<0 | 1 | 2>(0);
+  const [step, setStep] = useState<Step>(0);
   const [uploadedLogId, setUploadedLogId] = useState<string | null>(null);
 
   if (completed) return null;
@@ -27,7 +35,19 @@ export function OnboardingOverlay() {
   const isLast = step === STEP_COUNT - 1;
   const canGoBack = step > 0;
 
+  const ensurePrivacyDefault = () => {
+    // Privacy-respecting default: if the user finished or skipped without
+    // answering, treat that as opt-out and persist so the server agrees.
+    if (promptResolved) return;
+    resolvePrompt(false);
+    const cfg = cfgQuery.data;
+    if (cfg && cfg.enabled) {
+      updateMut.mutate({ ...cfg, enabled: false, opted_in_at: null });
+    }
+  };
+
   const finish = () => {
+    ensurePrivacyDefault();
     complete();
     if (uploadedLogId) {
       router.push(`/processes?focus=${uploadedLogId}`);
@@ -38,23 +58,24 @@ export function OnboardingOverlay() {
     if (isLast) {
       finish();
     } else {
-      setStep((s) => (s + 1) as 0 | 1 | 2);
+      setStep((s) => ((s + 1) as Step));
     }
   };
 
   const onBack = () => {
-    if (canGoBack) setStep((s) => (s - 1) as 0 | 1 | 2);
+    if (canGoBack) setStep((s) => ((s - 1) as Step));
   };
 
   const onSkip = () => {
     if (isLast) {
       finish();
     } else {
-      setStep((s) => (s + 1) as 0 | 1 | 2);
+      setStep((s) => ((s + 1) as Step));
     }
   };
 
-  const uploadInProgress = step === 1 && !uploadedLogId;
+  // Step indices: 0 welcome, 1 privacy, 2 upload, 3 modules
+  const uploadInProgress = step === 2 && !uploadedLogId;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
@@ -64,10 +85,11 @@ export function OnboardingOverlay() {
 
       <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-8">
         {step === 0 && <WelcomeStep />}
-        {step === 1 && (
+        {step === 1 && <PrivacyStep />}
+        {step === 2 && (
           <UploadStep uploadedLogId={uploadedLogId} onUploaded={setUploadedLogId} />
         )}
-        {step === 2 && <ModulesStep />}
+        {step === 3 && <ModulesStep />}
       </div>
 
       <div className="border-t border-border bg-background">

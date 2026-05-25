@@ -7,6 +7,7 @@ registered.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -24,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from flows_funds.api import __version__
 from flows_funds.api.config import get_settings
-from flows_funds.api.db.engine import dispose_engine
+from flows_funds.api.db.engine import dispose_engine, get_sessionmaker
 from flows_funds.api.duckdb.pool import get_duckdb_pool
 from flows_funds.api.events import EventBus, set_event_bus
 from flows_funds.api.ingest.dispatch import register_import_handler
@@ -33,7 +34,33 @@ from flows_funds.api.modules import CapabilityRegistry, ModuleLoader, set_module
 from flows_funds.api.modules.hot_reload import HotReload, sweep_stale_workdirs
 from flows_funds.api.modules.install_jobs import register_module_install_handlers
 from flows_funds.api.routes import v1
+from flows_funds.api.routes.analytics import prune_expired
 from flows_funds.api.schemas.common import HealthResponse
+
+# Daily — re-evaluated every loop iteration against the current
+# `analytics.config.retention_days` setting.
+_RETENTION_INTERVAL_SECONDS = 24 * 60 * 60
+
+
+async def _analytics_retention_loop() -> None:
+    """Periodically prune analytics rows older than the configured window.
+
+    A no-op when retention is unset; users on "forever" pay nothing. Errors
+    are swallowed so a transient DB hiccup never tears down the loop.
+    """
+    log = structlog.get_logger("analytics.retention")
+    sm = get_sessionmaker()
+    while True:
+        try:
+            await asyncio.sleep(_RETENTION_INTERVAL_SECONDS)
+            async with sm() as session:
+                pruned = await prune_expired(session)
+                if pruned:
+                    log.info("analytics.retention.pruned", events=pruned)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning("analytics.retention.failed", error=str(exc))
 
 
 def _configure_logging(level: str) -> None:
@@ -95,9 +122,16 @@ async def lifespan(app: FastAPI):
     # Touch the DuckDB pool so the first request doesn't pay the init cost.
     get_duckdb_pool()
 
+    retention_task = asyncio.create_task(_analytics_retention_loop())
+
     try:
         yield
     finally:
+        retention_task.cancel()
+        try:
+            await retention_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
         if hot_reload is not None:
             hot_reload.stop()
         await loader.unload_all()

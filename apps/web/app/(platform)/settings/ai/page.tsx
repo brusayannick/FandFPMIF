@@ -1,7 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, EyeOff, Loader2, RefreshCw, Upload } from "lucide-react";
+import {
+  Bot,
+  Check,
+  CircleAlert,
+  Download,
+  Eye,
+  EyeOff,
+  Loader2,
+  RefreshCw,
+  Settings2,
+  Sparkles,
+  Upload,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { toastError } from "@/lib/toast";
@@ -46,40 +59,92 @@ import {
   type ProviderConfig,
 } from "@/lib/ai-queries";
 
+// ── Provider catalogue ─────────────────────────────────────────────────────
+
 interface ProviderMeta {
   id: AiProvider;
   label: string;
+  tagline: string;
   blurb: string;
   needsBaseUrl: boolean;
   baseUrlPlaceholder?: string;
+  keyPlaceholder: string;
+  icon: LucideIcon;
 }
 
 const PROVIDERS: ProviderMeta[] = [
   {
     id: "anthropic",
     label: "Anthropic",
-    blurb: "Claude models. Key is sent only to api.anthropic.com via the backend proxy.",
+    tagline: "Claude models",
+    blurb: "Key is sent only to api.anthropic.com via the backend proxy.",
     needsBaseUrl: false,
+    keyPlaceholder: "sk-ant-…",
+    icon: Sparkles,
   },
   {
     id: "openai",
     label: "OpenAI",
-    blurb: "GPT and o-series models. Key is proxied through the backend to api.openai.com.",
+    tagline: "GPT and o-series",
+    blurb: "Key is proxied through the backend to api.openai.com.",
     needsBaseUrl: false,
+    keyPlaceholder: "sk-…",
+    icon: Bot,
   },
   {
     id: "unigpt",
-    label: "UniGPT (LibreChat)",
+    label: "UniGPT",
+    tagline: "LibreChat / university deployments",
     blurb:
-      "Any OpenAI-compatible endpoint exposed by a LibreChat / UniGPT deployment. Base URL must include the versioned API prefix (e.g. https://gpt.uni-muenster.de/v1).",
+      "OpenAI-compatible endpoint exposed by a LibreChat or UniGPT deployment. Base URL must include the versioned API prefix (e.g. https://gpt.uni-muenster.de/v1).",
     needsBaseUrl: true,
-    baseUrlPlaceholder: "https://chat.example.com/v1",
+    baseUrlPlaceholder: "https://gpt.uni-muenster.de/v1",
+    keyPlaceholder: "sk-…",
+    icon: Settings2,
+  },
+  {
+    id: "custom",
+    label: "Custom",
+    tagline: "Any OpenAI-compatible endpoint",
+    blurb:
+      "Self-hosted proxies (vLLM, LM Studio, Ollama with --openai), Azure OpenAI, OpenRouter, etc. Provide the base URL — usually ends with /v1.",
+    needsBaseUrl: true,
+    baseUrlPlaceholder: "https://your-endpoint.example.com/v1",
+    keyPlaceholder: "sk-…",
+    icon: Settings2,
   },
 ];
+
+function providerMeta(id: AiProvider): ProviderMeta {
+  return PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0];
+}
 
 function configsEqual(a: AiConfig, b: AiConfig): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
+
+function isProviderConfigured(
+  provider: AiProvider | null,
+  cfg: AiConfig,
+): boolean {
+  if (!provider) return false;
+  const p = cfg[provider];
+  if (!p.api_key) return false;
+  const meta = providerMeta(provider);
+  if (meta.needsBaseUrl && !p.base_url) return false;
+  return true;
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────
+
+type ModelsMap = Record<AiProvider, ModelInfo[]>;
+
+const EMPTY_MODELS: ModelsMap = {
+  anthropic: [],
+  openai: [],
+  unigpt: [],
+  custom: [],
+};
 
 export default function AiSettingsPage() {
   const { data: stored, isLoading, isError, error } = useAiConfig();
@@ -88,12 +153,12 @@ export default function AiSettingsPage() {
   const { data: pricing } = usePricingCatalog();
 
   const [draft, setDraft] = useState<AiConfig>(DEFAULT_AI_CONFIG);
-  const [models, setModels] = useState<Record<AiProvider, ModelInfo[]>>({
-    anthropic: [],
-    openai: [],
-    unigpt: [],
-  });
+  const [models, setModels] = useState<ModelsMap>(EMPTY_MODELS);
   const [busyProvider, setBusyProvider] = useState<AiProvider | null>(null);
+  // Provider ids we've already auto-fetched in this session, so an empty
+  // models[] (no models published by the proxy) doesn't trigger a refetch
+  // loop and so switching providers + back doesn't double-fetch.
+  const [autoFetched, setAutoFetched] = useState<Set<AiProvider>>(new Set());
 
   useEffect(() => {
     if (stored) setDraft(stored);
@@ -104,7 +169,42 @@ export default function AiSettingsPage() {
     [stored, draft],
   );
 
-  const setProvider = (id: AiProvider, patch: Partial<ProviderConfig>) => {
+  const selected = draft.selected_provider;
+  const meta = selected ? providerMeta(selected) : null;
+  const providerConfig: ProviderConfig | null = selected ? draft[selected] : null;
+  const connected = isProviderConfigured(stored?.selected_provider ?? null, stored ?? DEFAULT_AI_CONFIG)
+    && Boolean(stored?.selected_model);
+
+  // Auto-fetch models for the saved provider on load so the saved model id
+  // resolves to a real entry in the dropdown without the user having to
+  // click "Fetch models" again every time they revisit settings.
+  useEffect(() => {
+    if (!stored) return;
+    const p = stored.selected_provider;
+    if (!p) return;
+    if (!isProviderConfigured(p, stored)) return;
+    if (autoFetched.has(p)) return;
+    if (models[p].length > 0) return;
+    setAutoFetched((s) => new Set(s).add(p));
+    fetchModels
+      .mutateAsync(p)
+      .then((res) => setModels((m) => ({ ...m, [p]: res.models })))
+      .catch(() => {
+        // Silent — surfaced when the user explicitly hits Fetch models.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stored]);
+
+  const setSelectedProvider = (next: AiProvider | null) => {
+    setDraft((d) => ({
+      ...d,
+      selected_provider: next,
+      // Reset model when switching providers — old model id won't apply.
+      selected_model: d.selected_provider === next ? d.selected_model : null,
+    }));
+  };
+
+  const setProviderField = (id: AiProvider, patch: Partial<ProviderConfig>) => {
     setDraft((d) => ({ ...d, [id]: { ...d[id], ...patch } }));
   };
 
@@ -146,7 +246,7 @@ export default function AiSettingsPage() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-32 w-full" />
         <Skeleton className="h-64 w-full" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -160,129 +260,331 @@ export default function AiSettingsPage() {
     );
   }
 
-  const allKnownModels: { provider: AiProvider; model: ModelInfo }[] = (
-    ["anthropic", "openai", "unigpt"] as const
-  ).flatMap((p) => models[p].map((m) => ({ provider: p, model: m })));
-
   return (
     <div className="space-y-4">
+      <ConnectionBanner connected={connected} draftProvider={draft.selected_provider} />
+
+      <ProviderPicker
+        selected={draft.selected_provider}
+        configuredProviders={
+          new Set(
+            (Object.keys(stored) as (keyof AiConfig)[]).filter(
+              (k): k is AiProvider =>
+                k !== "system_prompt" &&
+                k !== "selected_provider" &&
+                k !== "selected_model" &&
+                isProviderConfigured(k as AiProvider, stored),
+            ),
+          )
+        }
+        onSelect={setSelectedProvider}
+      />
+
+      {selected && meta && providerConfig && (
+        <>
+          <ProviderConfigCard
+            meta={meta}
+            config={providerConfig}
+            onChange={(patch) => setProviderField(selected, patch)}
+            onFetch={() => onFetchModels(selected)}
+            busy={busyProvider === selected}
+            models={models[selected]}
+            pricing={pricing}
+          />
+
+          <ModelSelectCard
+            provider={selected}
+            selectedModel={draft.selected_model}
+            models={models[selected]}
+            onChange={(m) =>
+              setDraft((d) => ({ ...d, selected_model: m }))
+            }
+          />
+        </>
+      )}
+
       <SystemPromptCard
         value={draft.system_prompt}
         onChange={(v) => setDraft((d) => ({ ...d, system_prompt: v }))}
       />
 
-      {PROVIDERS.map((p) => (
-        <ProviderCard
-          key={p.id}
-          meta={p}
-          config={draft[p.id]}
-          onChange={(patch) => setProvider(p.id, patch)}
-          onFetch={() => onFetchModels(p.id)}
-          busy={busyProvider === p.id}
-          models={models[p.id]}
-          pricing={pricing}
-        />
-      ))}
+      <SaveBar
+        dirty={dirty}
+        saving={update.isPending}
+        onSave={onSave}
+        onRevert={() => stored && setDraft(stored)}
+      />
+    </div>
+  );
+}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Default model</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <p className="text-muted-foreground">
-            Used by ATLAS AI when a model isn&apos;t specified per-conversation. Fetch each
-            provider&apos;s models above first to populate the list.
-          </p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>Provider</Label>
-              <Select
-                value={draft.selected_provider ?? "__none"}
-                onValueChange={(v) =>
-                  setDraft((d) => ({
-                    ...d,
-                    selected_provider: v === "__none" ? null : (v as AiProvider),
-                    selected_model: null,
-                  }))
-                }
-              >
-                <SelectTrigger className="text-xs">
-                  <SelectValue placeholder="None" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">None</SelectItem>
-                  <SelectItem value="anthropic">Anthropic</SelectItem>
-                  <SelectItem value="openai">OpenAI</SelectItem>
-                  <SelectItem value="unigpt">UniGPT</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Model</Label>
-              <Select
-                value={draft.selected_model ?? "__none"}
-                onValueChange={(v) =>
-                  setDraft((d) => ({ ...d, selected_model: v === "__none" ? null : v }))
-                }
-                disabled={!draft.selected_provider}
-              >
-                <SelectTrigger className="text-xs">
-                  <SelectValue placeholder={draft.selected_provider ? "Choose a model" : "Pick a provider"} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">None</SelectItem>
-                  {draft.selected_provider &&
-                    models[draft.selected_provider].map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.display_name ?? cleanDisplayName(m.id)}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          {draft.selected_provider &&
-            models[draft.selected_provider].length === 0 &&
-            allKnownModels.length === 0 && (
-              <p className="text-xs text-muted-foreground">
-                No models fetched yet for {draft.selected_provider}. Click <em>Fetch models</em> in
-                that section.
-              </p>
-            )}
-        </CardContent>
-      </Card>
+// ── Connection banner ──────────────────────────────────────────────────────
 
-      <div className="sticky bottom-0 z-10 flex items-center justify-end gap-2 border-t border-border bg-background/80 py-3 backdrop-blur">
-        {dirty && (
-          <span className="text-xs text-muted-foreground mr-auto">
-            Unsaved changes
-          </span>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="cursor-pointer"
-          onClick={() => stored && setDraft(stored)}
-          disabled={!dirty || update.isPending}
-        >
-          Revert
-        </Button>
-        <Button
-          size="sm"
-          className="cursor-pointer"
-          onClick={onSave}
-          disabled={!dirty || update.isPending}
-        >
-          {update.isPending ? "Saving…" : "Save"}
-        </Button>
+function ConnectionBanner({
+  connected,
+  draftProvider,
+}: {
+  connected: boolean;
+  draftProvider: AiProvider | null;
+}) {
+  if (connected) {
+    return (
+      <div className="flex items-center gap-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400">
+        <Check className="h-4 w-4 shrink-0" />
+        <span>AI is connected. All AI features are available across the platform.</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+      <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+      <div className="min-w-0">
+        <div className="font-medium">No AI connected</div>
+        <p className="text-xs text-amber-700/80 dark:text-amber-300/80">
+          {draftProvider
+            ? `Add an API key for ${providerMeta(draftProvider).label}, pick a model, then click Save.`
+            : "Pick a provider below, paste an API key, choose a model, then click Save."}
+        </p>
       </div>
     </div>
   );
 }
 
-// --------------------------------------------------------------------------
-// System prompt card — textarea with load-from-file and download buttons
-// --------------------------------------------------------------------------
+// ── Provider picker (4 cards) ──────────────────────────────────────────────
+
+function ProviderPicker({
+  selected,
+  configuredProviders,
+  onSelect,
+}: {
+  selected: AiProvider | null;
+  configuredProviders: Set<AiProvider>;
+  onSelect: (next: AiProvider | null) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Provider</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {PROVIDERS.map((p) => {
+            const Icon = p.icon;
+            const active = selected === p.id;
+            const isConfigured = configuredProviders.has(p.id);
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onSelect(active ? null : p.id)}
+                className={cn(
+                  "group relative flex cursor-pointer flex-col items-start gap-1.5 rounded-md border bg-card p-3 text-left transition-colors",
+                  active
+                    ? "border-primary ring-1 ring-primary"
+                    : "border-border hover:border-primary/50",
+                )}
+                aria-pressed={active}
+              >
+                <div className="flex w-full items-center justify-between">
+                  <div
+                    className={cn(
+                      "flex h-6 w-6 items-center justify-center rounded-md",
+                      active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                  </div>
+                  {isConfigured && (
+                    <Check
+                      className={cn(
+                        "h-3.5 w-3.5",
+                        active ? "text-primary" : "text-emerald-500",
+                      )}
+                    />
+                  )}
+                </div>
+                <div className="text-sm font-medium">{p.label}</div>
+                <div className="text-[11px] leading-tight text-muted-foreground">
+                  {p.tagline}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Provider config card (single, for selected provider) ───────────────────
+
+function ProviderConfigCard({
+  meta,
+  config,
+  onChange,
+  onFetch,
+  busy,
+  models,
+  pricing,
+}: {
+  meta: ProviderMeta;
+  config: ProviderConfig;
+  onChange: (patch: Partial<ProviderConfig>) => void;
+  onFetch: () => void;
+  busy: boolean;
+  models: ModelInfo[];
+  pricing: PricingCatalog | undefined;
+}) {
+  const [showKey, setShowKey] = useState(false);
+  const canFetch = Boolean(config.api_key && (!meta.needsBaseUrl || config.base_url));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{meta.label} configuration</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-xs text-muted-foreground">{meta.blurb}</p>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={`${meta.id}-key`}>
+              API key <span className="text-destructive">*</span>
+            </Label>
+            <div className="relative">
+              <Input
+                id={`${meta.id}-key`}
+                type={showKey ? "text" : "password"}
+                autoComplete="off"
+                spellCheck={false}
+                value={config.api_key ?? ""}
+                onChange={(e) => onChange({ api_key: e.target.value || null })}
+                placeholder={meta.keyPlaceholder}
+                className="pr-9 font-mono text-xs"
+              />
+              <button
+                type="button"
+                aria-label={showKey ? "Hide key" : "Show key"}
+                onClick={() => setShowKey((s) => !s)}
+                className="absolute inset-y-0 right-0 flex w-9 cursor-pointer items-center justify-center text-muted-foreground hover:text-foreground"
+              >
+                {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          {meta.needsBaseUrl && (
+            <div className="space-y-1.5">
+              <Label htmlFor={`${meta.id}-base`}>
+                Base URL <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id={`${meta.id}-base`}
+                type="url"
+                autoComplete="off"
+                spellCheck={false}
+                value={config.base_url ?? ""}
+                onChange={(e) => onChange({ base_url: e.target.value || null })}
+                placeholder={meta.baseUrlPlaceholder}
+                className="font-mono text-xs"
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {models.length > 0
+              ? `${models.length} model${models.length === 1 ? "" : "s"} available`
+              : "No models fetched yet — paste a key and click Fetch models"}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="cursor-pointer gap-1.5"
+            onClick={onFetch}
+            disabled={!canFetch || busy}
+          >
+            {busy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Fetch models
+          </Button>
+        </div>
+
+        {models.length > 0 && <ModelsTable provider={meta.id} models={models} pricing={pricing} />}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Default-model selector ─────────────────────────────────────────────────
+
+function ModelSelectCard({
+  provider,
+  selectedModel,
+  models,
+  onChange,
+}: {
+  provider: AiProvider;
+  selectedModel: string | null;
+  models: ModelInfo[];
+  onChange: (modelId: string | null) => void;
+}) {
+  // If the saved model isn't in the fetched list yet (page just loaded, or
+  // the provider's catalog has changed), keep the saved id visible as its
+  // own item so the user can see what's selected without re-fetching.
+  const savedNotInList =
+    selectedModel !== null && !models.some((m) => m.id === selectedModel);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Default model</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Used by ATLAS AI and the panel-level AI insights when a model isn&apos;t
+          specified per-call.
+        </p>
+        <Select
+          value={selectedModel ?? "__none"}
+          onValueChange={(v) => onChange(v === "__none" ? null : v)}
+        >
+          <SelectTrigger className="text-xs">
+            <SelectValue placeholder="Choose a model" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none">None</SelectItem>
+            {savedNotInList && selectedModel && (
+              <SelectItem value={selectedModel}>
+                {cleanDisplayName(selectedModel)}{" "}
+                <span className="text-muted-foreground">(saved)</span>
+              </SelectItem>
+            )}
+            {models.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.display_name ?? cleanDisplayName(m.id)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {models.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            No models fetched yet for {providerMeta(provider).label}. Use{" "}
+            <em>Fetch models</em> in the configuration card above to see
+            other options.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── System prompt ──────────────────────────────────────────────────────────
 
 function SystemPromptCard({
   value,
@@ -358,7 +660,8 @@ function SystemPromptCard({
       </CardHeader>
       <CardContent className="space-y-2">
         <p className="text-xs text-muted-foreground">
-          Prepended to every ATLAS AI conversation. Plain text or markdown; whitespace is preserved.
+          Prepended to every ATLAS AI conversation and every AI insight call.
+          Shared across all providers. Plain text or markdown; whitespace is preserved.
         </p>
         <textarea
           value={value}
@@ -379,112 +682,46 @@ function SystemPromptCard({
   );
 }
 
-// --------------------------------------------------------------------------
-// Provider card — API key, base URL (UniGPT), Fetch models button + table
-// --------------------------------------------------------------------------
+// ── Save bar ───────────────────────────────────────────────────────────────
 
-function ProviderCard({
-  meta,
-  config,
-  onChange,
-  onFetch,
-  busy,
-  models,
-  pricing,
+function SaveBar({
+  dirty,
+  saving,
+  onSave,
+  onRevert,
 }: {
-  meta: ProviderMeta;
-  config: ProviderConfig;
-  onChange: (patch: Partial<ProviderConfig>) => void;
-  onFetch: () => void;
-  busy: boolean;
-  models: ModelInfo[];
-  pricing: PricingCatalog | undefined;
+  dirty: boolean;
+  saving: boolean;
+  onSave: () => void;
+  onRevert: () => void;
 }) {
-  const [showKey, setShowKey] = useState(false);
-  const canFetch = Boolean(config.api_key && (!meta.needsBaseUrl || config.base_url));
-
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{meta.label}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-xs text-muted-foreground">{meta.blurb}</p>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor={`${meta.id}-key`}>API key</Label>
-            <div className="relative">
-              <Input
-                id={`${meta.id}-key`}
-                type={showKey ? "text" : "password"}
-                autoComplete="off"
-                spellCheck={false}
-                value={config.api_key ?? ""}
-                onChange={(e) => onChange({ api_key: e.target.value || null })}
-                placeholder={meta.id === "anthropic" ? "sk-ant-…" : "sk-…"}
-                className="pr-9 font-mono text-xs"
-              />
-              <button
-                type="button"
-                aria-label={showKey ? "Hide key" : "Show key"}
-                onClick={() => setShowKey((s) => !s)}
-                className="absolute inset-y-0 right-0 flex w-9 cursor-pointer items-center justify-center text-muted-foreground hover:text-foreground"
-              >
-                {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-              </button>
-            </div>
-          </div>
-
-          {meta.needsBaseUrl && (
-            <div className="space-y-1.5">
-              <Label htmlFor={`${meta.id}-base`}>Base URL</Label>
-              <Input
-                id={`${meta.id}-base`}
-                type="url"
-                autoComplete="off"
-                spellCheck={false}
-                value={config.base_url ?? ""}
-                onChange={(e) => onChange({ base_url: e.target.value || null })}
-                placeholder={meta.baseUrlPlaceholder}
-                className="font-mono text-xs"
-              />
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {models.length > 0
-              ? `${models.length} model${models.length === 1 ? "" : "s"} available`
-              : "No models fetched yet"}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="cursor-pointer gap-1.5"
-            onClick={onFetch}
-            disabled={!canFetch || busy}
-          >
-            {busy ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
-            )}
-            Fetch models
-          </Button>
-        </div>
-
-        {models.length > 0 && <ModelsTable provider={meta.id} models={models} pricing={pricing} />}
-      </CardContent>
-    </Card>
+    <div className="sticky bottom-0 z-10 flex items-center justify-end gap-2 border-t border-border bg-background/80 py-3 backdrop-blur">
+      {dirty && (
+        <span className="text-xs text-muted-foreground mr-auto">Unsaved changes</span>
+      )}
+      <Button
+        variant="outline"
+        size="sm"
+        className="cursor-pointer"
+        onClick={onRevert}
+        disabled={!dirty || saving}
+      >
+        Revert
+      </Button>
+      <Button
+        size="sm"
+        className="cursor-pointer"
+        onClick={onSave}
+        disabled={!dirty || saving}
+      >
+        {saving ? "Saving…" : "Save"}
+      </Button>
+    </div>
   );
 }
 
-// --------------------------------------------------------------------------
-// Models table
-// --------------------------------------------------------------------------
+// ── Models table ───────────────────────────────────────────────────────────
 
 type CostCell = number | "free" | null;
 
@@ -502,6 +739,7 @@ function ModelsTable({
       [...models].sort((a, b) => a.id.localeCompare(b.id)).map((m) => {
         const price = lookupPricing(pricing, m.id);
         // UniGPT is a free university-hosted LibreChat — costs are always $0.
+        // Custom is unknown; show the catalog price if we have one.
         const isFree = provider === "unigpt";
         const context =
           price?.max_input_tokens ?? price?.max_tokens ?? fallbackContext(m.id) ?? null;

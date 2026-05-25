@@ -1,18 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MoreHorizontal } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Tooltip,
   TooltipContent,
@@ -68,44 +59,13 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
     >
       <CardContent className="flex h-full flex-col gap-3 p-4">
         {/* Header: Name, version, author */}
-        <div className="flex items-start justify-between gap-2 min-w-0">
-          <div className="min-w-0 flex-1">
-            <h3 className="truncate text-sm font-semibold leading-tight">{module.name}</h3>
-            <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-              {module.version && <span className="shrink-0">{module.version}</span>}
-              {module.author && module.version && <span className="shrink-0 text-muted-foreground/50">·</span>}
-              {module.author && <span className="truncate">by {module.author}</span>}
-            </div>
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold leading-tight">{module.name}</h3>
+          <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+            {module.version && <span className="shrink-0">{module.version}</span>}
+            {module.author && module.version && <span className="shrink-0 text-muted-foreground/50">·</span>}
+            {module.author && <span className="truncate">by {module.author}</span>}
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 shrink-0 cursor-pointer opacity-0 transition-opacity group-hover:opacity-100"
-                aria-label="Module actions"
-              >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-              <DropdownMenuItem asChild className="cursor-pointer">
-                <Link href={`/settings/modules/${module.id}`}>About this module</Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild className="cursor-pointer">
-                <Link href={`/settings/modules/${module.id}`}>Configure</Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() =>
-                  window.open(`/processes/${logId}/modules/${module.id}`, "_blank")
-                }
-                className="cursor-pointer"
-                disabled={isUnavailable || isDisabled}
-              >
-                Open in new tab
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
 
         {/* Category & Status */}

@@ -85,6 +85,20 @@ def _exponential_k(ctx: ModuleContext) -> float:
 class ComplexityModule(Module):
     id = "complexity"
 
+    guidance_system_prompt = (
+        "You are a process-mining analyst interpreting structural and "
+        "entropy-based complexity metrics for a single event log. Reference "
+        "specific metric names and values. Variant entropy and Pentland's "
+        "process complexity capture variability; structure and affinity "
+        "capture topology; trace length and distinct-traces percentage capture "
+        "scale. Suggest concrete next steps when relevant."
+    )
+
+    async def guidance_payload(self, ctx: ModuleContext) -> dict[str, Any] | None:
+        if not await ctx.cache.exists("metrics"):
+            return None
+        return await ctx.cache.get("metrics")
+
     @route.get("/metrics")
     async def metrics(self, ctx: ModuleContext) -> dict[str, Any]:
         return await _cached_or_compute(ctx, "metrics", lambda: self._compute(ctx))

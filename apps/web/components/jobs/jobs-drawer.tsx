@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Inbox, MoreHorizontal, Pause, Play, Trash2, Eye } from "lucide-react";
+import { Inbox, MoreHorizontal, Pause, Play, Eye } from "lucide-react";
 import { toastError } from "@/lib/toast";
 
 import {
@@ -43,9 +43,8 @@ export function JobsDrawer() {
   const finishedHidden = useJobsStore((s) => s.finishedHidden);
   const active = useJobsStore(useShallow(selectActiveJobs));
   const finished = useJobsStore(useShallow(selectFinishedJobs));
-  const clearFinished = useJobsStore((s) => s.clearFinished);
   const setFinishedHidden = useJobsStore((s) => s.setFinishedHidden);
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>("running");
   const [q, setQ] = useState("");
 
   // `j j` chord opens the drawer.
@@ -131,21 +130,16 @@ export function JobsDrawer() {
                     <Pause className="mr-2 h-3.5 w-3.5" /> Pause queue
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuSeparator />
-                {finishedHidden ? (
-                  <DropdownMenuItem
-                    onSelect={() => setFinishedHidden(false)}
-                    className="cursor-pointer"
-                  >
-                    <Eye className="mr-2 h-3.5 w-3.5" /> Show finished
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem
-                    onSelect={() => clearFinished()}
-                    className="cursor-pointer"
-                  >
-                    <Trash2 className="mr-2 h-3.5 w-3.5" /> Clear finished
-                  </DropdownMenuItem>
+                {finishedHidden && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => setFinishedHidden(false)}
+                      className="cursor-pointer"
+                    >
+                      <Eye className="mr-2 h-3.5 w-3.5" /> Show finished
+                    </DropdownMenuItem>
+                  </>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>

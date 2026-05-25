@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
 
-export type AiProvider = "anthropic" | "openai" | "unigpt";
+export type AiProvider = "anthropic" | "openai" | "unigpt" | "custom";
 
 export interface ProviderConfig {
   api_key: string | null;
@@ -16,6 +16,7 @@ export interface AiConfig {
   anthropic: ProviderConfig;
   openai: ProviderConfig;
   unigpt: ProviderConfig;
+  custom: ProviderConfig;
   selected_provider: AiProvider | null;
   selected_model: string | null;
 }
@@ -48,6 +49,7 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
   anthropic: { api_key: null, base_url: null },
   openai: { api_key: null, base_url: null },
   unigpt: { api_key: null, base_url: null },
+  custom: { api_key: null, base_url: null },
   selected_provider: null,
   selected_model: null,
 };

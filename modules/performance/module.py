@@ -113,6 +113,48 @@ async def _per_activity_sojourn(df: Any, freq_rows: list[tuple]) -> list[dict[st
 class PerformanceModule(Module):
     id = "performance"
 
+    guidance_system_prompt = (
+        "You are a process-mining analyst interpreting performance KPIs and "
+        "bottleneck rankings for an event log. Cite specific activity names, "
+        "cycle-time numbers, and share-of-time percentages. Distinguish "
+        "between high-frequency slow steps (volume issue) and rare slow steps "
+        "(outliers). Suggest concrete next steps when relevant."
+    )
+
+    async def guidance_payload(self, ctx: ModuleContext) -> dict[str, Any] | None:
+        if not await ctx.cache.exists("kpis"):
+            return None
+        kpis = await ctx.cache.get("kpis")
+        bottlenecks = (
+            await ctx.cache.get("bottlenecks") if await ctx.cache.exists("bottlenecks") else None
+        )
+        # Trim the heavy histograms — the LLM only needs ranking + numbers.
+        slim_bottlenecks: list[dict[str, Any]] = []
+        if isinstance(bottlenecks, dict):
+            for item in bottlenecks.get("items", [])[:10]:
+                slim_bottlenecks.append(
+                    {
+                        k: item.get(k)
+                        for k in (
+                            "rank",
+                            "activity",
+                            "frequency",
+                            "avg_sojourn_s",
+                            "p90_sojourn_s",
+                            "share_of_total_time",
+                        )
+                    }
+                )
+        return {
+            "summary": (kpis or {}).get("summary"),
+            "top_activities_by_frequency": sorted(
+                (kpis or {}).get("per_activity", []),
+                key=lambda a: a.get("frequency", 0),
+                reverse=True,
+            )[:10],
+            "bottlenecks": slim_bottlenecks,
+        }
+
     @route.get("/kpis")
     async def kpis(self, ctx: ModuleContext) -> dict[str, Any]:
         async def _compute() -> dict[str, Any]:

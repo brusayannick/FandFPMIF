@@ -2,7 +2,7 @@ id: discovery
 name: Discovery
 version: 1.0.0
 category: foundation
-description: Process discovery — DFG, Petri nets (Alpha / Inductive miners), Process Tree, Heuristics Net.
+description: Process discovery — DFG, Petri nets (Alpha / Inductive miners), Process Tree, Heuristics Net, BPMN.
 author: van der Aalst
 license: MIT
 default_enabled: true
@@ -22,6 +22,7 @@ provides:
   - discovery.petri_net.inductive
   - discovery.process_tree
   - discovery.heuristics_net
+  - discovery.bpmn
 
 consumes:
   - log.imported

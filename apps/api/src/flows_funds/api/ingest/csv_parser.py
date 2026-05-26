@@ -16,7 +16,7 @@ from flows_funds.api.schemas.event_logs import CsvColumnMapping
 
 import re
 
-_AUTODETECT_CANDIDATES: dict[str, list[str]] = {
+AUTODETECT_CANDIDATES: dict[str, list[str]] = {
     "case_id": ["case_id", "case", "case concept name", "trace_id", "id"],
     "activity": ["activity", "task", "concept name", "event"],
     "timestamp": ["timestamp", "time", "datetime", "date", "time timestamp", "start_timestamp", "start"],
@@ -28,7 +28,7 @@ _AUTODETECT_CANDIDATES: dict[str, list[str]] = {
 _NORMALISE_RE = re.compile(r"[^a-z0-9]+")
 
 
-def _normalise_ident(value: str) -> str:
+def normalise_ident(value: str) -> str:
     """Lowercase + strip non-alphanumerics so 'Case ID', 'case-id',
     'Case:Concept:Name', 'caseConceptName' all collapse to a comparable form.
     """
@@ -42,7 +42,7 @@ def autodetect_mapping(columns: list[str]) -> CsvColumnMapping | None:
     whatever's still unclaimed. Each header can only be claimed once, so an
     early exact match wins over a later substring one.
     """
-    headers = [(c, _normalise_ident(c)) for c in columns]
+    headers = [(c, normalise_ident(c)) for c in columns]
     claimed: set[str] = set()
     found: dict[str, str] = {}
 
@@ -51,7 +51,7 @@ def autodetect_mapping(columns: list[str]) -> CsvColumnMapping | None:
         predicate,  # (header_norm, cand_norm) -> bool
     ) -> str | None:
         for cand in candidates:
-            cand_norm = _normalise_ident(cand)
+            cand_norm = normalise_ident(cand)
             if not cand_norm:
                 continue
             for raw, norm in headers:
@@ -61,13 +61,13 @@ def autodetect_mapping(columns: list[str]) -> CsvColumnMapping | None:
                     return raw
         return None
 
-    for canonical, candidates in _AUTODETECT_CANDIDATES.items():
+    for canonical, candidates in AUTODETECT_CANDIDATES.items():
         match = _find(candidates, lambda h, c: h == c)
         if match is not None:
             found[canonical] = match
             claimed.add(match)
 
-    for canonical, candidates in _AUTODETECT_CANDIDATES.items():
+    for canonical, candidates in AUTODETECT_CANDIDATES.items():
         if canonical in found:
             continue
         match = _find(candidates, lambda h, c: c in h or h in c)

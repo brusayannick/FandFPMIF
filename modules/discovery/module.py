@@ -17,7 +17,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import Body, HTTPException, UploadFile
+from fastapi.responses import Response
 
 from flows_funds.sdk import Module, ModuleContext, job, on_event, route
 
@@ -29,12 +30,21 @@ _ILP_MAX_ACTIVITIES = 30
 _ILP_MAX_CASES = 5_000
 
 from .serializers import (
+    serialize_bpmn,
     serialize_dfg,
     serialize_heuristics_net,
     serialize_petri_net,
     serialize_prefix_tree,
     serialize_process_tree,
 )
+
+# Cache keys for the BPMN tab. ``bpmn_user_edit`` and ``bpmn_uploaded`` take
+# precedence over the auto-derived ``bpmn_inductive`` / ``bpmn_imf__*`` keys
+# in the GET /bpmn route, so a user's edits (or an uploaded model) survive
+# tab switches but are wiped when the underlying log is re-imported (the
+# ``log.imported`` precompute clears them).
+_BPMN_USER_EDIT_KEY = "bpmn_user_edit"
+_BPMN_UPLOADED_KEY = "bpmn_uploaded"
 
 _HEURISTICS_DEFAULTS: dict[str, float] = {
     "dependency_threshold": 0.5,
@@ -386,6 +396,36 @@ class DiscoveryModule(Module):
 
         return await asyncio.to_thread(_run)
 
+    async def _compute_bpmn_inductive(self, ctx: ModuleContext) -> dict[str, Any]:
+        async with ctx.event_log as log:
+            df = await log.pandas()
+
+        def _run() -> dict[str, Any]:
+            import pm4py
+
+            renamed = _rename_pm4py(df)
+            bpmn_graph = pm4py.discover_bpmn_inductive(renamed)
+            return serialize_bpmn(bpmn_graph)
+
+        return await asyncio.to_thread(_run)
+
+    async def _compute_bpmn_imf(
+        self, ctx: ModuleContext, *, noise_threshold: float
+    ) -> dict[str, Any]:
+        async with ctx.event_log as log:
+            df = await log.pandas()
+
+        def _run() -> dict[str, Any]:
+            import pm4py
+
+            renamed = _rename_pm4py(df)
+            bpmn_graph = pm4py.discover_bpmn_inductive(
+                renamed, noise_threshold=noise_threshold
+            )
+            return serialize_bpmn(bpmn_graph)
+
+        return await asyncio.to_thread(_run)
+
     async def _compute_prefix_tree(self, ctx: ModuleContext) -> dict[str, Any]:
         async with ctx.event_log as log:
             df = await log.pandas()
@@ -522,6 +562,139 @@ class DiscoveryModule(Module):
             ctx, "prefix_tree", lambda: self._compute_prefix_tree(ctx)
         )
 
+    # -- BPMN -----------------------------------------------------------------
+
+    async def _resolve_active_bpmn(
+        self,
+        ctx: ModuleContext,
+        *,
+        algo: str = "inductive",
+        noise_threshold: float | None = None,
+    ) -> dict[str, Any]:
+        """Resolve the BPMN payload the UI should show right now.
+
+        Priority: user-edited > uploaded > algorithm-derived (cached).
+        """
+        for key in (_BPMN_USER_EDIT_KEY, _BPMN_UPLOADED_KEY):
+            if await ctx.cache.exists(key):
+                cached = await ctx.cache.get(key)
+                if isinstance(cached, dict) and cached.get("xml"):
+                    return cached
+
+        if algo == "imf":
+            nt = float(noise_threshold) if noise_threshold is not None else 0.2
+            key = f"bpmn_imf__{nt:.3f}"
+            return await _cached_or_compute(
+                ctx, key, lambda: self._compute_bpmn_imf(ctx, noise_threshold=nt)
+            )
+        return await _cached_or_compute(
+            ctx, "bpmn_inductive", lambda: self._compute_bpmn_inductive(ctx)
+        )
+
+    @route.get("/bpmn")
+    async def bpmn(
+        self,
+        ctx: ModuleContext,
+        *,
+        algo: str | None = None,
+        noise_threshold: float | None = None,
+    ) -> dict[str, Any]:
+        return await self._resolve_active_bpmn(
+            ctx, algo=algo or "inductive", noise_threshold=noise_threshold
+        )
+
+    @route.post("/bpmn/upload")
+    async def bpmn_upload(self, ctx: ModuleContext, file: UploadFile) -> dict[str, Any]:
+        if not file.filename or not file.filename.lower().endswith(".bpmn"):
+            raise HTTPException(status_code=422, detail="Expected a .bpmn file.")
+
+        raw = await file.read()
+        try:
+            xml = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(
+                status_code=422, detail=f"BPMN file is not UTF-8: {exc}"
+            ) from exc
+
+        # Validate by parsing through pm4py. We don't keep the parsed graph —
+        # the XML is what we store and what bpmn-js renders.
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(suffix=".bpmn", delete=False) as fh:
+            tmp = Path(fh.name)
+        try:
+            tmp.write_bytes(raw)
+
+            def _validate() -> None:
+                import pm4py
+
+                pm4py.read_bpmn(str(tmp))
+
+            try:
+                await asyncio.to_thread(_validate)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"Invalid BPMN XML: {exc}"
+                ) from exc
+        finally:
+            tmp.unlink(missing_ok=True)
+
+        payload = {"kind": "bpmn", "version": 1, "xml": xml}
+        # Uploading a fresh model supersedes any prior user edits.
+        await ctx.cache.delete(_BPMN_USER_EDIT_KEY)
+        await ctx.cache.set(_BPMN_UPLOADED_KEY, payload)
+        return payload
+
+    @route.put("/bpmn")
+    async def bpmn_save(
+        self,
+        ctx: ModuleContext,
+        xml: str = Body(..., embed=True),
+    ) -> dict[str, Any]:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(suffix=".bpmn", delete=False) as fh:
+            tmp = Path(fh.name)
+        try:
+            tmp.write_text(xml, encoding="utf-8")
+
+            def _validate() -> None:
+                import pm4py
+
+                pm4py.read_bpmn(str(tmp))
+
+            try:
+                await asyncio.to_thread(_validate)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"Invalid BPMN XML: {exc}"
+                ) from exc
+        finally:
+            tmp.unlink(missing_ok=True)
+
+        payload = {"kind": "bpmn", "version": 1, "xml": xml}
+        await ctx.cache.set(_BPMN_USER_EDIT_KEY, payload)
+        return payload
+
+    @route.delete("/bpmn")
+    async def bpmn_reset(self, ctx: ModuleContext) -> dict[str, str]:
+        """Drop any user edits / uploaded model so the next GET re-derives."""
+        await ctx.cache.delete(_BPMN_USER_EDIT_KEY)
+        await ctx.cache.delete(_BPMN_UPLOADED_KEY)
+        return {"status": "reset"}
+
+    @route.get("/bpmn/download")
+    async def bpmn_download(self, ctx: ModuleContext) -> Response:
+        payload = await self._resolve_active_bpmn(ctx)
+        xml = str(payload.get("xml", ""))
+        return Response(
+            content=xml,
+            media_type="application/bpmn+xml",
+            headers={"Content-Disposition": 'attachment; filename="process.bpmn"'},
+        )
+
     # -- precompute on import -------------------------------------------------
 
     @on_event("log.imported")
@@ -529,6 +702,10 @@ class DiscoveryModule(Module):
     async def precompute(self, ctx: ModuleContext, payload: dict[str, Any]) -> None:
         thresholds = _heuristics_thresholds(ctx.config)
         default_nt = 0.2
+        # The events.parquet has been replaced; any previously saved BPMN
+        # edits / uploads no longer correspond to the active log.
+        await ctx.cache.delete(_BPMN_USER_EDIT_KEY)
+        await ctx.cache.delete(_BPMN_UPLOADED_KEY)
         stages: list[tuple[str, Any]] = [
             ("dfg", lambda: self._compute_dfg(ctx)),
             ("petri_net_alpha", lambda: self._compute_petri_alpha(ctx)),
@@ -538,6 +715,7 @@ class DiscoveryModule(Module):
             ("process_tree", lambda: self._compute_process_tree(ctx)),
             (f"process_tree_imf__{default_nt:.3f}", lambda: self._compute_process_tree_imf(ctx, noise_threshold=default_nt)),
             ("prefix_tree", lambda: self._compute_prefix_tree(ctx)),
+            ("bpmn_inductive", lambda: self._compute_bpmn_inductive(ctx)),
             (
                 _heuristics_cache_key(thresholds),
                 lambda: self._compute_heuristics_net(ctx, **thresholds),

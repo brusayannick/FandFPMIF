@@ -25,10 +25,11 @@ import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 
 import structlog
 from fastapi import APIRouter, FastAPI, HTTPException
+from pydantic import BaseModel
 
 from flows_funds.api.db.engine import get_sessionmaker
 from flows_funds.api.db.models import ModuleConfig
@@ -221,6 +222,12 @@ def _extra_handler_params(bound_method: Callable[..., Any]) -> list[inspect.Para
 
     The first param of every module handler is `ctx: ModuleContext`, which the
     loader supplies; everything after is forwarded from FastAPI's query string.
+
+    Modules typically use `from __future__ import annotations`, which turns
+    every annotation into a string. We resolve them via `get_type_hints` so
+    FastAPI sees real classes (notably `UploadFile`, which it auto-detects as
+    a form/file param only when it's a real type — a string `'UploadFile'`
+    annotation silently degrades to a query param and the file arrives None.
     """
     try:
         sig = inspect.signature(bound_method)
@@ -229,9 +236,22 @@ def _extra_handler_params(bound_method: Callable[..., Any]) -> list[inspect.Para
     params = list(sig.parameters.values())
     if not params:
         return []
+    try:
+        hints = get_type_hints(
+            bound_method.__func__ if hasattr(bound_method, "__func__") else bound_method,
+            include_extras=True,
+        )
+    except Exception:  # noqa: BLE001
+        hints = {}
     # `bound_method` is a bound instance method, so `self` is already removed.
     # Skip the first param (`ctx`) — what remains are the user kwargs.
-    return params[1:]
+    resolved: list[inspect.Parameter] = []
+    for p in params[1:]:
+        if p.name in hints:
+            resolved.append(p.replace(annotation=hints[p.name]))
+        else:
+            resolved.append(p)
+    return resolved
 
 
 def _build_endpoint_signature(extras: list[inspect.Parameter]) -> inspect.Signature:
@@ -607,16 +627,43 @@ class ModuleLoader:
                 else f"{module_id}.{spec.path.lstrip('/').replace('/', '.')}"
             )
 
-            async def _endpoint(log_id: str | None = None) -> dict[str, str]:  # type: ignore[misc]
-                ctx_log_id = log_id or ""
+            # Map of extra-arg name → annotation so the job runner can
+            # re-hydrate Pydantic models from the serialized payload.
+            extras_by_name = {p.name: p.annotation for p in extras}
+
+            async def _endpoint(**kwargs: Any) -> dict[str, str]:  # type: ignore[misc]
+                ctx_log_id = kwargs.pop("log_id", None) or ""
+
+                # Serialize forwarded args into the job payload. Pydantic
+                # models dump to dicts; primitives pass through. This is the
+                # bridge between the HTTP request (where FastAPI parses the
+                # body) and the background job (which only has a JSON blob).
+                serialized_extras: dict[str, Any] = {}
+                for name, value in kwargs.items():
+                    if isinstance(value, BaseModel):
+                        serialized_extras[name] = value.model_dump(mode="json")
+                    else:
+                        serialized_extras[name] = value
 
                 async def _job_handler(handle: JobHandle) -> None:
                     ctx = await self._make_context(
                         module_id,
-                        ctx_log_id,
+                        handle.payload.get("log_id", ""),
                         progress=_JobProgressAdapter(handle),
                     )
-                    await self._invoke_handler(bound_method, ctx)
+                    raw = handle.payload.get("_extras") or {}
+                    rebuilt: dict[str, Any] = {}
+                    for name, value in raw.items():
+                        ann = extras_by_name.get(name)
+                        if (
+                            isinstance(ann, type)
+                            and issubclass(ann, BaseModel)
+                            and isinstance(value, dict)
+                        ):
+                            rebuilt[name] = ann.model_validate(value)
+                        else:
+                            rebuilt[name] = value
+                    await self._invoke_handler(bound_method, ctx, **rebuilt)
 
                 # Register a one-shot handler under a unique type tag.
                 job_type = f"module.{module_id}.{spec.path.lstrip('/').replace('/', '.') or 'root'}"
@@ -642,10 +689,12 @@ class ModuleLoader:
                     title=resolved_title,
                     subtitle=resolved_subtitle,
                     module_id=module_id,
-                    payload={"log_id": ctx_log_id},
+                    payload={"log_id": ctx_log_id, "_extras": serialized_extras},
                     priority=job_spec.priority,
                 )
                 return {"job_id": job_id}
+
+            _endpoint.__signature__ = _build_endpoint_signature(extras)  # type: ignore[attr-defined]
 
         method = spec.method.lower()
         router.add_api_route(

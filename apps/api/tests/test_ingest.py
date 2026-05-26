@@ -74,6 +74,110 @@ async def test_csv_round_trip(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_xml_round_trip_autodetect(client: AsyncClient) -> None:
+    fixture = FIXTURES / "sample.xml"
+    with fixture.open("rb") as f:
+        resp = await client.post(
+            "/api/v1/event-logs",
+            files={"file": ("sample.xml", f, "application/xml")},
+            data={"name": "Sample XML"},
+        )
+    assert resp.status_code == 202, resp.text
+    log_id = resp.json()["log_id"]
+    detail = await _wait_until_ready(client, log_id)
+    assert detail["source_format"] == "xml"
+    assert detail["events_count"] == 9
+    assert detail["cases_count"] == 3
+    schema = detail.get("detected_schema") or {}
+    assert schema.get("xml_event_element") == "event"
+    assert "case_id" in (schema.get("canonical_columns") or [])
+
+
+@pytest.mark.asyncio
+async def test_xml_probe_endpoint(client: AsyncClient) -> None:
+    fixture = FIXTURES / "sample.xml"
+    with fixture.open("rb") as f:
+        resp = await client.post(
+            "/api/v1/event-logs/probe-xml",
+            files={"file": ("sample.xml", f, "application/xml")},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["event_element"] == "event"
+    # All four fields appear in every event in the fixture.
+    field_names = {f["name"] for f in body["fields"]}
+    assert {"case_id", "activity", "timestamp", "resource"}.issubset(field_names)
+    # Autodetect should succeed for canonically-named fields.
+    assert body["auto_mapping"] is not None
+    assert body["auto_mapping"]["case_id"] == "case_id"
+    assert body["auto_mapping"]["activity"] == "activity"
+
+
+@pytest.mark.asyncio
+async def test_xml_with_xes_payload_delegates_to_xes_parser(client: AsyncClient) -> None:
+    """A .xml file whose contents are XES should parse via the XES parser
+    instead of the generic flat-event model — otherwise the typed-attribute
+    children (<string>/<int>/<date>) out-vote the real <event> rows and the
+    detected schema comes out garbage.
+    """
+    fixture = FIXTURES / "sample_xes_as_xml.xml"
+    with fixture.open("rb") as f:
+        resp = await client.post(
+            "/api/v1/event-logs",
+            files={"file": ("sample.xml", f, "application/xml")},
+            data={"name": "XES-as-XML"},
+        )
+    assert resp.status_code == 202, resp.text
+    log_id = resp.json()["log_id"]
+    detail = await _wait_until_ready(client, log_id)
+    # Same numbers as the equivalent .xes fixture — 9 events / 3 cases.
+    assert detail["events_count"] == 9
+    assert detail["cases_count"] == 3
+    schema = detail.get("detected_schema") or {}
+    assert schema.get("format_hint") == "xes"
+
+
+@pytest.mark.asyncio
+async def test_xml_probe_recognises_xes(client: AsyncClient) -> None:
+    fixture = FIXTURES / "sample_xes_as_xml.xml"
+    with fixture.open("rb") as f:
+        resp = await client.post(
+            "/api/v1/event-logs/probe-xml",
+            files={"file": ("sample.xml", f, "application/xml")},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["format_hint"] == "xes"
+    # XES probes skip field enumeration; the frontend uses format_hint to
+    # bypass the mapping wizard entirely.
+    assert body["fields"] == []
+    assert body["auto_mapping"] is None
+
+
+@pytest.mark.asyncio
+async def test_xml_round_trip_with_explicit_mapping(client: AsyncClient) -> None:
+    # Same fixture but supply an explicit mapping — exercises the wizard path.
+    mapping = {
+        "event_element": "event",
+        "case_id": "case_id",
+        "activity": "activity",
+        "timestamp": "timestamp",
+        "resource": "resource",
+    }
+    fixture = FIXTURES / "sample.xml"
+    with fixture.open("rb") as f:
+        resp = await client.post(
+            "/api/v1/event-logs",
+            files={"file": ("sample.xml", f, "application/xml")},
+            data={"xml_mapping": json.dumps(mapping)},
+        )
+    assert resp.status_code == 202, resp.text
+    log_id = resp.json()["log_id"]
+    detail = await _wait_until_ready(client, log_id)
+    assert detail["events_count"] == 9
+
+
+@pytest.mark.asyncio
 async def test_unsupported_format_415(client: AsyncClient) -> None:
     resp = await client.post(
         "/api/v1/event-logs",

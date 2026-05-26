@@ -32,11 +32,19 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { ModuleLogsTail } from "@/components/settings/module-logs-tail";
 import {
+  AiKeysBanner,
+  AiModelPicker,
+  type AiModelSelection,
+} from "@/components/ai/ai-model-picker";
+import type { AiProvider } from "@/lib/ai-queries";
+import {
   useModules,
   useModuleConfig,
   useModuleManifest,
+  useRecreateModuleIndex,
   useUninstallModule,
   useUpdateModuleConfig,
+  type AiModelsManifest,
 } from "@/lib/queries";
 
 interface PropSchema {
@@ -54,6 +62,40 @@ interface ConfigSchema {
   properties?: Record<string, PropSchema>;
 }
 
+interface AiConfigDraft {
+  llm: AiModelSelection;
+  embedding: AiModelSelection;
+}
+
+const EMPTY_AI_DRAFT: AiConfigDraft = {
+  llm: { provider: null, model: null },
+  embedding: { provider: null, model: null, dimensions: null },
+};
+
+const EMBEDDING_PROVIDERS: AiProvider[] = ["openai", "unigpt", "custom"];
+
+function readAiDraft(cfg: Record<string, unknown>): AiConfigDraft {
+  const ai = (cfg.ai as Record<string, unknown> | undefined) ?? {};
+  const llm = (ai.llm as Partial<AiModelSelection> | undefined) ?? {};
+  const embedding = (ai.embedding as Partial<AiModelSelection> | undefined) ?? {};
+  const rawDim = embedding.dimensions;
+  const dimensions =
+    typeof rawDim === "number" && Number.isFinite(rawDim) && rawDim > 0
+      ? Math.floor(rawDim)
+      : null;
+  return {
+    llm: {
+      provider: (llm.provider as AiProvider | null | undefined) ?? null,
+      model: (llm.model as string | null | undefined) ?? null,
+    },
+    embedding: {
+      provider: (embedding.provider as AiProvider | null | undefined) ?? null,
+      model: (embedding.model as string | null | undefined) ?? null,
+      dimensions,
+    },
+  };
+}
+
 export default function ModuleDetailPage() {
   const router = useRouter();
   const { moduleId } = useParams<{ moduleId: string }>();
@@ -62,6 +104,7 @@ export default function ModuleDetailPage() {
   const { data: manifest } = useModuleManifest(moduleId);
   const uninstall = useUninstallModule();
   const update = useUpdateModuleConfig();
+  const recreateIndex = useRecreateModuleIndex(moduleId);
 
   const m = modules?.find((x) => x.id === moduleId);
 
@@ -69,20 +112,40 @@ export default function ModuleDetailPage() {
   const properties = schema?.properties ?? {};
   const hasSchema = Object.keys(properties).length > 0;
 
+  const aiManifest: AiModelsManifest | null = manifest?.ai_models ?? null;
+  const hasAiModels = Boolean(aiManifest && (aiManifest.llm || aiManifest.embedding));
+
   const [enabled, setEnabled] = useState<boolean>(true);
   useEffect(() => {
     if (cfg !== undefined) setEnabled(cfg.enabled);
   }, [cfg]);
 
   const [draft, setDraft] = useState<Record<string, unknown>>({});
+  const [aiDraft, setAiDraft] = useState<AiConfigDraft>(EMPTY_AI_DRAFT);
   useEffect(() => {
-    if (cfg !== undefined) setDraft(cfg.config ?? {});
+    if (cfg !== undefined) {
+      const c = cfg.config ?? {};
+      setDraft(c);
+      setAiDraft(readAiDraft(c));
+    }
   }, [cfg]);
+
+  const composeConfig = (
+    base: Record<string, unknown>,
+    ai: AiConfigDraft,
+  ): Record<string, unknown> => {
+    if (!hasAiModels) return base;
+    return { ...base, ai: { llm: ai.llm, embedding: ai.embedding } };
+  };
 
   const onToggleEnabled = async (val: boolean) => {
     setEnabled(val);
     try {
-      await update.mutateAsync({ id: moduleId, config: draft, enabled: val });
+      await update.mutateAsync({
+        id: moduleId,
+        config: composeConfig(draft, aiDraft),
+        enabled: val,
+      });
       toast.success(val ? `${m?.name ?? moduleId} enabled` : `${m?.name ?? moduleId} disabled`);
     } catch {
       setEnabled(!val);
@@ -92,7 +155,11 @@ export default function ModuleDetailPage() {
 
   const onSaveConfig = async () => {
     try {
-      await update.mutateAsync({ id: moduleId, config: draft, enabled });
+      await update.mutateAsync({
+        id: moduleId,
+        config: composeConfig(draft, aiDraft),
+        enabled,
+      });
       toast.success("Configuration saved");
     } catch {
       toastError("Failed to save configuration");
@@ -165,19 +232,109 @@ export default function ModuleDetailPage() {
         </CardContent>
       </Card>
 
+      {hasAiModels && aiManifest && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">AI models</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <AiKeysBanner />
+            {aiManifest.llm && (
+              <AiModelPicker
+                title={aiManifest.llm.title}
+                description={aiManifest.llm.description}
+                value={aiDraft.llm}
+                onChange={(next) => setAiDraft((d) => ({ ...d, llm: next }))}
+              />
+            )}
+            {aiManifest.embedding && (
+              <AiModelPicker
+                title={aiManifest.embedding.title}
+                description={aiManifest.embedding.description}
+                value={aiDraft.embedding}
+                onChange={(next) => setAiDraft((d) => ({ ...d, embedding: next }))}
+                allowProviders={EMBEDDING_PROVIDERS}
+                preferEmbeddingModels
+                showDimensions
+              />
+            )}
+            <Separator />
+            <div className="flex items-center justify-between gap-2">
+              {aiManifest.embedding ? (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="cursor-pointer text-destructive hover:bg-destructive/10"
+                      disabled={recreateIndex.isPending}
+                    >
+                      Recreate Pinecone index
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Recreate the Pinecone index?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This deletes the index and creates a fresh one using the dimension
+                        currently configured above. <strong>All previously ingested
+                        document vectors will be lost</strong> — you&apos;ll need to re-run
+                        ingestion afterwards. Save any pending AI-model changes first.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={async () => {
+                          try {
+                            const res = await recreateIndex.mutateAsync();
+                            toast.success(
+                              `Recreated "${res.index_name}" (dim ${res.dimension})`,
+                            );
+                          } catch (e) {
+                            toastError(
+                              `Failed to recreate index: ${(e as Error).message}`,
+                            );
+                          }
+                        }}
+                        className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Delete & recreate
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              ) : (
+                <span />
+              )}
+              <Button
+                size="sm"
+                onClick={onSaveConfig}
+                disabled={update.isPending}
+                className="cursor-pointer"
+              >
+                Save AI models
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Configuration</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          {hasSchema ? (
+          {hasSchema || hasAiModels ? (
             <>
-              <ConfigForm
-                properties={properties}
-                values={draft}
-                onChange={(key, val) => setDraft((d) => ({ ...d, [key]: val }))}
-              />
-              <Separator />
+              {hasSchema && (
+                <ConfigForm
+                  properties={properties}
+                  values={draft}
+                  onChange={(key, val) => setDraft((d) => ({ ...d, [key]: val }))}
+                />
+              )}
+              {hasSchema && <Separator />}
               <div className="flex justify-end">
                 <Button
                   size="sm"

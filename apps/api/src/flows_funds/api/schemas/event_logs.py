@@ -32,11 +32,48 @@ class CsvColumnMapping(BaseModel):
     extra: dict[str, str] = Field(default_factory=dict)
 
 
+class XmlColumnMapping(BaseModel):
+    """Mapping from XML element / attribute names to canonical event log fields.
+
+    Generic XML logs flatten a repeating *event element* into a row; each
+    event's attributes and direct child elements form the field bag. The
+    frontend probes the file to surface candidate fields, then submits this
+    mapping alongside the upload.
+    """
+
+    event_element: str
+    case_id: str
+    activity: str
+    timestamp: str
+    end_timestamp: str | None = None
+    resource: str | None = None
+    cost: str | None = None
+    timestamp_format: str | None = None
+    extra: dict[str, str] = Field(default_factory=dict)
+
+
+class XmlProbeField(BaseModel):
+    """A field discovered in a probed XML file."""
+
+    name: str
+    coverage: float
+    samples: list[str] = Field(default_factory=list)
+
+
+class XmlProbeResponse(BaseModel):
+    format_hint: Literal["generic", "xes"] = "generic"
+    event_element: str | None = None
+    events_sampled: int = 0
+    fields: list[XmlProbeField] = Field(default_factory=list)
+    auto_mapping: XmlColumnMapping | None = None
+
+
 class ImportPayload(BaseModel):
     """Optional metadata sent alongside a multipart upload (form-encoded JSON)."""
 
     name: str | None = None
     csv_mapping: CsvColumnMapping | None = None
+    xml_mapping: XmlColumnMapping | None = None
 
 
 class EventLogCreateResponse(BaseModel):

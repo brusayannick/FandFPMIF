@@ -33,6 +33,8 @@ import {
   useCreateFolder,
   useImportEventLog,
   useImportEventLogFromUrl,
+  useProbeXml,
+  type XmlProbeResponse,
 } from "@/lib/queries";
 import { useAiConfig } from "@/lib/ai-queries";
 import { useImportColumnMapping } from "@/lib/ai-guidance";
@@ -41,13 +43,14 @@ import { useTrack } from "@/lib/analytics/hooks";
 import { EV } from "@/lib/analytics/events";
 import { cn } from "@/lib/cn";
 
-type DetectedFormat = "xes" | "xes.gz" | "csv" | "unsupported";
+type DetectedFormat = "xes" | "xes.gz" | "csv" | "xml" | "unsupported";
 
 function detect(file: File): DetectedFormat {
   const n = file.name.toLowerCase();
   if (n.endsWith(".xes.gz")) return "xes.gz";
   if (n.endsWith(".xes")) return "xes";
   if (n.endsWith(".csv")) return "csv";
+  if (n.endsWith(".xml")) return "xml";
   return "unsupported";
 }
 
@@ -82,6 +85,25 @@ interface CsvMapping {
   delimiter: string;
   timestamp_format?: string;
 }
+
+interface XmlMapping {
+  event_element: string;
+  case_id: string;
+  activity: string;
+  timestamp: string;
+  end_timestamp?: string;
+  resource?: string;
+  cost?: string;
+  timestamp_format?: string;
+}
+
+type XmlMappingFieldKey =
+  | "case_id"
+  | "activity"
+  | "timestamp"
+  | "end_timestamp"
+  | "resource"
+  | "cost";
 
 // Each canonical field has an ordered list of candidate names. The first
 // candidate is also the canonical key itself, so a header literally named
@@ -208,6 +230,7 @@ export function ImportForm({ onSuccess }: ImportFormProps = {}) {
 function FileImportForm({ onSuccess }: ImportFormProps) {
   const router = useRouter();
   const importer = useImportEventLog();
+  const probeXml = useProbeXml();
   const { data: aiConfig } = useAiConfig();
   const aiMapping = useImportColumnMapping();
   const track = useTrack();
@@ -223,6 +246,12 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
   const [aiSuggested, setAiSuggested] = useState<Set<keyof CsvMapping>>(new Set());
   const [tsFormat, setTsFormat] = useState<string>(defaultTsFormat);
 
+  // XML wizard state. `xmlProbe` is null until the file has been inspected by
+  // the backend; xmlMapping is what we'll actually send on submit.
+  const [xmlProbe, setXmlProbe] = useState<XmlProbeResponse | null>(null);
+  const [xmlMapping, setXmlMapping] = useState<Partial<XmlMapping>>({});
+  const [xmlError, setXmlError] = useState<string | null>(null);
+
   const fmt = file ? detect(file) : null;
   const aiConfigured = Boolean(aiConfig?.selected_provider && aiConfig?.selected_model);
 
@@ -230,12 +259,41 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
     async (f: File) => {
       const detected = detect(f);
       if (detected === "unsupported") {
-        toastError(`Unsupported file: ${f.name}. Use .xes, .xes.gz, or .csv.`);
+        toastError(`Unsupported file: ${f.name}. Use .xes, .xes.gz, .csv, or .xml.`);
         return;
       }
       setFile(f);
-      setName((current) => current || f.name.replace(/\.(xes|xes\.gz|csv)$/i, ""));
+      setName((current) => current || f.name.replace(/\.(xes\.gz|xes|csv|xml)$/i, ""));
       setAiSuggested(new Set());
+      setXmlProbe(null);
+      setXmlMapping({});
+      setXmlError(null);
+      if (detected === "xml") {
+        try {
+          const probe = await probeXml.mutateAsync(f);
+          setXmlProbe(probe);
+          const auto = probe.auto_mapping;
+          if (auto) {
+            setXmlMapping({
+              event_element: auto.event_element,
+              case_id: auto.case_id,
+              activity: auto.activity,
+              timestamp: auto.timestamp,
+              end_timestamp: auto.end_timestamp ?? undefined,
+              resource: auto.resource ?? undefined,
+              cost: auto.cost ?? undefined,
+              timestamp_format: auto.timestamp_format ?? undefined,
+            });
+          } else if (probe.event_element) {
+            setXmlMapping({ event_element: probe.event_element });
+          }
+        } catch (err: unknown) {
+          setXmlError((err as Error).message || "Failed to inspect XML");
+        }
+        setHeaders([]);
+        setMapping({});
+        return;
+      }
       if (detected === "csv") {
         const sample = await readSampleLines(f, 11);
         const headerLine = sample[0] ?? "";
@@ -281,7 +339,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
         setMapping({});
       }
     },
-    [delimiter, aiConfigured, aiMapping],
+    [delimiter, aiConfigured, aiMapping, probeXml],
   );
 
   const ready = useMemo(() => {
@@ -289,18 +347,46 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
     if (fmt === "csv") {
       return Boolean(mapping.case_id && mapping.activity && mapping.timestamp);
     }
+    if (fmt === "xml") {
+      // XES-shaped .xml is handled by the dedicated XES parser server-side —
+      // no mapping needed. For generic XML we require the four canonical fields.
+      if (xmlProbe?.format_hint === "xes") return true;
+      return Boolean(
+        xmlMapping.event_element &&
+          xmlMapping.case_id &&
+          xmlMapping.activity &&
+          xmlMapping.timestamp,
+      );
+    }
     return true;
-  }, [file, fmt, mapping]);
+  }, [file, fmt, mapping, xmlMapping, xmlProbe]);
 
   const submit = async () => {
     if (!file) return;
     track(EV.PROCESS_IMPORT_STARTED, { source: "file", format: fmt });
     try {
-      const csvMapping = fmt === "csv" ? { ...mapping, delimiter, timestamp_format: tsFormat || undefined } : undefined;
+      const csvMappingPayload =
+        fmt === "csv" ? { ...mapping, delimiter, timestamp_format: tsFormat || undefined } : undefined;
+      const xmlMappingPayload =
+        fmt === "xml" &&
+        xmlProbe?.format_hint !== "xes" &&
+        xmlMapping.event_element
+          ? {
+              event_element: xmlMapping.event_element,
+              case_id: xmlMapping.case_id,
+              activity: xmlMapping.activity,
+              timestamp: xmlMapping.timestamp,
+              end_timestamp: xmlMapping.end_timestamp || undefined,
+              resource: xmlMapping.resource || undefined,
+              cost: xmlMapping.cost || undefined,
+              timestamp_format: xmlMapping.timestamp_format || undefined,
+            }
+          : undefined;
       const resp = await importer.mutateAsync({
         file,
         name: name || file.name,
-        csvMapping,
+        csvMapping: csvMappingPayload,
+        xmlMapping: xmlMappingPayload,
       });
       track(EV.PROCESS_IMPORT_FINISHED, { source: "file", format: fmt, ok: true });
       toast.success("Import queued");
@@ -378,6 +464,17 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
                   setTsFormat={setTsFormat}
                 />
               </>
+            )}
+
+            {fmt === "xml" && (
+              <XmlMappingSection
+                probe={xmlProbe}
+                mapping={xmlMapping}
+                setMapping={setXmlMapping}
+                loading={probeXml.isPending}
+                error={xmlError}
+                autoMappingApplied={Boolean(xmlProbe?.auto_mapping)}
+              />
             )}
 
             <div className="flex justify-end gap-2 border-t border-border pt-4">
@@ -556,12 +653,12 @@ function DropZone({
       )}
     >
       <FileUp className="h-8 w-8 text-muted-foreground" />
-      <div className="text-sm font-medium">Drop a XES, XES.gz, or CSV here</div>
+      <div className="text-sm font-medium">Drop a XES, XES.gz, CSV, or XML here</div>
       <div className="text-xs text-muted-foreground">Or click to choose a file</div>
       <input
         type="file"
         className="sr-only"
-        accept=".xes,.xes.gz,.csv,application/xml,text/xml,text/csv"
+        accept=".xes,.xes.gz,.csv,.xml,application/xml,text/xml,text/csv"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) onDrop(f);
@@ -724,6 +821,153 @@ function FieldText({
     <div className="grid gap-1.5">
       <Label className="text-xs">{label}</Label>
       <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+    </div>
+  );
+}
+
+// ── XML mapping wizard ────────────────────────────────────────────────────────
+
+function XmlMappingSection({
+  probe,
+  mapping,
+  setMapping,
+  loading,
+  error,
+  autoMappingApplied,
+}: {
+  probe: XmlProbeResponse | null;
+  mapping: Partial<XmlMapping>;
+  setMapping: (m: Partial<XmlMapping>) => void;
+  loading: boolean;
+  error: string | null;
+  autoMappingApplied: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Inspecting XML structure…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        {error}
+      </div>
+    );
+  }
+
+  if (probe?.format_hint === "xes") {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          Detected XES inside this .xml file. We&apos;ll parse it with the XES
+          parser — no field mapping needed.
+        </span>
+      </div>
+    );
+  }
+
+  if (!probe || !probe.event_element) {
+    return (
+      <div className="rounded-md border border-dashed border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+        Couldn&apos;t identify a repeating event element in this XML. The file
+        may not be an event log we can read.
+      </div>
+    );
+  }
+
+  const fieldNames = probe.fields.map((f) => f.name);
+  const set = (k: XmlMappingFieldKey) => (v: string) =>
+    setMapping({ ...mapping, [k]: v === "__none__" ? undefined : v });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span>
+          Detected event element:{" "}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+            &lt;{probe.event_element}&gt;
+          </code>
+          {probe.events_sampled > 0 && (
+            <span className="ml-1">({probe.events_sampled} sampled)</span>
+          )}
+        </span>
+        {autoMappingApplied && (
+          <span className="rounded-sm bg-primary/10 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-primary">
+            Auto-mapped
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <FieldText
+          label="Event element"
+          value={mapping.event_element ?? probe.event_element ?? ""}
+          onChange={(v) => setMapping({ ...mapping, event_element: v })}
+          placeholder={probe.event_element ?? "event"}
+        />
+        <FieldText
+          label="Timestamp format (optional)"
+          placeholder="e.g. %Y-%m-%d %H:%M:%S"
+          value={mapping.timestamp_format ?? ""}
+          onChange={(v) => setMapping({ ...mapping, timestamp_format: v })}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <FieldSelect
+          label="case_id"
+          value={mapping.case_id ?? ""}
+          onChange={set("case_id")}
+          options={fieldNames.map((h) => ({ value: h, label: h }))}
+          required
+        />
+        <FieldSelect
+          label="activity"
+          value={mapping.activity ?? ""}
+          onChange={set("activity")}
+          options={fieldNames.map((h) => ({ value: h, label: h }))}
+          required
+        />
+        <FieldSelect
+          label="timestamp"
+          value={mapping.timestamp ?? ""}
+          onChange={set("timestamp")}
+          options={fieldNames.map((h) => ({ value: h, label: h }))}
+          required
+        />
+        <FieldSelect
+          label="end_timestamp"
+          value={mapping.end_timestamp ?? "__none__"}
+          onChange={set("end_timestamp")}
+          options={[
+            { value: "__none__", label: "—" },
+            ...fieldNames.map((h) => ({ value: h, label: h })),
+          ]}
+        />
+        <FieldSelect
+          label="resource"
+          value={mapping.resource ?? "__none__"}
+          onChange={set("resource")}
+          options={[
+            { value: "__none__", label: "—" },
+            ...fieldNames.map((h) => ({ value: h, label: h })),
+          ]}
+        />
+        <FieldSelect
+          label="cost"
+          value={mapping.cost ?? "__none__"}
+          onChange={set("cost")}
+          options={[
+            { value: "__none__", label: "—" },
+            ...fieldNames.map((h) => ({ value: h, label: h })),
+          ]}
+        />
+      </div>
     </div>
   );
 }

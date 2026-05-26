@@ -81,6 +81,29 @@ class ManifestFrontend(BaseModel):
     page_layout: list[PageLayoutSection] = Field(default_factory=list)
 
 
+class AiModelSlot(BaseModel):
+    """One labelled (provider, model) selector exposed on the module's
+    settings page. The actual API keys come from the platform's global
+    Settings → AI; the module only persists the user's chosen pair."""
+
+    title: str
+    description: str | None = None
+
+
+class AiModelsManifest(BaseModel):
+    """Declares the AI-model selectors a module needs on its settings page.
+
+    Typical usage is ``llm`` (for chat agents) + ``embedding`` (for retrieval),
+    but any string-keyed slot is accepted so a module could declare extra
+    roles (e.g. a separate vision model).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    llm: AiModelSlot | None = None
+    embedding: AiModelSlot | None = None
+
+
 class Manifest(BaseModel):
     """The top-level manifest object — `manifest.yaml`."""
 
@@ -105,6 +128,10 @@ class Manifest(BaseModel):
     # platform passes it through to the frontend as-is (`/config-schema`);
     # form-rendering and validation are the frontend's responsibility.
     config_schema: dict[str, Any] | None = None
+    # Optional declaration of AI-model selectors. When present, the module's
+    # settings page renders an "AI models" card and the chosen (provider,
+    # model) pairs are persisted under ``module_configs.config_json["ai"]``.
+    ai_models: AiModelsManifest | None = None
 
     @model_validator(mode="after")
     def _validate_id(self) -> Self:

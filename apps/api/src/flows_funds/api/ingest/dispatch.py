@@ -32,8 +32,9 @@ from flows_funds.api.ingest.aggregation import compute_cases
 from flows_funds.api.ingest.csv_parser import parse_csv
 from flows_funds.api.ingest.storage import log_paths
 from flows_funds.api.ingest.xes import parse_xes
+from flows_funds.api.ingest.xml_parser import parse_xml
 from flows_funds.api.jobs.runtime import JobHandle, JobRuntime
-from flows_funds.api.schemas.event_logs import CsvColumnMapping
+from flows_funds.api.schemas.event_logs import CsvColumnMapping, XmlColumnMapping
 
 log = structlog.get_logger(__name__)
 
@@ -66,6 +67,7 @@ async def _import_handler(handle: JobHandle) -> None:
     source_format: str = payload["source_format"]
     original_path = Path(payload["original_path"])
     csv_mapping_data: dict[str, Any] | None = payload.get("csv_mapping")
+    xml_mapping_data: dict[str, Any] | None = payload.get("xml_mapping")
 
     paths = log_paths(log_id)
     paths.ensure()
@@ -90,6 +92,12 @@ async def _import_handler(handle: JobHandle) -> None:
         mapping = CsvColumnMapping.model_validate(csv_mapping_data) if csv_mapping_data else None
         rows, detected, used = await asyncio.to_thread(parse_csv, original_path, mapping)
         effective_mapping = used.model_dump()
+    elif source_format == "xml":
+        xml_mapping = (
+            XmlColumnMapping.model_validate(xml_mapping_data) if xml_mapping_data else None
+        )
+        rows, detected, used_xml = await asyncio.to_thread(parse_xml, original_path, xml_mapping)
+        effective_mapping = used_xml.model_dump()
     else:
         raise ValueError(f"Source format {source_format!r} is not supported in v1.")
 

@@ -1,9 +1,15 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api } from "@/lib/api";
-import type { DfgData, PetriNetData, PrefixTreeData, ProcessTreeData } from "./types";
+import { api, apiUrl } from "@/lib/api";
+import type {
+  BpmnData,
+  DfgData,
+  PetriNetData,
+  PrefixTreeData,
+  ProcessTreeData,
+} from "./types";
 
 const STALE_TIME = 30_000;
 
@@ -99,6 +105,84 @@ export function useDiscoveryPrefixTree(logId: string) {
     enabled: Boolean(logId),
     staleTime: STALE_TIME,
   });
+}
+
+export type BpmnAlgo = "inductive" | "imf";
+
+function bpmnQueryKey(logId: string, algo: BpmnAlgo, noiseThreshold: number) {
+  return ["modules", "discovery", "bpmn", logId, algo, noiseThreshold] as const;
+}
+
+export function useDiscoveryBpmn(
+  logId: string,
+  algo: BpmnAlgo = "inductive",
+  noiseThreshold = 0.2,
+) {
+  return useQuery<BpmnData>({
+    queryKey: bpmnQueryKey(logId, algo, noiseThreshold),
+    queryFn: () =>
+      api<BpmnData>(
+        discoveryUrl(
+          "/bpmn",
+          logId,
+          algo === "imf" ? { algo, noise_threshold: noiseThreshold } : { algo },
+        ),
+      ),
+    enabled: Boolean(logId),
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useUploadBpmn(logId: string) {
+  const qc = useQueryClient();
+  return useMutation<BpmnData, Error, File>({
+    mutationFn: async (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return api<BpmnData>(discoveryUrl("/bpmn/upload", logId), {
+        method: "POST",
+        body: form,
+      });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["modules", "discovery", "bpmn", logId],
+      });
+    },
+  });
+}
+
+export function useSaveBpmn(logId: string) {
+  const qc = useQueryClient();
+  return useMutation<BpmnData, Error, string>({
+    mutationFn: (xml: string) =>
+      api<BpmnData>(discoveryUrl("/bpmn", logId), {
+        method: "PUT",
+        json: { xml },
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["modules", "discovery", "bpmn", logId],
+      });
+    },
+  });
+}
+
+export function useResetBpmn(logId: string) {
+  const qc = useQueryClient();
+  return useMutation<{ status: string }, Error, void>({
+    mutationFn: () =>
+      api<{ status: string }>(discoveryUrl("/bpmn", logId), { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["modules", "discovery", "bpmn", logId],
+      });
+    },
+  });
+}
+
+export function bpmnDownloadUrl(logId: string): string {
+  return apiUrl(discoveryUrl("/bpmn/download", logId));
 }
 
 export interface HeuristicsThresholds {

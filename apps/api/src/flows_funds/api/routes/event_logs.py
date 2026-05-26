@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import shutil
+import tempfile
 from datetime import UTC, datetime
-from typing import Annotated
+from pathlib import Path
+from typing import Annotated, Any
 from urllib.parse import unquote, urlparse
 
 import aiofiles
@@ -26,6 +30,8 @@ from flows_funds.api.schemas.event_logs import (
     EventLogDetail,
     EventLogSummary,
     EventLogUpdate,
+    XmlColumnMapping,
+    XmlProbeResponse,
 )
 from flows_funds.api.uuid7 import uuid7_str
 
@@ -49,9 +55,10 @@ _RuntimeDep = Annotated[JobRuntime, Depends(_runtime_dep)]
 async def create_event_log(
     session: SessionDep,
     runtime: _RuntimeDep,
-    file: Annotated[UploadFile, File(description="XES, XES.GZ, or CSV upload")],
+    file: Annotated[UploadFile, File(description="XES, XES.GZ, CSV, or XML upload")],
     name: Annotated[str | None, Form()] = None,
     csv_mapping: Annotated[str | None, Form(description="JSON-encoded CsvColumnMapping")] = None,
+    xml_mapping: Annotated[str | None, Form(description="JSON-encoded XmlColumnMapping")] = None,
     folder_id: Annotated[str | None, Form()] = None,
 ) -> EventLogCreateResponse:
     if file.filename is None:
@@ -68,6 +75,13 @@ async def create_event_log(
             parsed_mapping = CsvColumnMapping.model_validate(json.loads(csv_mapping))
         except (ValueError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=422, detail=f"Invalid csv_mapping: {exc}") from exc
+
+    parsed_xml_mapping: XmlColumnMapping | None = None
+    if xml_mapping:
+        try:
+            parsed_xml_mapping = XmlColumnMapping.model_validate(json.loads(xml_mapping))
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid xml_mapping: {exc}") from exc
 
     if folder_id is not None:
         folder = await session.get(Folder, folder_id)
@@ -109,6 +123,7 @@ async def create_event_log(
             "source_format": source_format,
             "original_path": str(original_path),
             "csv_mapping": parsed_mapping.model_dump() if parsed_mapping else None,
+            "xml_mapping": parsed_xml_mapping.model_dump() if parsed_xml_mapping else None,
         },
     )
 
@@ -125,6 +140,7 @@ class ImportFromUrlRequest(BaseModel):
     url: HttpUrl
     name: str | None = None
     csv_mapping: str | None = None  # JSON-encoded CsvColumnMapping
+    xml_mapping: str | None = None  # JSON-encoded XmlColumnMapping
 
 
 @router.post(
@@ -158,6 +174,13 @@ async def create_event_log_from_url(
             parsed_mapping = CsvColumnMapping.model_validate(json.loads(body.csv_mapping))
         except (ValueError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=422, detail=f"Invalid csv_mapping: {exc}") from exc
+
+    parsed_xml_mapping: XmlColumnMapping | None = None
+    if body.xml_mapping:
+        try:
+            parsed_xml_mapping = XmlColumnMapping.model_validate(json.loads(body.xml_mapping))
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid xml_mapping: {exc}") from exc
 
     # Download the remote file.
     try:
@@ -211,6 +234,7 @@ async def create_event_log_from_url(
             "source_format": source_format,
             "original_path": str(original_path),
             "csv_mapping": parsed_mapping.model_dump() if parsed_mapping else None,
+            "xml_mapping": parsed_xml_mapping.model_dump() if parsed_xml_mapping else None,
         },
     )
 
@@ -222,6 +246,54 @@ async def create_event_log_from_url(
         url=url_str,
     )
     return EventLogCreateResponse(log_id=log_id, job_id=job_id)
+
+
+@router.post("/probe-xml", response_model=XmlProbeResponse)
+async def probe_xml_upload(
+    file: Annotated[UploadFile, File(description="XML file to probe for fields")],
+) -> XmlProbeResponse:
+    """Inspect an uploaded XML file and return its candidate event element +
+    field list. Drives the import-form mapping wizard before the actual upload.
+    """
+    # Stream the upload to a temp file so the probe can use lxml's path-based
+    # parsing without holding the whole document in memory twice.
+    fd, tmp_name = tempfile.mkstemp(suffix=".xml", prefix="ff-xml-probe-")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        async with aiofiles.open(tmp_path, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                await out.write(chunk)
+        # Avoid the late import of xml_parser at module-load time — lxml's
+        # iterparse is sync and CPU-bound, so this runs in a thread.
+        from flows_funds.api.ingest.xml_parser import autodetect_mapping, probe_xml
+
+        try:
+            probe = await asyncio.to_thread(probe_xml, tmp_path)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400, detail=f"Could not parse XML file: {exc}"
+            ) from exc
+        # XES-shaped probes ship without fields — the parser will delegate to
+        # the XES parser at import time, so the frontend skips the wizard.
+        hint = probe.get("format_hint") or "generic"
+        mapping = (
+            None
+            if hint == "xes"
+            else await asyncio.to_thread(autodetect_mapping, probe)
+        )
+        return XmlProbeResponse(
+            format_hint=hint,
+            event_element=probe.get("event_element"),
+            events_sampled=int(probe.get("events_sampled") or 0),
+            fields=probe.get("fields") or [],
+            auto_mapping=mapping,
+        )
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
 
 
 @router.get("", response_model=list[EventLogSummary])
@@ -333,14 +405,17 @@ async def reimport_event_log(
             detail="Original upload is missing on disk — cannot re-run import.",
         )
 
-    csv_mapping_data: dict | None = None
+    saved_mapping: dict[str, Any] | None = None
     if paths.meta.exists():
         try:
             meta = json.loads(paths.meta.read_text())
             mapping = meta.get("mapping") if isinstance(meta, dict) else None
-            csv_mapping_data = mapping if isinstance(mapping, dict) else None
+            saved_mapping = mapping if isinstance(mapping, dict) else None
         except (OSError, json.JSONDecodeError):
-            csv_mapping_data = None
+            saved_mapping = None
+
+    csv_mapping_data = saved_mapping if row.source_format == "csv" else None
+    xml_mapping_data = saved_mapping if row.source_format == "xml" else None
 
     # Reset derived state so the listing reflects "importing" while the worker
     # rebuilds events.parquet / cases.parquet / meta.json.
@@ -364,6 +439,7 @@ async def reimport_event_log(
             "source_format": row.source_format,
             "original_path": str(original_path),
             "csv_mapping": csv_mapping_data,
+            "xml_mapping": xml_mapping_data,
         },
     )
     log.info("event_log.reimport_started", log_id=log_id, job_id=job_id)

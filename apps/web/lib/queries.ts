@@ -127,12 +127,14 @@ export function useImportEventLog() {
       file: File;
       name?: string;
       csvMapping?: unknown;
+      xmlMapping?: unknown;
       folderId?: string | null;
     }) => {
       const fd = new FormData();
       fd.append("file", input.file);
       if (input.name) fd.append("name", input.name);
       if (input.csvMapping) fd.append("csv_mapping", JSON.stringify(input.csvMapping));
+      if (input.xmlMapping) fd.append("xml_mapping", JSON.stringify(input.xmlMapping));
       if (input.folderId) fd.append("folder_id", input.folderId);
       return api<EventLogCreateResponse>("/api/v1/event-logs", { method: "POST", body: fd });
     },
@@ -145,17 +147,60 @@ export function useImportEventLog() {
 export function useImportEventLogFromUrl() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { url: string; name?: string; csvMapping?: unknown }) =>
+    mutationFn: (input: {
+      url: string;
+      name?: string;
+      csvMapping?: unknown;
+      xmlMapping?: unknown;
+    }) =>
       api<EventLogCreateResponse>("/api/v1/event-logs/from-url", {
         method: "POST",
         json: {
           url: input.url,
           name: input.name || undefined,
           csv_mapping: input.csvMapping ? JSON.stringify(input.csvMapping) : undefined,
+          xml_mapping: input.xmlMapping ? JSON.stringify(input.xmlMapping) : undefined,
         },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
+    },
+  });
+}
+
+export interface XmlProbeField {
+  name: string;
+  coverage: number;
+  samples: string[];
+}
+
+export interface XmlProbeResponse {
+  format_hint: "generic" | "xes";
+  event_element: string | null;
+  events_sampled: number;
+  fields: XmlProbeField[];
+  auto_mapping: {
+    event_element: string;
+    case_id: string;
+    activity: string;
+    timestamp: string;
+    end_timestamp?: string | null;
+    resource?: string | null;
+    cost?: string | null;
+    timestamp_format?: string | null;
+    extra?: Record<string, string>;
+  } | null;
+}
+
+export function useProbeXml() {
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return api<XmlProbeResponse>("/api/v1/event-logs/probe-xml", {
+        method: "POST",
+        body: fd,
+      });
     },
   });
 }
@@ -348,10 +393,27 @@ export function useUninstallModule() {
   });
 }
 
+export interface AiModelSlot {
+  title: string;
+  description?: string | null;
+}
+
+export interface AiModelsManifest {
+  llm?: AiModelSlot | null;
+  embedding?: AiModelSlot | null;
+  [extra: string]: AiModelSlot | null | undefined;
+}
+
+export interface ModuleManifest {
+  config_schema?: Record<string, unknown> | null;
+  ai_models?: AiModelsManifest | null;
+  [extra: string]: unknown;
+}
+
 export function useModuleManifest(moduleId: string) {
   return useQuery({
     queryKey: queryKeys.moduleManifest(moduleId),
-    queryFn: () => api<Record<string, unknown>>(`/api/v1/modules/${moduleId}/manifest`),
+    queryFn: () => api<ModuleManifest>(`/api/v1/modules/${moduleId}/manifest`),
     staleTime: Infinity,
   });
 }
@@ -367,6 +429,22 @@ export function useUpdateModuleConfig() {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: queryKeys.moduleConfig(vars.id) });
     },
+  });
+}
+
+export interface RecreateIndexResponse {
+  ok: boolean;
+  index_name: string;
+  dimension: number;
+}
+
+export function useRecreateModuleIndex(moduleId: string) {
+  return useMutation({
+    mutationFn: () =>
+      api<RecreateIndexResponse>(
+        `/api/v1/modules/${moduleId}/pinecone/recreate-index`,
+        { method: "POST" },
+      ),
   });
 }
 

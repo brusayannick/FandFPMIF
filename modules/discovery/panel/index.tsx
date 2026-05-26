@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertTriangle, ArrowUp, RotateCcw, Settings2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, ArrowUp, Download, RotateCcw, Save, Settings2, Upload } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/empty-state";
 
+import { BpmnCanvas } from "./canvases/BpmnCanvas";
 import { DfgCanvas } from "./canvases/DfgCanvas";
 import { HeuristicsNetCanvas } from "./canvases/HeuristicsNetCanvas";
 import { PetriNetCanvas } from "./canvases/PetriNetCanvas";
@@ -46,6 +47,8 @@ import {
 import { SettingsSheet } from "./settings-sheet";
 
 import {
+  bpmnDownloadUrl,
+  useDiscoveryBpmn,
   useDiscoveryDfg,
   useDiscoveryHeuristicsNet,
   useDiscoveryPetriAlpha,
@@ -56,16 +59,21 @@ import {
   useDiscoveryPrefixTree,
   useDiscoveryProcessTree,
   useDiscoveryProcessTreeImf,
+  useResetBpmn,
+  useSaveBpmn,
+  useUploadBpmn,
+  type BpmnAlgo,
   type HeuristicsThresholds,
 } from "./queries";
 
-type View = "dfg" | "petri" | "tree" | "prefix-tree" | "heuristics";
+type View = "dfg" | "petri" | "tree" | "prefix-tree" | "heuristics" | "bpmn";
 const VIEWS: { value: View; label: string }[] = [
   { value: "dfg", label: "DFG" },
   { value: "petri", label: "Petri Net" },
   { value: "tree", label: "Process Tree" },
   { value: "prefix-tree", label: "Prefix Tree" },
   { value: "heuristics", label: "Heuristics Net" },
+  { value: "bpmn", label: "BPMN" },
 ];
 
 export function DiscoveryPanel({ logId, moduleId }: { logId: string; moduleId: string }) {
@@ -160,6 +168,7 @@ function DiscoveryPanelContent({ logId }: { logId: string }) {
         {view === "tree" && <ProcessTreeTab logId={logId} />}
         {view === "prefix-tree" && <PrefixTreeTab logId={logId} />}
         {view === "heuristics" && <HeuristicsTab logId={logId} />}
+        {view === "bpmn" && <BpmnTab logId={logId} />}
       </div>
     </div>
   );
@@ -781,3 +790,117 @@ function CommitSlider({
   );
 }
 
+function BpmnTab({ logId }: { logId: string }) {
+  const [algo, setAlgo] = useState<BpmnAlgo>("inductive");
+  const [noiseThreshold, setNoiseThreshold] = useState(0.2);
+
+  const { data, isLoading, isError, error, dataUpdatedAt } = useDiscoveryBpmn(
+    logId,
+    algo,
+    noiseThreshold,
+  );
+  const uploadMut = useUploadBpmn(logId);
+  const saveMut = useSaveBpmn(logId);
+  const resetMut = useResetBpmn(logId);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Track the latest XML emitted by the modeler so the Save button can PUT
+  // it back. Reset whenever the underlying query payload changes (algorithm
+  // switch, upload, reset).
+  const [dirtyXml, setDirtyXml] = useState<string | null>(null);
+  useEffect(() => {
+    setDirtyXml(null);
+  }, [dataUpdatedAt]);
+
+  return (
+    <>
+      <FilterBar>
+        <FilterField label="Algorithm">
+          <Select value={algo} onValueChange={(v) => setAlgo(v as BpmnAlgo)}>
+            <SelectTrigger className="h-7 w-44 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inductive">Inductive Miner</SelectItem>
+              <SelectItem value="imf">IM Infrequent</SelectItem>
+            </SelectContent>
+          </Select>
+        </FilterField>
+        {algo === "imf" && (
+          <FilterField label="Noise threshold">
+            <CommitSlider value={noiseThreshold} onCommit={setNoiseThreshold} />
+          </FilterField>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".bpmn,application/bpmn+xml,application/xml,text/xml"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) uploadMut.mutate(file);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="cursor-pointer gap-1.5"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadMut.isPending}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Upload .bpmn
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            asChild
+            className="cursor-pointer gap-1.5"
+            disabled={!data}
+          >
+            <a href={bpmnDownloadUrl(logId)} download="process.bpmn">
+              <Download className="h-3.5 w-3.5" />
+              Download
+            </a>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="cursor-pointer gap-1.5"
+            onClick={() => resetMut.mutate()}
+            disabled={resetMut.isPending}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Re-derive
+          </Button>
+          <Button
+            size="sm"
+            className="cursor-pointer gap-1.5"
+            onClick={() => {
+              if (dirtyXml) saveMut.mutate(dirtyXml);
+            }}
+            disabled={!dirtyXml || saveMut.isPending}
+          >
+            <Save className="h-3.5 w-3.5" />
+            {saveMut.isPending ? "Saving…" : "Save edits"}
+          </Button>
+        </div>
+      </FilterBar>
+
+      {isLoading ? (
+        <CanvasSkeleton />
+      ) : isError || !data ? (
+        <CanvasError message={(error as Error)?.message ?? "Unknown error"} />
+      ) : (
+        <CanvasFrame>
+          {/* Re-mount when the backend payload identity changes so we
+              import fresh XML (algorithm switch / upload / reset). */}
+          <BpmnCanvas key={dataUpdatedAt} xml={data.xml} onChange={setDirtyXml} />
+        </CanvasFrame>
+      )}
+    </>
+  );
+}

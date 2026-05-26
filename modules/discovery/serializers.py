@@ -179,6 +179,33 @@ def serialize_prefix_tree(cases: list[list[str]]) -> dict[str, Any]:
     return {"kind": "prefix_tree", "nodes": list(node_store.values())}
 
 
+def serialize_bpmn(bpmn_graph: Any) -> dict[str, Any]:
+    """Serialise a pm4py BPMN graph to its standard XML form.
+
+    pm4py exposes write_bpmn() but not a bytes/stream API, so we round-trip
+    through a NamedTemporaryFile. The XML it emits has no BPMNDI (diagram
+    interchange) section — coordinates are filled in client-side by
+    bpmn-auto-layout before bpmn-js renders.
+    """
+    import tempfile
+    from pathlib import Path
+
+    import pm4py
+
+    with tempfile.NamedTemporaryFile(suffix=".bpmn", delete=False) as fh:
+        tmp = Path(fh.name)
+    try:
+        # auto_layout=True would invoke pm4py's graphviz-based layouter — a
+        # heavy dep we'd rather not require. bpmn-auto-layout on the client
+        # fills in BPMNDI just before render.
+        pm4py.write_bpmn(bpmn_graph, str(tmp), auto_layout=False)
+        xml = tmp.read_text(encoding="utf-8")
+    finally:
+        tmp.unlink(missing_ok=True)
+
+    return {"kind": "bpmn", "version": 1, "xml": xml}
+
+
 def serialize_heuristics_net(hnet: Any) -> dict[str, Any]:
     """Serialise pm4py HeuristicsNet (frequency + dependency)."""
     occurrences: dict[str, int] = dict(getattr(hnet, "activities_occurrences", {}) or {})

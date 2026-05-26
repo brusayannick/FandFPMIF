@@ -85,3 +85,12 @@ export interface PrefixTreeData {
   kind: "prefix_tree";
   nodes: PrefixTreeNodeFlat[];
 }
+
+export interface BpmnData {
+  kind: "bpmn";
+  version: number;
+  /** Standard BPMN 2.0 XML. May lack BPMNDI (diagram interchange) coordinates
+   *  when freshly derived by pm4py; `bpmn-auto-layout` fills them in
+   *  client-side before bpmn-js renders. */
+  xml: string;
+}

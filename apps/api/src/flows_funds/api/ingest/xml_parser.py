@@ -58,14 +58,20 @@ def _localname(tag: object) -> str:
 def is_xes_like(path: Path, *, scan_limit: int = 20000) -> bool:
     """Quick streaming sniff: does the file look like XES regardless of extension?
 
-    Two positive signals (either is sufficient):
+    Any of these positive signals is sufficient:
 
     * The root element declares the XES namespace.
-    * We find a ``<trace>`` or ``<event>`` element whose children are XES
-      typed-attribute leaves (``<string key="…" value="…"/>`` etc.).
+    * The root element carries an ``xes.*`` or ``openxes.*`` attribute (the
+      OpenXES library emits these instead of a namespace declaration).
+    * We see an ``<extension>`` element whose ``uri`` points at
+      ``xes-standard.org`` — XES files declare these in the log header.
+    * We see a XES typed-attribute leaf (``<string key="…" value="…"/>`` etc.)
+      anywhere — including directly under ``<log>``, which is how XES carries
+      log-level metadata.
 
-    Bounded by ``scan_limit`` so a malformed or pathological document can't
-    spin forever.
+    We scan up to ``scan_limit`` parse events and never bail to ``False`` on
+    a single sparse ``<trace>``/``<event>`` — an empty trace appearing before
+    populated ones used to misclassify the whole file.
     """
     try:
         context = etree.iterparse(str(path), events=("start", "end"))
@@ -74,25 +80,27 @@ def is_xes_like(path: Path, *, scan_limit: int = 20000) -> bool:
             seen += 1
             if seen > scan_limit:
                 return False
-            if event == "start" and seen == 1 and isinstance(elem, etree._Element):
-                ns = etree.QName(elem.tag).namespace or ""
-                if ns in _XES_NAMESPACES:
-                    return True
-            if event != "end" or not isinstance(elem, etree._Element):
+            if not isinstance(elem, etree._Element):
                 continue
-            local = _localname(elem.tag)
-            if local not in ("trace", "event"):
-                continue
-            # First trace/event seen — its children give us a decisive answer.
-            for child in elem:
-                if not isinstance(child, etree._Element):
-                    continue
-                if _localname(child.tag) in _XES_TYPED_TAGS and child.get("key"):
+            if event == "start":
+                if seen == 1:
+                    ns = etree.QName(elem.tag).namespace or ""
+                    if ns in _XES_NAMESPACES:
+                        return True
+                    for attr_name in elem.attrib:
+                        local = _localname(attr_name).lower()
+                        if local.startswith("xes.") or local.startswith("openxes."):
+                            return True
+                local = _localname(elem.tag)
+                if local == "extension":
+                    uri = elem.get("uri") or ""
+                    if "xes-standard.org" in uri:
+                        return True
+                elif local in _XES_TYPED_TAGS and elem.get("key") is not None:
                     return True
-            return False
+        return False
     except (etree.XMLSyntaxError, OSError):
         return False
-    return False
 
 
 def _event_fields(elem: etree._Element) -> dict[str, str]:

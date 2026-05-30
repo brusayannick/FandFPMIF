@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { toastError } from "@/lib/toast";
@@ -18,6 +19,7 @@ import {
   cleanDisplayName,
   useAiConfig,
   useFetchProviderModels,
+  useProviderModels,
   type AiConfig,
   type AiProvider,
   type ModelInfo,
@@ -81,10 +83,8 @@ export function AiModelPicker({
 }: AiModelPickerProps) {
   const { data: aiCfg } = useAiConfig();
   const fetchModels = useFetchProviderModels();
-  const [modelsByProvider, setModelsByProvider] = useState<
-    Partial<Record<AiProvider, ModelInfo[]>>
-  >({});
-  const [fetchingProvider, setFetchingProvider] = useState<AiProvider | null>(null);
+  const qc = useQueryClient();
+  const [refreshingProvider, setRefreshingProvider] = useState<AiProvider | null>(null);
 
   const configured = useMemo(() => {
     const s = new Set<AiProvider>();
@@ -95,24 +95,11 @@ export function AiModelPicker({
     return s;
   }, [aiCfg, allowProviders]);
 
-  // Auto-fetch the model list for the currently-selected provider so the
-  // dropdown isn't empty on first render.
-  useEffect(() => {
-    if (!value.provider) return;
-    if (!configured.has(value.provider)) return;
-    if (modelsByProvider[value.provider]) return;
-    setFetchingProvider(value.provider);
-    fetchModels
-      .mutateAsync(value.provider)
-      .then((res) =>
-        setModelsByProvider((m) => ({ ...m, [value.provider!]: res.models })),
-      )
-      .catch(() => {
-        // Silent — surfaced when user clicks refresh.
-      })
-      .finally(() => setFetchingProvider(null));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value.provider, configured]);
+  const providerReady =
+    value.provider !== null && configured.has(value.provider);
+  const modelsQuery = useProviderModels(value.provider, providerReady);
+  const fetchingProvider =
+    refreshingProvider ?? (modelsQuery.isFetching ? value.provider : null);
 
   const onPickProvider = (p: AiProvider | null) => {
     onChange({ provider: p, model: null, dimensions: value.dimensions ?? null });
@@ -130,20 +117,18 @@ export function AiModelPicker({
   };
 
   const onRefreshModels = async (p: AiProvider) => {
-    setFetchingProvider(p);
+    setRefreshingProvider(p);
     try {
       const res = await fetchModels.mutateAsync(p);
-      setModelsByProvider((m) => ({ ...m, [p]: res.models }));
+      qc.setQueryData(["ai", "models", p], res);
     } catch (e) {
       toastError(`Could not fetch models: ${(e as Error).message}`);
     } finally {
-      setFetchingProvider(null);
+      setRefreshingProvider(null);
     }
   };
 
-  const allModels: ModelInfo[] = value.provider
-    ? modelsByProvider[value.provider] ?? []
-    : [];
+  const allModels: ModelInfo[] = modelsQuery.data?.models ?? [];
 
   const displayedModels = useMemo(() => {
     if (!preferEmbeddingModels) return allModels;

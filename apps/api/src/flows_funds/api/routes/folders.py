@@ -8,14 +8,18 @@ exactly once when the drag ends.
 
 from __future__ import annotations
 
+import shutil
 import structlog
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
 from flows_funds.api.db.models import EventLog, Folder
 from flows_funds.api.db.session import SessionDep
+from flows_funds.api.ingest.storage import log_paths
+from flows_funds.api.jobs.runtime import JobRuntime, get_job_runtime
 from flows_funds.api.schemas.event_logs import (
     FolderCreate,
     FolderSummary,
@@ -27,6 +31,13 @@ from flows_funds.api.uuid7 import uuid7_str
 log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/folders", tags=["folders"])
+
+
+def _runtime_dep() -> JobRuntime:
+    return get_job_runtime()
+
+
+_RuntimeDep = Annotated[JobRuntime, Depends(_runtime_dep)]
 
 
 def _utcnow() -> datetime:
@@ -127,36 +138,43 @@ async def update_folder(
 
 
 @router.delete("/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_folder(folder_id: str, session: SessionDep) -> None:
-    """Soft-delete a folder. Children (folders and logs) are moved to root."""
+async def delete_folder(
+    folder_id: str,
+    session: SessionDep,
+    runtime: _RuntimeDep,
+) -> None:
+    """Soft-delete a folder, all descendant folders, and every event log inside.
+
+    On-disk data for each affected event log (parquet outputs + original upload)
+    is also removed. The frontend confirms intent before calling this.
+    """
     folder = await session.get(Folder, folder_id)
     if folder is None or folder.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Folder not found.")
 
-    # Promote direct children to the folder's parent so deleting "Q1/2025"
-    # surfaces its contents under "Q1" rather than orphaning them at root.
-    target_parent = folder.parent_id
+    now = _utcnow()
 
-    child_folders = (
-        (
+    # Collect every descendant folder id (including the target itself).
+    folder_ids: list[str] = []
+    stack: list[str] = [folder_id]
+    while stack:
+        cur = stack.pop()
+        folder_ids.append(cur)
+        descendants = (
             await session.execute(
-                select(Folder).where(
-                    Folder.parent_id == folder_id,
+                select(Folder.id).where(
+                    Folder.parent_id == cur,
                     Folder.deleted_at.is_(None),
                 )
             )
-        )
-        .scalars()
-        .all()
-    )
-    for child in child_folders:
-        child.parent_id = target_parent
+        ).scalars().all()
+        stack.extend(descendants)
 
-    child_logs = (
+    log_rows = (
         (
             await session.execute(
                 select(EventLog).where(
-                    EventLog.folder_id == folder_id,
+                    EventLog.folder_id.in_(folder_ids),
                     EventLog.deleted_at.is_(None),
                 )
             )
@@ -164,12 +182,37 @@ async def delete_folder(folder_id: str, session: SessionDep) -> None:
         .scalars()
         .all()
     )
-    for child in child_logs:
-        child.folder_id = target_parent
+    deleted_log_ids: list[str] = []
+    for row in log_rows:
+        row.deleted_at = now
+        deleted_log_ids.append(row.id)
 
-    folder.deleted_at = _utcnow()
+    for fid in folder_ids:
+        f = await session.get(Folder, fid)
+        if f is not None and f.deleted_at is None:
+            f.deleted_at = now
+
     await session.commit()
-    log.info("folder.deleted", folder_id=folder_id)
+
+    # Terminate any in-flight or queued jobs tied to the affected logs before
+    # we delete their on-disk directories, matching delete_event_log.
+    cancelled_jobs = await runtime.cancel_for_logs(deleted_log_ids)
+
+    for log_id in deleted_log_ids:
+        paths = log_paths(log_id)
+        if paths.exists():
+            try:
+                shutil.rmtree(paths.root)
+            except OSError as exc:
+                log.warning("event_log.cleanup_failed", log_id=log_id, error=str(exc))
+
+    log.info(
+        "folder.deleted",
+        folder_id=folder_id,
+        cascade_folders=len(folder_ids),
+        cascade_logs=len(deleted_log_ids),
+        cancelled_jobs=cancelled_jobs,
+    )
 
 
 @router.post("/reorder", status_code=status.HTTP_204_NO_CONTENT)

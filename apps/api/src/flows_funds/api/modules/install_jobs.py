@@ -293,7 +293,11 @@ def _stage_to_modules_dir(
 
 def _resolve_archive_root(staging: Path) -> Path:
     """If the archive contained one wrapper directory, descend into it."""
-    entries = [p for p in staging.iterdir() if not p.name.startswith(".")]
+    # `__MACOSX` is metadata cruft macOS adds to zips alongside the real folder.
+    entries = [
+        p for p in staging.iterdir()
+        if not p.name.startswith(".") and p.name != "__MACOSX"
+    ]
     if len(entries) == 1 and entries[0].is_dir() and not (staging / "manifest.yaml").exists():
         return entries[0]
     return staging

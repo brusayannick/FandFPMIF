@@ -35,7 +35,7 @@ export default function AboutPage() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">About ATLAS Hub</CardTitle>
+          <CardTitle className="text-base">About MATE Hub</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

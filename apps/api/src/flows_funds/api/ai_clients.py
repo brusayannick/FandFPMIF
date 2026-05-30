@@ -39,6 +39,7 @@ async def build_chat_model(
     *,
     temperature: float = 0.0,
     max_tokens: int | None = None,
+    timeout: float = 90.0,
 ) -> "BaseChatModel":
     """Return a LangChain chat model for ``(provider, model)``.
 
@@ -57,6 +58,7 @@ async def build_chat_model(
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
+        kwargs["default_request_timeout"] = timeout
         return ChatAnthropic(**kwargs)
 
     if provider in ("unigpt", "custom") and not base_url:
@@ -72,6 +74,7 @@ async def build_chat_model(
 
     if base_url:
         kwargs["base_url"] = base_url
+    kwargs["timeout"] = timeout
     return ChatOpenAI(**kwargs)
 
 

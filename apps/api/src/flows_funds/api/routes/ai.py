@@ -281,7 +281,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatContext(BaseModel):
-    """Optional process-aware context for the ATLAS sidebar.
+    """Optional process-aware context for the MATE sidebar.
 
     When set, the server fetches cached outputs for the given module ids on
     the given log and prepends them to the system prompt so the chat can

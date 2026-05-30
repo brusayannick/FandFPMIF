@@ -145,9 +145,16 @@ async def _import_handler(handle: JobHandle) -> None:
     # entirely. PyArrow then fails with "Expected bytes, got a 'float' object".
     # Strategy: if every non-null value parses as a number, use a numeric dtype;
     # otherwise coerce everything to a clean string column with real nulls.
+    # case_id and activity are excluded — they're contractually strings (pm4py
+    # / Discovery treat case_id as the trace key) and an all-digit case_id
+    # would otherwise get silently re-typed to int here.
     object_cols = list(df.select_dtypes(include="object").columns)
     fixed_columns = [col for col in object_cols if df[col].isna().any()]
+    string_only_cols = {"case_id", "activity"}
     for col in object_cols:
+        if col in string_only_cols:
+            df[col] = df[col].map(lambda v: None if pd.isna(v) else str(v))
+            continue
         non_null = df[col].dropna()
         if len(non_null) > 0:
             coerced = pd.to_numeric(non_null, errors="coerce")

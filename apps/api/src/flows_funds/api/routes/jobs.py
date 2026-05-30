@@ -70,6 +70,13 @@ async def cancel_job(job_id: str) -> None:
         )
 
 
+@router.post("/cancel-all")
+async def cancel_all_jobs() -> dict[str, int]:
+    """Cancel every queued and running job. Returns the count cancelled."""
+    cancelled = await get_job_runtime().cancel_all()
+    return {"cancelled": cancelled}
+
+
 @router.post("/{job_id}/retry")
 async def retry_job(job_id: str) -> dict[str, str]:
     runtime = get_job_runtime()

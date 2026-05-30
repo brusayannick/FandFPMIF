@@ -36,13 +36,17 @@ export function OnboardingOverlay() {
   const canGoBack = step > 0;
 
   const ensurePrivacyDefault = () => {
-    // Privacy-respecting default: if the user finished or skipped without
-    // answering, treat that as opt-out and persist so the server agrees.
+    // Opt-in is the pre-selected default in the privacy step, so finishing
+    // or skipping without an explicit click persists opt-in to the server.
     if (promptResolved) return;
-    resolvePrompt(false);
+    resolvePrompt(true);
     const cfg = cfgQuery.data;
-    if (cfg && cfg.enabled) {
-      updateMut.mutate({ ...cfg, enabled: false, opted_in_at: null });
+    if (cfg && !cfg.enabled) {
+      updateMut.mutate({
+        ...cfg,
+        enabled: true,
+        opted_in_at: new Date().toISOString(),
+      });
     }
   };
 

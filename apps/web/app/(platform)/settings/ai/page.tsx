@@ -547,7 +547,7 @@ function ModelSelectCard({
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
-          Used by ATLAS AI and the panel-level AI insights when a model isn&apos;t
+          Used by MATE AI and the panel-level AI insights when a model isn&apos;t
           specified per-call.
         </p>
         <Select
@@ -660,14 +660,14 @@ function SystemPromptCard({
       </CardHeader>
       <CardContent className="space-y-2">
         <p className="text-xs text-muted-foreground">
-          Prepended to every ATLAS AI conversation and every AI insight call.
+          Prepended to every MATE AI conversation and every AI insight call.
           Shared across all providers. Plain text or markdown; whitespace is preserved.
         </p>
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
           rows={10}
-          placeholder="You are ATLAS, an analyst assistant…"
+          placeholder="You are MATE, an analyst assistant…"
           className={cn(
             "block w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs leading-relaxed shadow-xs",
             "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",

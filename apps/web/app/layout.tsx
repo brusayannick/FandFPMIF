@@ -9,7 +9,7 @@ import "diagram-js-minimap/assets/diagram-js-minimap.css";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "ATLAS Hub",
+  title: "MATE Hub",
   description: "Local-first process analysis platform.",
 };
 

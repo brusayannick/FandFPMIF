@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from flows_funds.api.config import Settings, get_settings
@@ -199,10 +199,36 @@ class JobRuntime:
     async def start(self) -> None:
         if self._running:
             return
+        await self._reconcile_orphan_running()
         self._running = True
         for _ in range(self.settings.worker_concurrency):
             self._workers.append(asyncio.create_task(self._worker_loop()))
         log.info("job_runtime.started", workers=self.settings.worker_concurrency)
+
+    async def _reconcile_orphan_running(self) -> None:
+        """Fail any rows left in `running` by a previous process.
+
+        A worker can only ever crash mid-job (process killed, container
+        restart) — there's no recovery thread to resume an in-flight job, so
+        the row would otherwise stay `running` forever and the UI would show
+        a phantom active task.
+        """
+        sm = get_sessionmaker()
+        async with sm() as session:
+            result = await session.execute(
+                update(Job)
+                .where(Job.status == "running")
+                .values(
+                    status="failed",
+                    error="Worker terminated before job completed.",
+                    finished_at=_utcnow_naive(),
+                )
+            )
+            await session.commit()
+            if result.rowcount:
+                log.info(
+                    "job_runtime.orphans_reconciled", count=result.rowcount,
+                )
 
     async def stop(self) -> None:
         if not self._running:
@@ -331,6 +357,55 @@ class JobRuntime:
         if not running:
             await self._ensure_bus().publish("job.cancelled", {"id": job_id, "reason": "queued"})
         return True
+
+    async def cancel_for_logs(self, log_ids: list[str]) -> int:
+        """Cancel every queued/running job whose payload references one of `log_ids`.
+
+        Jobs don't carry an indexed `log_id` column — the affiliation lives in
+        `payload_json["log_id"]`. We pull all active jobs and filter in Python,
+        which is fine because the active set is small (bounded by the worker
+        pool + queue depth, not history).
+        """
+        if not log_ids:
+            return 0
+        wanted = set(log_ids)
+        sm = get_sessionmaker()
+        async with sm() as session:
+            rows = (
+                await session.execute(
+                    select(Job.id, Job.payload_json).where(
+                        Job.status.in_(("queued", "running"))
+                    )
+                )
+            ).all()
+
+        cancelled = 0
+        for job_id, payload in rows:
+            if isinstance(payload, dict) and payload.get("log_id") in wanted:
+                if await self.cancel(job_id):
+                    cancelled += 1
+        return cancelled
+
+    async def cancel_all(self) -> int:
+        """Cancel every queued and running job. Returns the count cancelled.
+
+        Issues per-job `cancel()` calls so the existing path (DB row flip,
+        token signal, asyncio task cancel, `job.cancelled` event) runs for
+        each one — keeps the UI in sync without a separate broadcast.
+        """
+        sm = get_sessionmaker()
+        async with sm() as session:
+            rows = (
+                await session.execute(
+                    select(Job.id).where(Job.status.in_(("queued", "running")))
+                )
+            ).scalars().all()
+
+        cancelled = 0
+        for job_id in rows:
+            if await self.cancel(job_id):
+                cancelled += 1
+        return cancelled
 
     async def retry(self, job_id: str) -> str | None:
         """Re-enqueue a failed job with the same payload. Returns the new job id."""

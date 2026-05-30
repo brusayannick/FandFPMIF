@@ -8,7 +8,7 @@ interface UiState {
   showUnavailableModules: boolean;
   showDisabledModules: boolean;
   notificationsMuted: boolean;
-  atlasOpen: boolean;
+  mateOpen: boolean;
   // Locale + import defaults — used by Settings → General and pre-filled
   // into the CSV import form so users don't re-pick them every upload
   // (§7.6.1).
@@ -20,8 +20,8 @@ interface UiState {
   setShowUnavailableModules: (v: boolean) => void;
   setShowDisabledModules: (v: boolean) => void;
   setNotificationsMuted: (v: boolean) => void;
-  toggleAtlas: () => void;
-  setAtlasOpen: (v: boolean) => void;
+  toggleMate: () => void;
+  setMateOpen: (v: boolean) => void;
   setTimezone: (v: string) => void;
   setDateFormat: (v: "iso" | "us" | "eu") => void;
   setCsvDelimiter: (v: "," | ";" | "\t" | "|") => void;
@@ -43,7 +43,7 @@ export const useUi = create<UiState>()(
       showUnavailableModules: true,
       showDisabledModules: false,
       notificationsMuted: false,
-      atlasOpen: false,
+      mateOpen: false,
       timezone: DEFAULT_TIMEZONE,
       dateFormat: "iso",
       csvDelimiter: ",",
@@ -52,8 +52,8 @@ export const useUi = create<UiState>()(
       setShowUnavailableModules: (v) => set({ showUnavailableModules: v }),
       setShowDisabledModules: (v) => set({ showDisabledModules: v }),
       setNotificationsMuted: (v) => set({ notificationsMuted: v }),
-      toggleAtlas: () => set((s) => ({ atlasOpen: !s.atlasOpen })),
-      setAtlasOpen: (v) => set({ atlasOpen: v }),
+      toggleMate: () => set((s) => ({ mateOpen: !s.mateOpen })),
+      setMateOpen: (v) => set({ mateOpen: v }),
       setTimezone: (v) => set({ timezone: v }),
       setDateFormat: (v) => set({ dateFormat: v }),
       setCsvDelimiter: (v) => set({ csvDelimiter: v }),

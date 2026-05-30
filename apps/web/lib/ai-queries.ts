@@ -89,6 +89,17 @@ export function useFetchProviderModels() {
   });
 }
 
+export function useProviderModels(provider: AiProvider | null, enabled: boolean) {
+  return useQuery<FetchModelsResponse>({
+    queryKey: ["ai", "models", provider],
+    queryFn: () =>
+      api<FetchModelsResponse>(`/api/v1/ai/models/${provider}`, { method: "POST" }),
+    enabled: enabled && provider !== null,
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
 export function usePricingCatalog() {
   return useQuery<PricingCatalog>({
     queryKey: KEYS.pricing,

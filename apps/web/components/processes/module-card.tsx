@@ -80,14 +80,8 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
           </div>
         </div>
 
-        {/* Category & Status */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge
-            variant="secondary"
-            className="h-5 px-2 py-0 text-[9px] font-medium uppercase tracking-wide"
-          >
-            {module.category.replace(/_/g, " ")}
-          </Badge>
+        {/* Status */}
+        <div className="flex flex-wrap items-center gap-1.5 empty:hidden">
           {isJobRunning && (
             <Badge className="h-5 gap-1 border-0 bg-primary/10 px-2 py-0 text-[9px] font-medium text-primary">
               <Loader2 className="h-2.5 w-2.5 animate-spin" />

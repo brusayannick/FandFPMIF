@@ -366,6 +366,15 @@ export function useCancelJob() {
   });
 }
 
+export function useCancelAllJobs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api<{ cancelled: number }>(`/api/v1/jobs/cancel-all`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+}
+
 export function useRetryJob() {
   const qc = useQueryClient();
   return useMutation({

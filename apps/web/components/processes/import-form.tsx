@@ -974,7 +974,7 @@ function XmlMappingSection({
 
 // ── Folder import form ────────────────────────────────────────────────────────
 
-type ItemStatus = "pending" | "uploading" | "done" | "failed";
+type ItemStatus = "pending" | "uploading" | "done" | "failed" | "skipped";
 
 interface FolderItem {
   file: File;
@@ -982,6 +982,81 @@ interface FolderItem {
   format: DetectedFormat;
   status: ItemStatus;
   error?: string;
+  groupId?: string;
+}
+
+// Schema-grouped folder import: scan each file's headers/probe once, cluster
+// by header signature, and ask the user to map each unique schema once.
+
+type SchemaKind = "xes" | "csv" | "xml-generic" | "xml-xes" | "error";
+
+interface SchemaGroup {
+  id: string; // signature — also the React key
+  kind: SchemaKind;
+  itemIndices: number[];
+  // CSV-only:
+  headers?: string[];
+  delimiter?: string;
+  csvMapping?: Partial<CsvMapping>;
+  csvTsFormat?: string;
+  // XML-only:
+  probe?: XmlProbeResponse;
+  xmlMapping?: Partial<XmlMapping>;
+  // Set on any scan error (malformed XML, etc.). Files in this group are
+  // skipped at import time.
+  error?: string;
+}
+
+const CSV_DELIM_CANDIDATES = [",", ";", "\t", "|"] as const;
+
+function detectCsvDelimiter(firstLine: string): string {
+  let best = ",";
+  let bestN = -1;
+  for (const d of CSV_DELIM_CANDIDATES) {
+    let n = 0;
+    for (let i = 0; i < firstLine.length; i++) {
+      if (firstLine[i] === d) n++;
+    }
+    if (n > bestN) {
+      best = d;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
+function csvSignature(headers: string[], delimiter: string): string {
+  const norm = headers.map(normaliseIdent).filter(Boolean).sort().join("|");
+  return `csv:${delimiter === "\t" ? "tab" : delimiter}:${norm}`;
+}
+
+function xmlSignature(probe: XmlProbeResponse): string {
+  if (probe.format_hint === "xes") return "xml-xes";
+  const fields = probe.fields
+    .map((f) => normaliseIdent(f.name))
+    .filter(Boolean)
+    .sort()
+    .join("|");
+  return `xml:${probe.event_element ?? "?"}:${fields}`;
+}
+
+// Bounded-concurrency map (lightweight — only used during folder scan).
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  async function run() {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await worker(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return out;
 }
 
 interface SelectedFolder {
@@ -1018,40 +1093,222 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
   const router = useRouter();
   const importer = useImportEventLog();
   const createFolder = useCreateFolder();
+  const probeXml = useProbeXml();
 
   const [picked, setPicked] = useState<SelectedFolder | null>(null);
   const [folderName, setFolderName] = useState("");
   const [running, setRunning] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [groups, setGroups] = useState<SchemaGroup[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const onPick = (files: FileList | null) => {
     if (!files) return;
     const collected = collectFolderItems(files);
     if (!collected || collected.items.length === 0) {
-      toastError("No supported files found (.xes, .xes.gz, or .csv).");
+      toastError("No supported files found (.xes, .xes.gz, .csv, or .xml).");
       return;
     }
     setPicked(collected);
     setFolderName(collected.rootName);
+    setGroups([]);
+    void scanAndGroup(collected);
   };
 
   const reset = () => {
     setPicked(null);
     setFolderName("");
+    setGroups([]);
+    setScanning(false);
     if (inputRef.current) inputRef.current.value = "";
   };
+
+  // Run once per pick: read headers / probe XML for every file, then cluster
+  // files by schema signature so the user maps each unique schema once.
+  const scanAndGroup = async (collected: SelectedFolder) => {
+    setScanning(true);
+    try {
+      type Scan = {
+        index: number;
+        signature: string;
+        kind: SchemaKind;
+        headers?: string[];
+        delimiter?: string;
+        probe?: XmlProbeResponse;
+        error?: string;
+      };
+
+      const scans = await mapWithConcurrency<FolderItem, Scan>(
+        collected.items,
+        4,
+        async (item, index) => {
+          try {
+            if (item.format === "xes" || item.format === "xes.gz") {
+              return { index, signature: "xes", kind: "xes" };
+            }
+            if (item.format === "csv") {
+              const headerLine = await readFirstLine(item.file);
+              const delim = detectCsvDelimiter(headerLine);
+              const headers = parseCsvHeader(headerLine, delim);
+              return {
+                index,
+                signature: csvSignature(headers, delim),
+                kind: "csv",
+                headers,
+                delimiter: delim,
+              };
+            }
+            if (item.format === "xml") {
+              const probe = await probeXml.mutateAsync(item.file);
+              const sig = xmlSignature(probe);
+              return {
+                index,
+                signature: sig,
+                kind: probe.format_hint === "xes" ? "xml-xes" : "xml-generic",
+                probe,
+              };
+            }
+            return { index, signature: "unknown", kind: "error", error: "Unsupported file" };
+          } catch (err) {
+            return {
+              index,
+              signature: `error:${index}`, // unique — each error is its own group
+              kind: "error",
+              error: (err as Error).message || "Scan failed",
+            };
+          }
+        },
+      );
+
+      const bySig = new Map<string, SchemaGroup>();
+      for (const s of scans) {
+        let g = bySig.get(s.signature);
+        if (!g) {
+          g = {
+            id: s.signature,
+            kind: s.kind,
+            itemIndices: [],
+            headers: s.headers,
+            delimiter: s.delimiter,
+            probe: s.probe,
+            error: s.error,
+          };
+          if (s.kind === "csv" && s.headers) {
+            g.csvMapping = autoMap(s.headers);
+            g.csvTsFormat = "";
+          }
+          if (s.kind === "xml-generic" && s.probe?.auto_mapping) {
+            const a = s.probe.auto_mapping;
+            g.xmlMapping = {
+              event_element: a.event_element,
+              case_id: a.case_id,
+              activity: a.activity,
+              timestamp: a.timestamp,
+              end_timestamp: a.end_timestamp ?? undefined,
+              resource: a.resource ?? undefined,
+              cost: a.cost ?? undefined,
+              timestamp_format: a.timestamp_format ?? undefined,
+            };
+          } else if (s.kind === "xml-generic" && s.probe?.event_element) {
+            g.xmlMapping = { event_element: s.probe.event_element };
+          }
+          bySig.set(s.signature, g);
+        }
+        g.itemIndices.push(s.index);
+      }
+
+      const orderedGroups = Array.from(bySig.values()).sort(
+        (a, b) => b.itemIndices.length - a.itemIndices.length,
+      );
+      setGroups(orderedGroups);
+
+      // Mirror groupId onto each item so progress UI can group by source.
+      setPicked((cur) =>
+        cur
+          ? {
+              ...cur,
+              items: cur.items.map((it, idx) => {
+                const g = orderedGroups.find((gr) => gr.itemIndices.includes(idx));
+                return g ? { ...it, groupId: g.id } : it;
+              }),
+            }
+          : cur,
+      );
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const updateGroup = (id: string, patch: Partial<SchemaGroup>) =>
+    setGroups((cur) => cur.map((g) => (g.id === id ? { ...g, ...patch } : g)));
+
+  const groupReady = (g: SchemaGroup): boolean => {
+    if (g.kind === "xes" || g.kind === "xml-xes") return true;
+    if (g.kind === "error") return false;
+    if (g.kind === "csv") {
+      const m = g.csvMapping ?? {};
+      return Boolean(m.case_id && m.activity && m.timestamp);
+    }
+    if (g.kind === "xml-generic") {
+      const m = g.xmlMapping ?? {};
+      return Boolean(m.event_element && m.case_id && m.activity && m.timestamp);
+    }
+    return false;
+  };
+
+  const allGroupsReady = groups.length > 0 && groups.every(groupReady);
+  const needsMappingCount = groups.filter(
+    (g) => g.kind === "csv" || g.kind === "xml-generic",
+  ).length;
+  const errorCount = groups.filter((g) => g.kind === "error").length;
+  const skippedCount = groups
+    .filter((g) => g.kind === "error")
+    .reduce((acc, g) => acc + g.itemIndices.length, 0);
 
   const totalDone = useMemo(
     () =>
       picked
-        ? picked.items.filter((i) => i.status === "done" || i.status === "failed").length
+        ? picked.items.filter(
+            (i) => i.status === "done" || i.status === "failed" || i.status === "skipped",
+          ).length
         : 0,
     [picked],
   );
 
+  const buildMappingForGroup = (g: SchemaGroup): {
+    csvMapping?: Record<string, unknown>;
+    xmlMapping?: Record<string, unknown>;
+  } => {
+    if (g.kind === "csv" && g.csvMapping) {
+      return {
+        csvMapping: {
+          ...g.csvMapping,
+          delimiter: g.delimiter ?? ",",
+          timestamp_format: g.csvTsFormat || undefined,
+        },
+      };
+    }
+    if (g.kind === "xml-generic" && g.xmlMapping?.event_element) {
+      return {
+        xmlMapping: {
+          event_element: g.xmlMapping.event_element,
+          case_id: g.xmlMapping.case_id,
+          activity: g.xmlMapping.activity,
+          timestamp: g.xmlMapping.timestamp,
+          end_timestamp: g.xmlMapping.end_timestamp || undefined,
+          resource: g.xmlMapping.resource || undefined,
+          cost: g.xmlMapping.cost || undefined,
+          timestamp_format: g.xmlMapping.timestamp_format || undefined,
+        },
+      };
+    }
+    return {};
+  };
+
   const submit = async () => {
     if (!picked) return;
     const cleanName = folderName.trim() || picked.rootName;
+    const groupById = new Map(groups.map((g) => [g.id, g] as const));
 
     setRunning(true);
     try {
@@ -1062,10 +1319,32 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
       //    and the server isn't slammed with N parallel multiparts.
       let failed = 0;
       let ok = 0;
-      const lastIdx = picked.items.length - 1;
+      let skipped = 0;
       let firstLogId: string | null = null;
 
       for (let i = 0; i < picked.items.length; i++) {
+        const item = picked.items[i];
+        const g = item.groupId ? groupById.get(item.groupId) : undefined;
+
+        // Files whose schema scan failed get marked skipped — we don't have a
+        // valid mapping to send so there's nothing useful to attempt.
+        if (g?.kind === "error") {
+          skipped++;
+          setPicked((cur) =>
+            cur
+              ? {
+                  ...cur,
+                  items: cur.items.map((it, idx) =>
+                    idx === i
+                      ? { ...it, status: "skipped", error: g.error ?? "Unscannable" }
+                      : it,
+                  ),
+                }
+              : cur,
+          );
+          continue;
+        }
+
         // Mark uploading.
         setPicked((cur) =>
           cur
@@ -1078,16 +1357,17 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
             : cur,
         );
         try {
-          const cleanFileName = picked.items[i].file.name.replace(
-            /\.(xes\.gz|xes|csv)$/i,
+          const cleanFileName = item.file.name.replace(
+            /\.(xes\.gz|xes|csv|xml)$/i,
             "",
           );
+          const mapping = g ? buildMappingForGroup(g) : {};
           const resp = await importer.mutateAsync({
-            file: picked.items[i].file,
+            file: item.file,
             name: cleanFileName,
             folderId: folder.id,
-            // No csv_mapping in bulk mode — backend auto-detects for CSVs and
-            // surfaces a failure status if it can't (user can re-run later).
+            csvMapping: mapping.csvMapping,
+            xmlMapping: mapping.xmlMapping,
           });
           if (firstLogId === null) firstLogId = resp.log_id;
           ok++;
@@ -1116,15 +1396,17 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
               : cur,
           );
         }
-        void lastIdx;
       }
 
-      if (ok > 0 && failed === 0) {
+      if (ok > 0 && failed === 0 && skipped === 0) {
         toast.success(`Imported ${ok} log${ok === 1 ? "" : "s"} into "${cleanName}"`);
-      } else if (ok > 0 && failed > 0) {
-        toast.warning(`Imported ${ok}, ${failed} failed — see status below`);
+      } else if (ok > 0) {
+        const parts = [`Imported ${ok}`];
+        if (failed) parts.push(`${failed} failed`);
+        if (skipped) parts.push(`${skipped} skipped`);
+        toast.warning(`${parts.join(", ")} — see status below`);
       } else {
-        toastError(`All ${failed} uploads failed`);
+        toastError(`All uploads failed or skipped`);
       }
 
       if (ok > 0) {
@@ -1187,6 +1469,20 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>
               {picked.items.length} file{picked.items.length === 1 ? "" : "s"} ready
+              {groups.length > 0 && (
+                <>
+                  {" · "}
+                  {groups.length} schema{groups.length === 1 ? "" : "s"} detected
+                </>
+              )}
+              {errorCount > 0 && (
+                <>
+                  {" · "}
+                  <span className="text-amber-600 dark:text-amber-400">
+                    {skippedCount} unscannable
+                  </span>
+                </>
+              )}
             </span>
             {running && (
               <span>
@@ -1202,22 +1498,51 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
           )}
         </div>
 
-        <div className="max-h-72 overflow-y-auto rounded-md border border-border">
-          <ul className="divide-y divide-border text-xs">
-            {picked.items.map((it, idx) => (
-              <li key={idx} className="flex items-center gap-2 px-3 py-2">
-                <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate font-mono">
-                  {it.relativePath}
-                </span>
-                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {it.format}
-                </span>
-                <StatusIcon status={it.status} error={it.error} />
-              </li>
+        {scanning && (
+          <div className="flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Inspecting file schemas…
+          </div>
+        )}
+
+        {!scanning && groups.length > 0 && !running && (
+          <div className="space-y-3">
+            {needsMappingCount > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Confirm the column mapping for each unique schema. Each mapping
+                is applied to every file in its group.
+              </p>
+            )}
+            {groups.map((g) => (
+              <SchemaGroupCard
+                key={g.id}
+                group={g}
+                items={picked.items}
+                ready={groupReady(g)}
+                onChange={(patch) => updateGroup(g.id, patch)}
+              />
             ))}
-          </ul>
-        </div>
+          </div>
+        )}
+
+        {running && (
+          <div className="max-h-72 overflow-y-auto rounded-md border border-border">
+            <ul className="divide-y divide-border text-xs">
+              {picked.items.map((it, idx) => (
+                <li key={idx} className="flex items-center gap-2 px-3 py-2">
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate font-mono">
+                    {it.relativePath}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {it.format}
+                  </span>
+                  <StatusIcon status={it.status} error={it.error} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="flex justify-end gap-2 border-t border-border pt-4">
           <Button
@@ -1230,15 +1555,130 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
           </Button>
           <Button
             onClick={submit}
-            disabled={running || picked.items.length === 0}
+            disabled={
+              running ||
+              scanning ||
+              picked.items.length === 0 ||
+              !allGroupsReady
+            }
             className="cursor-pointer gap-2"
+            title={!allGroupsReady ? "Map every schema before importing" : undefined}
           >
             {running && <Loader2 className="h-4 w-4 animate-spin" />}
-            {running ? "Importing…" : `Import ${picked.items.length} file${picked.items.length === 1 ? "" : "s"}`}
+            {running
+              ? "Importing…"
+              : `Import ${picked.items.length - skippedCount} file${picked.items.length - skippedCount === 1 ? "" : "s"}`}
           </Button>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function SchemaGroupCard({
+  group,
+  items,
+  ready,
+  onChange,
+}: {
+  group: SchemaGroup;
+  items: FolderItem[];
+  ready: boolean;
+  onChange: (patch: Partial<SchemaGroup>) => void;
+}) {
+  const groupItems = group.itemIndices.map((i) => items[i]).filter(Boolean);
+  const sample = groupItems[0]?.relativePath ?? "";
+  const more = groupItems.length - 1;
+
+  const headerLabel: Record<SchemaKind, string> = {
+    xes: "XES",
+    "xml-xes": "XES inside XML",
+    csv: "CSV",
+    "xml-generic": "Generic XML",
+    error: "Unscannable",
+  };
+
+  return (
+    <div
+      className={cn(
+        "rounded-md border border-border bg-surface p-3 space-y-3",
+        group.kind === "error" && "border-amber-500/30 bg-amber-500/5",
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-medium">
+              {headerLabel[group.kind]} · {groupItems.length} file
+              {groupItems.length === 1 ? "" : "s"}
+            </span>
+            {(group.kind === "xes" || group.kind === "xml-xes") && (
+              <span className="rounded-sm bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                No mapping needed
+              </span>
+            )}
+            {group.kind === "error" && (
+              <span className="rounded-sm bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                Will be skipped
+              </span>
+            )}
+            {(group.kind === "csv" || group.kind === "xml-generic") && (
+              <span
+                className={cn(
+                  "rounded-sm px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                  ready
+                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "bg-destructive/10 text-destructive",
+                )}
+              >
+                {ready ? "Ready" : "Needs mapping"}
+              </span>
+            )}
+          </div>
+          <div className="mt-1 truncate text-[11px] text-muted-foreground font-mono">
+            {sample}
+            {more > 0 && (
+              <span className="text-muted-foreground/70"> +{more} more</span>
+            )}
+          </div>
+          {group.error && (
+            <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
+              {group.error}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {group.kind === "csv" && group.headers && (
+        <CsvMappingFields
+          headers={group.headers}
+          mapping={group.csvMapping ?? {}}
+          setMapping={(m) => onChange({ csvMapping: m })}
+          aiSuggested={new Set()}
+          delimiter={group.delimiter ?? ","}
+          setDelimiter={(d) => {
+            // Delimiter change only affects this group's mapping; the file
+            // group itself stays as-is (signatures were frozen at scan time).
+            // We can't easily re-read the file's first line here without
+            // re-clustering, so we just update the value used at submit.
+            onChange({ delimiter: d });
+          }}
+          tsFormat={group.csvTsFormat ?? ""}
+          setTsFormat={(s) => onChange({ csvTsFormat: s })}
+        />
+      )}
+
+      {group.kind === "xml-generic" && group.probe && (
+        <XmlMappingSection
+          probe={group.probe}
+          mapping={group.xmlMapping ?? {}}
+          setMapping={(m) => onChange({ xmlMapping: m })}
+          loading={false}
+          error={null}
+          autoMappingApplied={Boolean(group.probe.auto_mapping)}
+        />
+      )}
+    </div>
   );
 }
 
@@ -1250,6 +1690,12 @@ function StatusIcon({ status, error }: { status: ItemStatus; error?: string }) {
     return (
       <span title={error} className="inline-flex">
         <XCircle className="h-3.5 w-3.5 text-destructive" />
+      </span>
+    );
+  if (status === "skipped")
+    return (
+      <span title={error} className="inline-flex">
+        <XCircle className="h-3.5 w-3.5 text-amber-500" />
       </span>
     );
   return <span className="h-3.5 w-3.5" />;

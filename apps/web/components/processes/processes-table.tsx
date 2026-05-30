@@ -608,8 +608,21 @@ function FolderRow({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete &ldquo;{node.folder.name}&rdquo;?</AlertDialogTitle>
             <AlertDialogDescription>
-              The folder will be removed and its contents promoted to the parent
-              folder. Event logs are not deleted.
+              {(() => {
+                const logCount = countDescendantLogs(node);
+                const folderCount = countDescendantFolders(node);
+                const parts: string[] = [];
+                if (logCount > 0) {
+                  parts.push(`${logCount} event ${logCount === 1 ? "log" : "logs"}`);
+                }
+                if (folderCount > 0) {
+                  parts.push(`${folderCount} ${folderCount === 1 ? "subfolder" : "subfolders"}`);
+                }
+                if (parts.length === 0) {
+                  return "The folder will be permanently removed. This cannot be undone.";
+                }
+                return `This will permanently delete the folder, ${parts.join(" and ")}, including all Parquet files and original uploads on disk. This cannot be undone.`;
+              })()}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -639,6 +652,17 @@ function countDescendantLogs(node: FolderNode): number {
   const walk = (n: TreeNode) => {
     if (n.kind === "log") count++;
     else for (const c of n.children) walk(c);
+  };
+  for (const c of node.children) walk(c);
+  return count;
+}
+
+function countDescendantFolders(node: FolderNode): number {
+  let count = 0;
+  const walk = (n: TreeNode) => {
+    if (n.kind !== "folder") return;
+    count++;
+    for (const c of n.children) walk(c);
   };
   for (const c of node.children) walk(c);
   return count;

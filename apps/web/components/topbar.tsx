@@ -97,7 +97,7 @@ export function Topbar() {
         </BreadcrumbList>
       </Breadcrumb>
 
-      <AtlasTopbarButton />
+      <MateTopbarButton />
 
       <Button
         type="button"
@@ -118,9 +118,9 @@ export function Topbar() {
   );
 }
 
-function AtlasTopbarButton() {
-  const open = useUi((s) => s.atlasOpen);
-  const toggle = useUi((s) => s.toggleAtlas);
+function MateTopbarButton() {
+  const open = useUi((s) => s.mateOpen);
+  const toggle = useUi((s) => s.toggleMate);
   return (
     <Button
       type="button"
@@ -131,11 +131,11 @@ function AtlasTopbarButton() {
         open && "text-foreground",
       )}
       onClick={toggle}
-      aria-label="Toggle ATLAS AI"
+      aria-label="Toggle MATE AI"
       aria-pressed={open}
     >
       <Sparkles className="h-3.5 w-3.5" />
-      <span className="hidden md:inline">ATLAS AI</span>
+      <span className="hidden md:inline">MATE AI</span>
     </Button>
   );
 }

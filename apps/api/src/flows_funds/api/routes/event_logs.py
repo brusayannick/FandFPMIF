@@ -321,10 +321,20 @@ async def get_event_log(log_id: str, session: SessionDep) -> EventLogDetail:
 
 
 @router.delete("/{log_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_event_log(log_id: str, session: SessionDep) -> None:
+async def delete_event_log(
+    log_id: str,
+    session: SessionDep,
+    runtime: _RuntimeDep,
+) -> None:
     row = await session.get(EventLog, log_id)
     if row is None or row.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Event log not found.")
+    # Terminate active jobs (import / re-import / module runs) before tearing
+    # down the row + on-disk data so workers don't keep writing to a directory
+    # we're about to rmtree.
+    cancelled = await runtime.cancel_for_logs([log_id])
+    if cancelled:
+        log.info("event_log.jobs_cancelled", log_id=log_id, count=cancelled)
     row.deleted_at = datetime.now(UTC).replace(tzinfo=None)
     await session.commit()
     paths = log_paths(log_id)

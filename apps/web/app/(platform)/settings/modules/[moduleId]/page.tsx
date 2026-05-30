@@ -38,7 +38,6 @@ import {
 } from "@/components/ai/ai-model-picker";
 import type { AiProvider } from "@/lib/ai-queries";
 import {
-  useModules,
   useModuleConfig,
   useModuleManifest,
   useRecreateModuleIndex,
@@ -99,14 +98,12 @@ function readAiDraft(cfg: Record<string, unknown>): AiConfigDraft {
 export default function ModuleDetailPage() {
   const router = useRouter();
   const { moduleId } = useParams<{ moduleId: string }>();
-  const { data: modules, isLoading } = useModules(null);
   const { data: cfg } = useModuleConfig(moduleId);
-  const { data: manifest } = useModuleManifest(moduleId);
+  const { data: manifest, isLoading: manifestLoading, isError: manifestError } =
+    useModuleManifest(moduleId);
   const uninstall = useUninstallModule();
   const update = useUpdateModuleConfig();
   const recreateIndex = useRecreateModuleIndex(moduleId);
-
-  const m = modules?.find((x) => x.id === moduleId);
 
   const schema = (manifest?.config_schema as ConfigSchema | undefined) ?? null;
   const properties = schema?.properties ?? {};
@@ -129,6 +126,18 @@ export default function ModuleDetailPage() {
       setAiDraft(readAiDraft(c));
     }
   }, [cfg]);
+
+  const m = manifest
+    ? {
+        id: manifest.id as string,
+        name: manifest.name as string,
+        version: manifest.version as string,
+        category: manifest.category as string,
+        description: (manifest.description as string | null) ?? null,
+        provides: (manifest.provides as string[]) ?? [],
+        consumes: (manifest.consumes as string[]) ?? [],
+      }
+    : null;
 
   const composeConfig = (
     base: Record<string, unknown>,
@@ -176,7 +185,7 @@ export default function ModuleDetailPage() {
     }
   };
 
-  if (isLoading) {
+  if (manifestLoading) {
     return (
       <div className="space-y-3">
         <Skeleton className="h-6 w-48" />
@@ -184,7 +193,7 @@ export default function ModuleDetailPage() {
       </div>
     );
   }
-  if (!m) {
+  if (manifestError || !m) {
     return (
       <EmptyState
         icon={FileBox}
@@ -193,6 +202,8 @@ export default function ModuleDetailPage() {
       />
     );
   }
+
+  const cfgLoading = cfg === undefined;
 
   return (
     <div className="space-y-4">
@@ -213,15 +224,21 @@ export default function ModuleDetailPage() {
               <span className="text-xs font-normal text-muted-foreground">{m.version}</span>
             </CardTitle>
             <div className="flex items-center gap-2 shrink-0">
-              <Label htmlFor="module-enabled" className="text-sm">
-                {enabled ? "Enabled" : "Disabled"}
-              </Label>
-              <Switch
-                id="module-enabled"
-                checked={enabled}
-                onCheckedChange={onToggleEnabled}
-                disabled={update.isPending}
-              />
+              {cfgLoading ? (
+                <Skeleton className="h-6 w-24" />
+              ) : (
+                <>
+                  <Label htmlFor="module-enabled" className="text-sm">
+                    {enabled ? "Enabled" : "Disabled"}
+                  </Label>
+                  <Switch
+                    id="module-enabled"
+                    checked={enabled}
+                    onCheckedChange={onToggleEnabled}
+                    disabled={update.isPending}
+                  />
+                </>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -239,24 +256,30 @@ export default function ModuleDetailPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <AiKeysBanner />
-            {aiManifest.llm && (
-              <AiModelPicker
-                title={aiManifest.llm.title}
-                description={aiManifest.llm.description}
-                value={aiDraft.llm}
-                onChange={(next) => setAiDraft((d) => ({ ...d, llm: next }))}
-              />
-            )}
-            {aiManifest.embedding && (
-              <AiModelPicker
-                title={aiManifest.embedding.title}
-                description={aiManifest.embedding.description}
-                value={aiDraft.embedding}
-                onChange={(next) => setAiDraft((d) => ({ ...d, embedding: next }))}
-                allowProviders={EMBEDDING_PROVIDERS}
-                preferEmbeddingModels
-                showDimensions
-              />
+            {cfgLoading ? (
+              <Skeleton className="h-20 w-full" />
+            ) : (
+              <>
+                {aiManifest.llm && (
+                  <AiModelPicker
+                    title={aiManifest.llm.title}
+                    description={aiManifest.llm.description}
+                    value={aiDraft.llm}
+                    onChange={(next) => setAiDraft((d) => ({ ...d, llm: next }))}
+                  />
+                )}
+                {aiManifest.embedding && (
+                  <AiModelPicker
+                    title={aiManifest.embedding.title}
+                    description={aiManifest.embedding.description}
+                    value={aiDraft.embedding}
+                    onChange={(next) => setAiDraft((d) => ({ ...d, embedding: next }))}
+                    allowProviders={EMBEDDING_PROVIDERS}
+                    preferEmbeddingModels
+                    showDimensions
+                  />
+                )}
+              </>
             )}
             <Separator />
             <div className="flex items-center justify-between gap-2">
@@ -310,7 +333,7 @@ export default function ModuleDetailPage() {
               <Button
                 size="sm"
                 onClick={onSaveConfig}
-                disabled={update.isPending}
+                disabled={update.isPending || cfgLoading}
                 className="cursor-pointer"
               >
                 Save AI models
@@ -326,26 +349,30 @@ export default function ModuleDetailPage() {
         </CardHeader>
         <CardContent className="space-y-5">
           {hasSchema || hasAiModels ? (
-            <>
-              {hasSchema && (
-                <ConfigForm
-                  properties={properties}
-                  values={draft}
-                  onChange={(key, val) => setDraft((d) => ({ ...d, [key]: val }))}
-                />
-              )}
-              {hasSchema && <Separator />}
-              <div className="flex justify-end">
-                <Button
-                  size="sm"
-                  onClick={onSaveConfig}
-                  disabled={update.isPending}
-                  className="cursor-pointer"
-                >
-                  Save configuration
-                </Button>
-              </div>
-            </>
+            cfgLoading ? (
+              <Skeleton className="h-24 w-full" />
+            ) : (
+              <>
+                {hasSchema && (
+                  <ConfigForm
+                    properties={properties}
+                    values={draft}
+                    onChange={(key, val) => setDraft((d) => ({ ...d, [key]: val }))}
+                  />
+                )}
+                {hasSchema && <Separator />}
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    onClick={onSaveConfig}
+                    disabled={update.isPending}
+                    className="cursor-pointer"
+                  >
+                    Save configuration
+                  </Button>
+                </div>
+              </>
+            )
           ) : (
             <p className="text-xs text-muted-foreground">
               This module has no configurable parameters.

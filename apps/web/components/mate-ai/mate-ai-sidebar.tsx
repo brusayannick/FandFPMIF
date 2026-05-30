@@ -280,9 +280,9 @@ function deriveChatContext(pathname: string | null): {
   return { log_id, module_ids: module_id ? [module_id] : [] };
 }
 
-export function AtlasAiSidebar() {
-  const open = useUi((s) => s.atlasOpen);
-  const setOpen = useUi((s) => s.setAtlasOpen);
+export function MateAiSidebar() {
+  const open = useUi((s) => s.mateOpen);
+  const setOpen = useUi((s) => s.setMateOpen);
   const { data: aiConfig } = useAiConfig();
   const pathname = usePathname();
   const chatContext = useMemo(() => deriveChatContext(pathname), [pathname]);
@@ -422,7 +422,7 @@ export function AtlasAiSidebar() {
 
   return (
     <aside
-      aria-label="ATLAS AI assistant"
+      aria-label="MATE AI assistant"
       aria-hidden={!open}
       className={cn(
         "flex h-full shrink-0 flex-col overflow-hidden border-l border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-in-out",
@@ -439,7 +439,7 @@ export function AtlasAiSidebar() {
             <Sparkles className="h-4 w-4" />
           </div>
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="truncate text-sm font-semibold tracking-tight">ATLAS AI</span>
+            <span className="truncate text-sm font-semibold tracking-tight">MATE AI</span>
             <Badge
               variant="secondary"
               className="h-4 border-0 bg-sidebar-accent px-1.5 text-[10px] font-medium uppercase tracking-wide text-sidebar-accent-foreground/70"
@@ -464,7 +464,7 @@ export function AtlasAiSidebar() {
             type="button"
             variant="ghost"
             size="icon"
-            aria-label="Close ATLAS AI"
+            aria-label="Close MATE AI"
             onClick={() => setOpen(false)}
             className="h-8 w-8 cursor-pointer text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
@@ -574,7 +574,7 @@ export function AtlasAiSidebar() {
               placeholder={
                 isStreaming
                   ? "Waiting for response…"
-                  : "Ask ATLAS AI… (Enter to send)"
+                  : "Ask MATE AI… (Enter to send)"
               }
               rows={2}
               disabled={isStreaming}
@@ -595,7 +595,7 @@ export function AtlasAiSidebar() {
             </Button>
           </form>
           <p className="mt-2 px-1 text-[10px] text-sidebar-foreground/40">
-            ATLAS AI can make mistakes. Verify important details.
+            MATE AI can make mistakes. Verify important details.
           </p>
         </div>
       </div>

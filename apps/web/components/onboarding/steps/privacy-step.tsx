@@ -37,7 +37,7 @@ export function PrivacyStep() {
   const cfgQuery = useAnalyticsConfig();
   const updateMut = useUpdateAnalyticsConfig();
 
-  const selected = !promptResolved ? null : enabled ? "in" : "out";
+  const selected = !promptResolved ? "in" : enabled ? "in" : "out";
   const ready = !!cfgQuery.data;
 
   const onChoose = (choice: "in" | "out") => {

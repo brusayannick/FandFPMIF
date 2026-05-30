@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Inbox, MoreHorizontal, Pause, Play, Eye } from "lucide-react";
+import { Inbox, MoreHorizontal, Pause, Play, Eye, XCircle } from "lucide-react";
+import { toast } from "sonner";
 import { toastError } from "@/lib/toast";
+import { useCancelAllJobs } from "@/lib/queries";
 
 import {
   Sheet,
@@ -44,8 +46,10 @@ export function JobsDrawer() {
   const active = useJobsStore(useShallow(selectActiveJobs));
   const finished = useJobsStore(useShallow(selectFinishedJobs));
   const setFinishedHidden = useJobsStore((s) => s.setFinishedHidden);
+  const cancelAll = useCancelAllJobs();
   const [filter, setFilter] = useState<Filter>("running");
   const [q, setQ] = useState("");
+  const hasActive = active.length > 0;
 
   // `j j` chord opens the drawer.
   useEffect(() => {
@@ -130,6 +134,27 @@ export function JobsDrawer() {
                     <Pause className="mr-2 h-3.5 w-3.5" /> Pause queue
                   </DropdownMenuItem>
                 )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={!hasActive || cancelAll.isPending}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    if (!hasActive || cancelAll.isPending) return;
+                    cancelAll.mutate(undefined, {
+                      onSuccess: (data) => {
+                        toast.success(
+                          data.cancelled === 0
+                            ? "No active jobs to cancel"
+                            : `Cancelled ${data.cancelled} job${data.cancelled === 1 ? "" : "s"}`,
+                        );
+                      },
+                      onError: (e) => toastError(`Cancel all failed: ${(e as Error).message}`),
+                    });
+                  }}
+                  className="cursor-pointer text-destructive focus:text-destructive"
+                >
+                  <XCircle className="mr-2 h-3.5 w-3.5" /> Cancel all running
+                </DropdownMenuItem>
                 {finishedHidden && (
                   <>
                     <DropdownMenuSeparator />

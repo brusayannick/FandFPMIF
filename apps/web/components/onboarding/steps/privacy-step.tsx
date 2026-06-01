@@ -37,7 +37,11 @@ export function PrivacyStep() {
   const cfgQuery = useAnalyticsConfig();
   const updateMut = useUpdateAnalyticsConfig();
 
-  const selected = !promptResolved ? "in" : enabled ? "in" : "out";
+  // `off` pre-selects opt-out; `on`/`force` pre-select opt-in. Once the user
+  // has answered, their actual choice (mirrored in `enabled`) wins.
+  const mode = cfgQuery.data?.onboarding_mode ?? "on";
+  const defaultChoice: "in" | "out" = mode === "off" ? "out" : "in";
+  const selected = !promptResolved ? defaultChoice : enabled ? "in" : "out";
   const ready = !!cfgQuery.data;
 
   const onChoose = (choice: "in" | "out") => {

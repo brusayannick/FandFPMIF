@@ -1,31 +1,23 @@
 "use client";
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
 
 export type ExperienceLevel = "beginner" | "intermediate" | "expert";
 
+/**
+ * Transient onboarding UI state — only the in-flight experience-level
+ * selection. Whether onboarding is *completed* now lives per-user on the
+ * server (see `lib/onboarding-queries.ts`), not in browser localStorage, so a
+ * second account on the same browser still gets the welcome flow.
+ */
 interface OnboardingState {
-  completed: boolean;
   experienceLevel: ExperienceLevel | null;
   setExperienceLevel: (level: ExperienceLevel) => void;
-  complete: () => void;
-  reset: () => void;
+  clear: () => void;
 }
 
-export const useOnboarding = create<OnboardingState>()(
-  persist(
-    (set) => ({
-      completed: false,
-      experienceLevel: null,
-      setExperienceLevel: (level) => set({ experienceLevel: level }),
-      complete: () => set({ completed: true }),
-      reset: () => set({ completed: false, experienceLevel: null }),
-    }),
-    {
-      name: "ff.onboarding",
-      storage: createJSONStorage(() => localStorage),
-      skipHydration: true,
-    },
-  ),
-);
+export const useOnboarding = create<OnboardingState>((set) => ({
+  experienceLevel: null,
+  setExperienceLevel: (level) => set({ experienceLevel: level }),
+  clear: () => set({ experienceLevel: null }),
+}));

@@ -99,6 +99,9 @@ class ModuleContext:
 
     log_id: str
     module_id: str
+    # Owner of this invocation (Keycloak `sub`). Exposed so modules that reach
+    # across to another module's per-user result cache can scope it correctly.
+    user_id: str
     event_log: EventLogAccessProtocol
     bus: EventBusProtocol
     registry: ModuleRegistryProtocol

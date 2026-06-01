@@ -1,7 +1,6 @@
 "use client";
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
 
 // --------------------------------------------------------------------------
 // Settings shapes
@@ -105,6 +104,10 @@ interface VizSettingsState {
   setNodePosition: (logId: string, moduleId: string, viz: VizKey, nodeId: string, pos: { x: number; y: number }) => void;
   setNodePositions: (logId: string, moduleId: string, viz: VizKey, patch: NodePositions) => void;
   resetPositions: (logId: string, moduleId: string, viz?: VizKey) => void;
+
+  // Replace the data slice with a server blob merged over defaults. Used by
+  // the per-user server-state sync (see `lib/server-persist.ts`).
+  hydrate: (data: Record<string, unknown>) => void;
 }
 
 // --------------------------------------------------------------------------
@@ -202,9 +205,7 @@ function patchPositions(
 // Store
 // --------------------------------------------------------------------------
 
-export const useVizSettings = create<VizSettingsState>()(
-  persist(
-    (set) => ({
+export const useVizSettings = create<VizSettingsState>()((set) => ({
       general: { ...DEFAULT_GENERAL },
       perLog: {},
       positions: {},
@@ -256,57 +257,18 @@ export const useVizSettings = create<VizSettingsState>()(
           delete nextMod[viz];
           return { positions: { ...s.positions, [logId]: { ...log, [moduleId]: nextMod } } };
         }),
-    }),
-    {
-      name: "ff.viz-settings.v1",
-      storage: createJSONStorage(() => localStorage),
-      skipHydration: true,
-      version: 3,
-      migrate: (persisted: unknown, version: number) => {
-        if (!persisted || typeof persisted !== "object") {
-          return persisted as VizSettingsState;
-        }
-        let p = persisted as Partial<VizSettingsState>;
 
-        // v1 → v2: flip stale `layoutDirection: "LR"` to the new TB default.
-        if (version < 2) {
-          p = {
-            ...p,
-            general: { ...DEFAULT_GENERAL, ...p.general, layoutDirection: "TB" },
-          };
-        }
-
-        // v2 → v3: backfill per-viz fields that were added after the user
-        // first persisted (e.g. heuristics threshold sliders). Without this
-        // backfill, accessing the new field returns `undefined` and crashes
-        // consumers like `<Slider value.toFixed()>`.
-        if (version < 3 && p.perLog) {
-          const nextPerLog: VizSettingsState["perLog"] = {};
-          for (const [logId, modMap] of Object.entries(p.perLog)) {
-            const nextModMap: Record<string, PerVizSettings> = {};
-            for (const [modId, viz] of Object.entries(modMap ?? {})) {
-              nextModMap[modId] = {
-                ...viz,
-                dfg: viz.dfg ? { ...DEFAULT_DFG, ...viz.dfg } : viz.dfg,
-                petri: viz.petri ? { ...DEFAULT_PETRI, ...viz.petri } : viz.petri,
-                process_tree: viz.process_tree
-                  ? { ...DEFAULT_PROCESS_TREE, ...viz.process_tree }
-                  : viz.process_tree,
-                heuristics: viz.heuristics
-                  ? { ...DEFAULT_HEURISTICS, ...viz.heuristics }
-                  : viz.heuristics,
-              };
-            }
-            nextPerLog[logId] = nextModMap;
-          }
-          p = { ...p, perLog: nextPerLog };
-        }
-
-        return p as VizSettingsState;
-      },
-    },
-  ),
-);
+      // Server blob merged over defaults. `general` is deep-merged with
+      // DEFAULT_GENERAL so a field added after the user last saved doesn't
+      // arrive undefined and crash a consumer; perLog/positions reset to empty
+      // when the server has none (also clears a prior account on switch).
+      hydrate: (data) =>
+        set({
+          general: { ...DEFAULT_GENERAL, ...((data.general as Partial<GeneralSettings>) ?? {}) },
+          perLog: (data.perLog as VizSettingsState["perLog"]) ?? {},
+          positions: (data.positions as VizSettingsState["positions"]) ?? {},
+        }),
+}));
 
 // --------------------------------------------------------------------------
 // Convenience selectors

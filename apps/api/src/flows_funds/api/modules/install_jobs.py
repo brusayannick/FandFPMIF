@@ -29,7 +29,9 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from flows_funds.api.db.engine import get_sessionmaker
 from flows_funds.api.jobs.runtime import JobHandle, JobRuntime
+from flows_funds.api.modules.installs import module_owned_by_other, record_install
 from flows_funds.sdk.errors import ModuleManifestError
 from flows_funds.sdk.manifest import Manifest
 
@@ -42,6 +44,16 @@ log = structlog.get_logger(__name__)
 JOB_TYPE_UPLOAD = "module.install.upload"
 JOB_TYPE_GIT = "module.install.git"
 JOB_TYPE_REGISTRY = "module.install.registry"
+
+
+async def _record_owner(user_id: str, module_id: str, source: str) -> None:
+    """Mark *module_id* as installed for the user who ran the install job, so
+    it shows up in their (per-user) module list and only they can uninstall it.
+    """
+    sm = get_sessionmaker()
+    async with sm() as session:
+        await record_install(session, user_id, module_id, source)
+        await session.commit()
 
 
 def register_module_install_handlers(runtime: JobRuntime, loader: "ModuleLoader") -> None:
@@ -76,14 +88,17 @@ def _install_from_upload(loader: "ModuleLoader"):
             try:
                 await asyncio.to_thread(_extract_archive, archive_path, staging)
                 await handle.progress(35, 100, stage="validating", message="Validating manifest")
-                folder, manifest = _stage_to_modules_dir(loader.modules_dir, staging)
+                folder, manifest = await _stage_validated_upload(
+                    loader, handle.user_id, staging
+                )
                 await handle.progress(60, 100, stage="installing", message="Resolving dependencies")
                 await loader.load_one(folder, manifest)
+                await _record_owner(handle.user_id, manifest.id, "upload")
                 await handle.progress(100, 100, stage="ready", message="Module installed")
                 handle.payload["module_id"] = manifest.id
                 await handle.bus.publish(
                     "module.installed",
-                    {"id": manifest.id, "source": "upload"},
+                    {"id": manifest.id, "source": "upload", "user_id": handle.user_id},
                 )
             finally:
                 shutil.rmtree(staging, ignore_errors=True)
@@ -119,14 +134,23 @@ def _install_from_git(loader: "ModuleLoader"):
             # The clone leaves a .git directory we don't want — strip it.
             shutil.rmtree(staging / ".git", ignore_errors=True)
             await handle.progress(35, 100, stage="validating", message="Validating manifest")
-            folder, manifest = _stage_to_modules_dir(loader.modules_dir, staging)
+            folder, manifest = await _stage_validated_upload(
+                loader, handle.user_id, staging
+            )
             await handle.progress(60, 100, stage="installing", message="Resolving dependencies")
             await loader.load_one(folder, manifest)
+            await _record_owner(handle.user_id, manifest.id, "git")
             await handle.progress(100, 100, stage="ready", message="Module installed")
             handle.payload["module_id"] = manifest.id
             await handle.bus.publish(
                 "module.installed",
-                {"id": manifest.id, "source": "git", "url": url, "ref": ref},
+                {
+                    "id": manifest.id,
+                    "source": "git",
+                    "url": url,
+                    "ref": ref,
+                    "user_id": handle.user_id,
+                },
             )
         finally:
             shutil.rmtree(staging, ignore_errors=True)
@@ -186,6 +210,7 @@ def _install_from_registry(loader: "ModuleLoader"):
         loaded_ids: list[str] = []
         for d in new_modules:
             await loader.load_one(d.folder, d.manifest)
+            await _record_owner(handle.user_id, d.id, "registry")
             loaded_ids.append(d.id)
 
         await handle.progress(100, 100, stage="ready", message="Module installed")
@@ -193,7 +218,13 @@ def _install_from_registry(loader: "ModuleLoader"):
         handle.payload["module_ids"] = loaded_ids
         await handle.bus.publish(
             "module.installed",
-            {"id": loaded_ids[0] if loaded_ids else None, "ids": loaded_ids, "source": "pypi", "package": pkg},
+            {
+                "id": loaded_ids[0] if loaded_ids else None,
+                "ids": loaded_ids,
+                "source": "pypi",
+                "package": pkg,
+                "user_id": handle.user_id,
+            },
         )
 
     return handler
@@ -266,10 +297,8 @@ def _safe_extract_tar(tf: tarfile.TarFile, dest: Path) -> None:
     tf.extractall(dest, filter="data")
 
 
-def _stage_to_modules_dir(
-    modules_dir: Path, staging: Path
-) -> tuple[Path, Manifest]:
-    """Find the manifest in the staged extraction, move into modules/<id>/.
+def _read_staged_manifest(staging: Path) -> tuple[Path, Manifest]:
+    """Locate + parse the manifest in a staged extraction *without* moving it.
 
     Many archives wrap their content in a single top-level folder (e.g.
     GitHub's tarball auto-names with a SHA). We unwrap one level if there's a
@@ -281,12 +310,38 @@ def _stage_to_modules_dir(
         raise ModuleManifestError(
             f"Archive is missing manifest.yaml at the top level (looked in {inner})."
         )
-    manifest = Manifest.load_yaml(manifest_path)
-    target = modules_dir / manifest.id
+    return inner, Manifest.load_yaml(manifest_path)
+
+
+async def _stage_validated_upload(
+    loader: "ModuleLoader", user_id: str, staging: Path
+) -> tuple[Path, Manifest]:
+    """Validate a staged upload, then move it into the uploads root.
+
+    Rejects (before touching disk) an id that collides with a built-in default
+    — uploads must never overwrite repo code — or one already owned by another
+    user, since module code is shared in-process under a single id. Re-uploading
+    an id the same user already owns replaces it (hot-reload).
+    """
+    inner, manifest = _read_staged_manifest(staging)
+    if manifest.id in loader.default_module_ids:
+        raise ModuleManifestError(
+            f"Module id {manifest.id!r} is a built-in default module and cannot be "
+            "overwritten by an upload. Choose a different id."
+        )
+    sm = get_sessionmaker()
+    async with sm() as session:
+        if await module_owned_by_other(session, user_id, manifest.id):
+            raise ModuleManifestError(
+                f"Module id {manifest.id!r} is already in use by another user. "
+                "Choose a unique id."
+            )
+    target = loader.uploaded_modules_dir / manifest.id
     if target.exists():
         # Replace prior install — keeps the operator's expectations simple
         # ("re-uploading the same id updates it"). The loader will hot-reload.
         shutil.rmtree(target, ignore_errors=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(inner), str(target))
     return target, manifest
 

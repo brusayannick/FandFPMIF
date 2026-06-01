@@ -116,6 +116,7 @@ async def apply_cell_edit(
     raw_value: Any,
     specs: list[ColumnSpec],
     session: AsyncSession,
+    user_id: str,
 ) -> CellEditOutcome:
     """Apply a single-cell edit, rewrite parquet, recompute cases, persist
     audit + header counters. Returns the resulting row + new index.
@@ -124,9 +125,9 @@ async def apply_cell_edit(
     lock = await _lock_for(log_id)
     async with lock:
         outcome = await asyncio.to_thread(
-            _rewrite_with_edits, log_id, [(row_index, field, coerced)]
+            _rewrite_with_edits, log_id, user_id, [(row_index, field, coerced)]
         )
-        await _persist_after_write(log_id, outcome, session)
+        await _persist_after_write(log_id, outcome, session, user_id)
     return outcome  # type: ignore[return-value]
 
 
@@ -137,13 +138,16 @@ async def apply_bulk_fill(
     raw_value: Any,
     specs: list[ColumnSpec],
     session: AsyncSession,
+    user_id: str,
 ) -> BulkFillOutcome:
     coerced = coerce_value(field, raw_value, specs)
     edits = [(idx, field, coerced) for idx in row_indices]
     lock = await _lock_for(log_id)
     async with lock:
-        outcome = await asyncio.to_thread(_rewrite_with_edits, log_id, edits)
-        await _persist_after_write(log_id, outcome, session)
+        outcome = await asyncio.to_thread(
+            _rewrite_with_edits, log_id, user_id, edits
+        )
+        await _persist_after_write(log_id, outcome, session, user_id)
     return BulkFillOutcome(
         updated=len(edits),
         header=outcome.header,
@@ -153,10 +157,11 @@ async def apply_bulk_fill(
 
 def _rewrite_with_edits(
     log_id: str,
+    user_id: str,
     edits: list[tuple[int, str, Any]],
 ) -> CellEditOutcome:
     """Synchronous parquet rewrite — runs on a worker thread."""
-    paths = log_paths(log_id)
+    paths = log_paths(log_id, user_id)
     if not paths.events.exists():
         raise FileNotFoundError(f"events.parquet missing for log {log_id!r}.")
 
@@ -228,6 +233,7 @@ async def _persist_after_write(
     log_id: str,
     outcome: CellEditOutcome,
     session: AsyncSession,
+    user_id: str,
 ) -> None:
     now = datetime.now(UTC).replace(tzinfo=None)
     await session.execute(
@@ -245,6 +251,7 @@ async def _persist_after_write(
     for row_index, field, old, new in outcome.audit:
         session.add(
             EventEdit(
+                user_id=user_id,
                 log_id=log_id,
                 row_index=row_index,
                 field=field,

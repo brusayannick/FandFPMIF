@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +32,7 @@ import { trackCustom } from "@/lib/analytics/client";
 import { EV } from "@/lib/analytics/events";
 
 export default function PrivacySettingsPage() {
+  const router = useRouter();
   const cfgQuery = useAnalyticsConfig();
   const summaryQuery = useAnalyticsSummary();
   const updateMut = useUpdateAnalyticsConfig();
@@ -41,6 +43,14 @@ export default function PrivacySettingsPage() {
   const [wipeOpen, setWipeOpen] = useState(false);
 
   const cfg = cfgQuery.data;
+
+  // `force` mandates tracking — the tab is hidden, so a direct URL hit lands
+  // here; bounce to General rather than show controls that can't be changed.
+  const forced = cfg?.onboarding_mode === "force";
+  useEffect(() => {
+    if (forced) router.replace("/settings/general");
+  }, [forced, router]);
+  if (forced) return null;
 
   function patch(partial: Partial<AnalyticsConfig>) {
     if (!cfg) return;

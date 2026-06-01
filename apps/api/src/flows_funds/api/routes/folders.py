@@ -16,6 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
+from flows_funds.api.auth import CurrentUserDep, get_owned_folder
 from flows_funds.api.db.models import EventLog, Folder
 from flows_funds.api.db.session import SessionDep
 from flows_funds.api.ingest.storage import log_paths
@@ -45,7 +46,7 @@ def _utcnow() -> datetime:
 
 
 async def _ensure_no_cycle(
-    session, folder_id: str, candidate_parent_id: str | None
+    session, folder_id: str, candidate_parent_id: str | None, user_id: str
 ) -> None:
     """Walking up from the candidate parent must not land on the folder itself."""
     cur = candidate_parent_id
@@ -56,16 +57,18 @@ async def _ensure_no_cycle(
                 detail="Cannot move a folder into one of its descendants.",
             )
         parent = await session.get(Folder, cur)
-        if parent is None or parent.deleted_at is not None:
+        if parent is None or parent.user_id != user_id or parent.deleted_at is not None:
             return
         cur = parent.parent_id
 
 
 @router.get("", response_model=list[FolderSummary])
-async def list_folders(session: SessionDep) -> list[FolderSummary]:
+async def list_folders(
+    session: SessionDep, user: CurrentUserDep
+) -> list[FolderSummary]:
     stmt = (
         select(Folder)
-        .where(Folder.deleted_at.is_(None))
+        .where(Folder.user_id == user.id, Folder.deleted_at.is_(None))
         .order_by(Folder.position.asc(), Folder.created_at.asc())
     )
     rows = (await session.execute(stmt)).scalars().all()
@@ -73,18 +76,19 @@ async def list_folders(session: SessionDep) -> list[FolderSummary]:
 
 
 @router.post("", response_model=FolderSummary, status_code=status.HTTP_201_CREATED)
-async def create_folder(payload: FolderCreate, session: SessionDep) -> FolderSummary:
+async def create_folder(
+    payload: FolderCreate, session: SessionDep, user: CurrentUserDep
+) -> FolderSummary:
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="Name cannot be empty.")
 
     if payload.parent_id is not None:
-        parent = await session.get(Folder, payload.parent_id)
-        if parent is None or parent.deleted_at is not None:
-            raise HTTPException(status_code=404, detail="Parent folder not found.")
+        await get_owned_folder(session, payload.parent_id, user.id)
 
     # Append: position = max(sibling positions) + 1.
     sib_max_stmt = select(Folder.position).where(
+        Folder.user_id == user.id,
         Folder.deleted_at.is_(None),
         Folder.parent_id.is_(payload.parent_id)
         if payload.parent_id is None
@@ -95,6 +99,7 @@ async def create_folder(payload: FolderCreate, session: SessionDep) -> FolderSum
 
     folder = Folder(
         id=uuid7_str(),
+        user_id=user.id,
         name=name,
         parent_id=payload.parent_id,
         position=next_pos,
@@ -108,11 +113,12 @@ async def create_folder(payload: FolderCreate, session: SessionDep) -> FolderSum
 
 @router.patch("/{folder_id}", response_model=FolderSummary)
 async def update_folder(
-    folder_id: str, payload: FolderUpdate, session: SessionDep
+    folder_id: str,
+    payload: FolderUpdate,
+    session: SessionDep,
+    user: CurrentUserDep,
 ) -> FolderSummary:
-    folder = await session.get(Folder, folder_id)
-    if folder is None or folder.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="Folder not found.")
+    folder = await get_owned_folder(session, folder_id, user.id)
 
     if payload.name is not None:
         cleaned = payload.name.strip()
@@ -124,10 +130,8 @@ async def update_folder(
 
     if "parent_id" in payload.model_fields_set:
         if payload.parent_id is not None:
-            parent = await session.get(Folder, payload.parent_id)
-            if parent is None or parent.deleted_at is not None:
-                raise HTTPException(status_code=404, detail="Parent folder not found.")
-        await _ensure_no_cycle(session, folder_id, payload.parent_id)
+            await get_owned_folder(session, payload.parent_id, user.id)
+        await _ensure_no_cycle(session, folder_id, payload.parent_id, user.id)
         folder.parent_id = payload.parent_id
 
     if payload.position is not None:
@@ -142,15 +146,14 @@ async def delete_folder(
     folder_id: str,
     session: SessionDep,
     runtime: _RuntimeDep,
+    user: CurrentUserDep,
 ) -> None:
     """Soft-delete a folder, all descendant folders, and every event log inside.
 
     On-disk data for each affected event log (parquet outputs + original upload)
     is also removed. The frontend confirms intent before calling this.
     """
-    folder = await session.get(Folder, folder_id)
-    if folder is None or folder.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="Folder not found.")
+    await get_owned_folder(session, folder_id, user.id)
 
     now = _utcnow()
 
@@ -163,6 +166,7 @@ async def delete_folder(
         descendants = (
             await session.execute(
                 select(Folder.id).where(
+                    Folder.user_id == user.id,
                     Folder.parent_id == cur,
                     Folder.deleted_at.is_(None),
                 )
@@ -174,6 +178,7 @@ async def delete_folder(
         (
             await session.execute(
                 select(EventLog).where(
+                    EventLog.user_id == user.id,
                     EventLog.folder_id.in_(folder_ids),
                     EventLog.deleted_at.is_(None),
                 )
@@ -189,7 +194,7 @@ async def delete_folder(
 
     for fid in folder_ids:
         f = await session.get(Folder, fid)
-        if f is not None and f.deleted_at is None:
+        if f is not None and f.user_id == user.id and f.deleted_at is None:
             f.deleted_at = now
 
     await session.commit()
@@ -199,7 +204,7 @@ async def delete_folder(
     cancelled_jobs = await runtime.cancel_for_logs(deleted_log_ids)
 
     for log_id in deleted_log_ids:
-        paths = log_paths(log_id)
+        paths = log_paths(log_id, user.id)
         if paths.exists():
             try:
                 shutil.rmtree(paths.root)
@@ -216,7 +221,9 @@ async def delete_folder(
 
 
 @router.post("/reorder", status_code=status.HTTP_204_NO_CONTENT)
-async def reorder(payload: ReorderRequest, session: SessionDep) -> None:
+async def reorder(
+    payload: ReorderRequest, session: SessionDep, user: CurrentUserDep
+) -> None:
     """Bulk-update parent + position for any mix of folders and logs.
 
     The frontend calls this exactly once at the end of a drag with the full
@@ -226,15 +233,15 @@ async def reorder(payload: ReorderRequest, session: SessionDep) -> None:
     for item in payload.items:
         if item.kind == "folder":
             row = await session.get(Folder, item.id)
-            if row is None or row.deleted_at is not None:
+            if row is None or row.user_id != user.id or row.deleted_at is not None:
                 continue
             if item.parent_id is not None:
-                await _ensure_no_cycle(session, item.id, item.parent_id)
+                await _ensure_no_cycle(session, item.id, item.parent_id, user.id)
             row.parent_id = item.parent_id
             row.position = item.position
         else:  # log
             row = await session.get(EventLog, item.id)
-            if row is None or row.deleted_at is not None:
+            if row is None or row.user_id != user.id or row.deleted_at is not None:
                 continue
             row.folder_id = item.parent_id
             row.position = item.position

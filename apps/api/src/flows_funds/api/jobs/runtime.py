@@ -8,8 +8,9 @@ What's wired (phase 4):
   - Lifecycle events emitted on the platform `EventBus`: `job.queued`,
     `job.started`, `job.progress`, `job.completed`, `job.failed`,
     `job.cancelled`, `job.queue.paused`, `job.queue.resumed`.
-  - Whole-queue pause/resume: workers stop pulling new jobs but keep
-    running ones going (the spec calls this out in §7.9.5).
+  - Per-user pause/resume: a paused user's dequeued jobs are parked until
+    they resume; other tenants keep flowing and already-running jobs of the
+    paused user finish (the spec calls pause/resume out in §7.9.5).
   - Progress is throttled to SQLite (every `progress_persist_every` ticks),
     but every call broadcasts on the bus — this keeps the drawer's per-job
     `WS /jobs/{id}/stream` smooth without writing to disk thousands of times
@@ -76,6 +77,7 @@ class JobHandle:
     """
 
     id: str
+    user_id: str
     type: str
     title: str
     subtitle: str | None
@@ -112,6 +114,7 @@ class JobHandle:
             "job.progress",
             {
                 "id": self.id,
+                "user_id": self.user_id,
                 "type": self.type,
                 "module_id": self.module_id,
                 "current": current,
@@ -153,8 +156,13 @@ class JobRuntime:
         self._handlers: dict[str, JobHandler] = {}
         self._workers: list[asyncio.Task[None]] = []
         self._running = False
-        self._paused = asyncio.Event()
-        self._paused.set()  # set = NOT paused (we wait while it's clear)
+        # Pause is per-user (the queue itself is shared across all tenants). A
+        # user in `_paused_users` has their dequeued jobs parked in `_deferred`
+        # instead of run; everyone else keeps flowing. Resuming re-enqueues the
+        # parked ids. Held in memory only — like queued jobs, deferred ids don't
+        # survive a process restart (the queue isn't rebuilt from SQLite).
+        self._paused_users: set[str] = set()
+        self._deferred: dict[str, list[str]] = {}
         self._cancel_tokens: dict[str, CancelToken] = {}
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._process_pool: ProcessPoolExecutor | None = None
@@ -259,28 +267,33 @@ class JobRuntime:
         finally:
             await self.stop()
 
-    @property
-    def is_paused(self) -> bool:
-        return not self._paused.is_set()
+    def is_paused(self, user_id: str) -> bool:
+        return user_id in self._paused_users
 
-    async def pause_queue(self) -> None:
-        if self.is_paused:
+    async def pause_queue(self, user_id: str) -> None:
+        if user_id in self._paused_users:
             return
-        self._paused.clear()
-        await self._ensure_bus().publish("job.queue.paused", {})
-        log.info("job_runtime.queue_paused")
+        self._paused_users.add(user_id)
+        # user_id scopes the event so only the pausing user's sessions flip to
+        # "Paused" — other tenants' jobs (and dock badges) are unaffected.
+        await self._ensure_bus().publish("job.queue.paused", {"user_id": user_id})
+        log.info("job_runtime.queue_paused", user_id=user_id)
 
-    async def resume_queue(self) -> None:
-        if not self.is_paused:
+    async def resume_queue(self, user_id: str) -> None:
+        if user_id not in self._paused_users:
             return
-        self._paused.set()
-        await self._ensure_bus().publish("job.queue.resumed", {})
-        log.info("job_runtime.queue_resumed")
+        self._paused_users.discard(user_id)
+        deferred = self._deferred.pop(user_id, [])
+        for job_id in deferred:
+            await self._queue.put(job_id)
+        await self._ensure_bus().publish("job.queue.resumed", {"user_id": user_id})
+        log.info("job_runtime.queue_resumed", user_id=user_id, requeued=len(deferred))
 
     async def submit(
         self,
         *,
         type_: str,
+        user_id: str,
         title: str,
         payload: dict[str, Any],
         subtitle: str | None = None,
@@ -297,6 +310,7 @@ class JobRuntime:
             session.add(
                 Job(
                     id=job_id,
+                    user_id=user_id,
                     type=type_,
                     title=title,
                     subtitle=subtitle,
@@ -313,6 +327,7 @@ class JobRuntime:
             "job.queued",
             {
                 "id": job_id,
+                "user_id": user_id,
                 "type": type_,
                 "title": title,
                 "subtitle": subtitle,
@@ -341,6 +356,7 @@ class JobRuntime:
             if job.status not in {"queued", "running"}:
                 return False
             running = job.status == "running"
+            owner_id = job.user_id
             if not running:
                 job.status = "cancelled"
                 job.finished_at = _utcnow_naive()
@@ -355,7 +371,10 @@ class JobRuntime:
             task.cancel()
 
         if not running:
-            await self._ensure_bus().publish("job.cancelled", {"id": job_id, "reason": "queued"})
+            await self._ensure_bus().publish(
+                "job.cancelled",
+                {"id": job_id, "user_id": owner_id, "reason": "queued"},
+            )
         return True
 
     async def cancel_for_logs(self, log_ids: list[str]) -> int:
@@ -416,6 +435,7 @@ class JobRuntime:
                 return None
             new_id = await self.submit(
                 type_=job.type,
+                user_id=job.user_id,
                 title=job.title,
                 subtitle=job.subtitle,
                 module_id=job.module_id,
@@ -428,22 +448,36 @@ class JobRuntime:
     async def _worker_loop(self) -> None:
         sm = get_sessionmaker()
         while self._running:
-            # Honour pause before pulling work.
-            try:
-                await self._paused.wait()
-            except asyncio.CancelledError:
-                return
             try:
                 job_id = await self._queue.get()
             except asyncio.CancelledError:
                 return
 
             try:
+                # Pause is per-user: if this job's owner is paused, park it and
+                # move on so other tenants' jobs keep running. resume_queue()
+                # re-enqueues the parked ids.
+                if await self._maybe_defer(job_id, sm):
+                    continue
                 await self._run_one(job_id, sm)
             except Exception as exc:  # noqa: BLE001
                 log.exception("job_runtime.unexpected_error", job_id=job_id, error=str(exc))
             finally:
                 self._queue.task_done()
+
+    async def _maybe_defer(self, job_id: str, sm: async_sessionmaker) -> bool:
+        """Park *job_id* if its owner is currently paused. Returns True if parked.
+
+        Fast-paths the common case (nobody paused) without touching the DB.
+        """
+        if not self._paused_users:
+            return False
+        async with sm() as session:
+            owner = await session.scalar(select(Job.user_id).where(Job.id == job_id))
+        if owner is not None and owner in self._paused_users:
+            self._deferred.setdefault(owner, []).append(job_id)
+            return True
+        return False
 
     async def _run_one(self, job_id: str, sm: async_sessionmaker) -> None:
         bus = self._ensure_bus()
@@ -464,7 +498,12 @@ class JobRuntime:
                 await session.commit()
                 await bus.publish(
                     "job.failed",
-                    {"id": job.id, "type": job.type, "error": job.error},
+                    {
+                        "id": job.id,
+                        "user_id": job.user_id,
+                        "type": job.type,
+                        "error": job.error,
+                    },
                 )
                 return
             job.status = "running"
@@ -476,6 +515,7 @@ class JobRuntime:
             handle_subtitle = job.subtitle
             handle_module_id = job.module_id
             handle_type = job.type
+            handle_user_id = job.user_id
 
         token = CancelToken()
         self._cancel_tokens[job_id] = token
@@ -484,6 +524,7 @@ class JobRuntime:
             "job.started",
             {
                 "id": job_id,
+                "user_id": handle_user_id,
                 "type": handle_type,
                 "title": handle_title,
                 "module_id": handle_module_id,
@@ -492,6 +533,7 @@ class JobRuntime:
 
         handle = JobHandle(
             id=job_id,
+            user_id=handle_user_id,
             type=handle_type,
             title=handle_title,
             subtitle=handle_subtitle,
@@ -522,7 +564,10 @@ class JobRuntime:
                     .values(status="cancelled", finished_at=_utcnow_naive()),
                 )
                 await session.commit()
-            await bus.publish("job.cancelled", {"id": job_id, "reason": "running"})
+            await bus.publish(
+                "job.cancelled",
+                {"id": job_id, "user_id": handle_user_id, "reason": "running"},
+            )
             return
         except Exception as exc:  # noqa: BLE001
             logging.exception("Job handler failed for %s", job_id)
@@ -539,7 +584,12 @@ class JobRuntime:
                 await session.commit()
             await bus.publish(
                 "job.failed",
-                {"id": job_id, "type": handle_type, "error": str(exc)},
+                {
+                    "id": job_id,
+                    "user_id": handle_user_id,
+                    "type": handle_type,
+                    "error": str(exc),
+                },
             )
             return
         finally:
@@ -556,7 +606,12 @@ class JobRuntime:
 
         await bus.publish(
             "job.completed",
-            {"id": job_id, "type": handle_type, "module_id": handle_module_id},
+            {
+                "id": job_id,
+                "user_id": handle_user_id,
+                "type": handle_type,
+                "module_id": handle_module_id,
+            },
         )
 
 

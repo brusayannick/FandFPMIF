@@ -37,6 +37,7 @@ from flows_funds.api.ai_guidance import (
     stream_interpretation,
     structured_completion,
 )
+from flows_funds.api.auth import CurrentUserDep, get_owned_event_log
 from flows_funds.api.db.models import ModuleConfig
 from flows_funds.api.db.session import SessionDep
 from flows_funds.api.modules import get_module_loader
@@ -94,7 +95,9 @@ def _hash_payload(payload: Any) -> str:
     return hashlib.blake2b(raw, digest_size=16).hexdigest()
 
 
-async def _build_payload(module_id: str, log_id: str) -> tuple[Any, str, str]:
+async def _build_payload(
+    module_id: str, log_id: str, user_id: str
+) -> tuple[Any, str, str]:
     """Resolve a module's ``guidance_payload`` for a log.
 
     Returns ``(payload, system_prompt, user_prefix)``.
@@ -120,7 +123,7 @@ async def _build_payload(module_id: str, log_id: str) -> tuple[Any, str, str]:
         or f"Analyse this {module_id} module output for the process at hand:"
     )
 
-    ctx = await loader._make_context(module_id, log_id)
+    ctx = await loader._make_context(module_id, log_id, user_id)
     try:
         payload = await fn(ctx) if asyncio.iscoroutinefunction(fn) else await asyncio.to_thread(fn, ctx)
     finally:
@@ -137,9 +140,15 @@ async def _build_payload(module_id: str, log_id: str) -> tuple[Any, str, str]:
     return payload, system_prompt, user_prefix
 
 
-async def _enabled_modules_with_guidance(session: SessionDep) -> list[str]:
+async def _enabled_modules_with_guidance(
+    session: SessionDep, user_id: str
+) -> list[str]:
     """Return ids of loaded modules that are enabled AND expose guidance_payload."""
-    rows = await session.execute(select(ModuleConfig.module_id, ModuleConfig.enabled))
+    rows = await session.execute(
+        select(ModuleConfig.module_id, ModuleConfig.enabled).where(
+            ModuleConfig.user_id == user_id
+        )
+    )
     enabled_map: dict[str, bool] = {mid: en for mid, en in rows.all()}
     loader = get_module_loader()
     out: list[str] = []
@@ -159,11 +168,15 @@ async def module_guidance(
     module_id: str,
     body: ModuleGuidanceRequest,
     session: SessionDep,
+    user: CurrentUserDep,
     log_id: str = Query(..., min_length=1),
 ) -> GuidanceResponse:
-    payload, system_prompt, user_prefix = await _build_payload(module_id, log_id)
+    await get_owned_event_log(session, log_id, user.id)
+    payload, system_prompt, user_prefix = await _build_payload(
+        module_id, log_id, user.id
+    )
     output_hash = _hash_payload(payload)
-    cache = ResultCache(log_id, module_id)
+    cache = ResultCache(log_id, module_id, user.id)
 
     if not body.force:
         cached = await cache.get(_GUIDANCE_KEY)
@@ -177,7 +190,7 @@ async def module_guidance(
                 guidance=GuidanceBody.model_validate(cached["guidance"]),
             )
 
-    cfg = await load_ai_config(session)
+    cfg = await load_ai_config(session, user.id)
     try:
         guidance = await generate_guidance(
             cfg,
@@ -209,9 +222,12 @@ async def module_guidance(
 @router.delete("/module/{module_id}")
 async def delete_module_guidance(
     module_id: str,
+    session: SessionDep,
+    user: CurrentUserDep,
     log_id: str = Query(..., min_length=1),
 ) -> dict[str, bool]:
-    cache = ResultCache(log_id, module_id)
+    await get_owned_event_log(session, log_id, user.id)
+    cache = ResultCache(log_id, module_id, user.id)
     await cache.delete(_GUIDANCE_KEY)
     return {"ok": True}
 
@@ -224,12 +240,16 @@ def _sse(data: dict[str, Any]) -> str:
 async def module_guidance_stream(
     module_id: str,
     session: SessionDep,
+    user: CurrentUserDep,
     log_id: str = Query(..., min_length=1),
 ) -> StreamingResponse:
-    payload, system_prompt, user_prefix = await _build_payload(module_id, log_id)
+    await get_owned_event_log(session, log_id, user.id)
+    payload, system_prompt, user_prefix = await _build_payload(
+        module_id, log_id, user.id
+    )
     output_hash = _hash_payload(payload)
-    cfg = await load_ai_config(session)
-    cache = ResultCache(log_id, module_id)
+    cfg = await load_ai_config(session, user.id)
+    cache = ResultCache(log_id, module_id, user.id)
 
     async def _gen() -> AsyncGenerator[str, None]:
         try:
@@ -297,8 +317,10 @@ async def process_guidance(
     log_id: str,
     body: ModuleGuidanceRequest,
     session: SessionDep,
+    user: CurrentUserDep,
 ) -> GuidanceResponse:
-    module_ids = await _enabled_modules_with_guidance(session)
+    await get_owned_event_log(session, log_id, user.id)
+    module_ids = await _enabled_modules_with_guidance(session, user.id)
     if not module_ids:
         raise HTTPException(
             409,
@@ -308,7 +330,7 @@ async def process_guidance(
     composite: dict[str, Any] = {}
     for mid in module_ids:
         try:
-            payload, _sys, _prefix = await _build_payload(mid, log_id)
+            payload, _sys, _prefix = await _build_payload(mid, log_id, user.id)
             composite[mid] = payload
         except HTTPException:
             # Skip modules without data yet — overview still works on the rest.
@@ -321,7 +343,7 @@ async def process_guidance(
         )
 
     output_hash = _hash_payload(composite)
-    cache = ResultCache(log_id, "__platform__")
+    cache = ResultCache(log_id, "__platform__", user.id)
 
     if not body.force:
         cached = await cache.get(_GUIDANCE_KEY)
@@ -335,7 +357,7 @@ async def process_guidance(
                 guidance=GuidanceBody.model_validate(cached["guidance"]),
             )
 
-    cfg = await load_ai_config(session)
+    cfg = await load_ai_config(session, user.id)
     try:
         guidance = await generate_guidance(
             cfg,
@@ -395,10 +417,11 @@ _COLUMN_MAPPING_SCHEMA = {
 async def import_column_mapping(
     body: ImportColumnMappingRequest,
     session: SessionDep,
+    user: CurrentUserDep,
 ) -> ImportColumnMappingResponse:
     if not body.headers:
         return ImportColumnMappingResponse(suggestions={})
-    cfg = await load_ai_config(session)
+    cfg = await load_ai_config(session, user.id)
     if not cfg.selected_provider or not cfg.selected_model:
         raise HTTPException(
             400, detail="No AI model selected. Configure one in Settings → AI."
@@ -448,12 +471,9 @@ async def import_quality(
     log_id: str,
     body: ModuleGuidanceRequest,
     session: SessionDep,
+    user: CurrentUserDep,
 ) -> GuidanceResponse:
-    from flows_funds.api.db.models import EventLog
-
-    log_row = await session.get(EventLog, log_id)
-    if log_row is None:
-        raise HTTPException(404, detail=f"Event log {log_id!r} not found.")
+    log_row = await get_owned_event_log(session, log_id, user.id)
     payload = {
         "name": log_row.name,
         "source_format": log_row.source_format,
@@ -466,7 +486,7 @@ async def import_quality(
         "detected_schema": log_row.detected_schema,
     }
     output_hash = _hash_payload(payload)
-    cache = ResultCache(log_id, "__platform__")
+    cache = ResultCache(log_id, "__platform__", user.id)
     cache_key = f"{_GUIDANCE_KEY}__import_quality"
 
     if not body.force:
@@ -481,7 +501,7 @@ async def import_quality(
                 guidance=GuidanceBody.model_validate(cached["guidance"]),
             )
 
-    cfg = await load_ai_config(session)
+    cfg = await load_ai_config(session, user.id)
     try:
         guidance = await generate_guidance(
             cfg,

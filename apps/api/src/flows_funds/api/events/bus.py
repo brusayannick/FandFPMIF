@@ -97,15 +97,25 @@ class EventBus:
             )
         self._schemas[topic] = model
 
+    # Platform routing keys that live alongside a module's domain payload.
+    # They are preserved across schema validation so a module-authored schema
+    # that doesn't model them can't strip them — the WS fan-out and the
+    # loader's @on_event dispatch both key on `user_id` for tenant isolation.
+    _RESERVED_KEYS = ("user_id", "log_id")
+
     async def publish(self, topic: str, payload: dict[str, Any]) -> None:
         schema = self._schemas.get(topic)
         if schema is not None:
+            reserved = {k: payload[k] for k in self._RESERVED_KEYS if k in payload}
             try:
                 payload = schema.model_validate(payload).model_dump()
             except ValidationError as exc:
                 raise EventSchemaError(
                     f"Event {topic!r} payload failed schema validation: {exc}"
                 ) from exc
+            # Re-attach without clobbering a value the schema legitimately set.
+            for key, value in reserved.items():
+                payload.setdefault(key, value)
         envelope = EventEnvelope(topic=topic, payload=payload)
         async with self._lock:
             subs = list(self._subs)

@@ -106,6 +106,7 @@ export interface ModuleSummary {
   consumes: string[];
   has_frontend: boolean;
   enabled: boolean;
+  is_confidential_safe: boolean;
   availability: { status: "available" | "unavailable" | "degraded"; reasons: string[] } | null;
 }
 

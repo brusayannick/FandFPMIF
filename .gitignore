@@ -39,10 +39,17 @@ data/event_logs/*
 !data/event_logs/.gitkeep
 data/module_results/*
 !data/module_results/.gitkeep
+data/users/
+data/.multi_user_migrated
 data/metadata.db
 data/metadata.db-wal
 data/metadata.db-shm
 data/*.bak
+
+# Local environment overrides (Auth.js + Keycloak secrets land here)
+.env
+.env.local
+apps/web/.env.local
 
 # Generated TypeScript types
 packages/shared-types/generated/

@@ -22,6 +22,12 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 
+from flows_funds.api.auth import (
+    CurrentUserDep,
+    get_current_user_from_token,
+    get_owned_job,
+)
+from flows_funds.api.db.engine import get_sessionmaker
 from flows_funds.api.db.models import Job
 from flows_funds.api.db.session import SessionDep
 from flows_funds.api.events import get_event_bus
@@ -35,12 +41,18 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 @router.get("", response_model=list[JobDetail])
 async def list_jobs(
     session: SessionDep,
+    user: CurrentUserDep,
     status_filter: Annotated[str | None, Query(alias="status")] = None,
     type_filter: Annotated[str | None, Query(alias="type")] = None,
     since: Annotated[datetime | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[JobDetail]:
-    stmt = select(Job).order_by(Job.created_at.desc()).limit(limit)
+    stmt = (
+        select(Job)
+        .where(Job.user_id == user.id)
+        .order_by(Job.created_at.desc())
+        .limit(limit)
+    )
     if status_filter:
         stmt = stmt.where(Job.status == status_filter)
     if type_filter:
@@ -52,15 +64,18 @@ async def list_jobs(
 
 
 @router.get("/{job_id}", response_model=JobDetail)
-async def get_job(job_id: str, session: SessionDep) -> JobDetail:
-    row = await session.get(Job, job_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Job not found.")
+async def get_job(
+    job_id: str, session: SessionDep, user: CurrentUserDep
+) -> JobDetail:
+    row = await get_owned_job(session, job_id, user.id)
     return JobDetail.model_validate(row)
 
 
 @router.post("/{job_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
-async def cancel_job(job_id: str) -> None:
+async def cancel_job(
+    job_id: str, session: SessionDep, user: CurrentUserDep
+) -> None:
+    await get_owned_job(session, job_id, user.id)
     runtime = get_job_runtime()
     ok = await runtime.cancel(job_id)
     if not ok:
@@ -71,14 +86,31 @@ async def cancel_job(job_id: str) -> None:
 
 
 @router.post("/cancel-all")
-async def cancel_all_jobs() -> dict[str, int]:
-    """Cancel every queued and running job. Returns the count cancelled."""
-    cancelled = await get_job_runtime().cancel_all()
+async def cancel_all_jobs(
+    session: SessionDep, user: CurrentUserDep
+) -> dict[str, int]:
+    """Cancel every queued and running job owned by the user."""
+    ids = (
+        await session.execute(
+            select(Job.id).where(
+                Job.user_id == user.id,
+                Job.status.in_(("queued", "running")),
+            )
+        )
+    ).scalars().all()
+    runtime = get_job_runtime()
+    cancelled = 0
+    for job_id in ids:
+        if await runtime.cancel(job_id):
+            cancelled += 1
     return {"cancelled": cancelled}
 
 
 @router.post("/{job_id}/retry")
-async def retry_job(job_id: str) -> dict[str, str]:
+async def retry_job(
+    job_id: str, session: SessionDep, user: CurrentUserDep
+) -> dict[str, str]:
+    await get_owned_job(session, job_id, user.id)
     runtime = get_job_runtime()
     new_id = await runtime.retry(job_id)
     if new_id is None:
@@ -90,13 +122,14 @@ async def retry_job(job_id: str) -> dict[str, str]:
 
 
 @router.post("/queue/pause", status_code=status.HTTP_204_NO_CONTENT)
-async def pause_queue() -> None:
-    await get_job_runtime().pause_queue()
+async def pause_queue(user: CurrentUserDep) -> None:
+    """Pause only the caller's jobs — other users' queues keep flowing."""
+    await get_job_runtime().pause_queue(user.id)
 
 
 @router.post("/queue/resume", status_code=status.HTTP_204_NO_CONTENT)
-async def resume_queue() -> None:
-    await get_job_runtime().resume_queue()
+async def resume_queue(user: CurrentUserDep) -> None:
+    await get_job_runtime().resume_queue(user.id)
 
 
 # -- WebSockets --------------------------------------------------------------
@@ -124,16 +157,30 @@ async def stream_job(ws: WebSocket, job_id: str) -> None:
     filters by id. Spec §7.9.5: SQLite-poll fallback applies if the bus is
     momentarily empty — we send an initial snapshot of the row so reconnects
     catch up without missing the early lifecycle events.
+
+    Browsers can't set custom WS headers, so the access token rides in the
+    ``?token=...`` query param. Code ``4401`` signals "auth failed, do not
+    reconnect — sign in again".
     """
     await ws.accept()
     bus = get_event_bus()
 
-    # Initial snapshot — lets a late subscriber paint immediately.
-    from flows_funds.api.db.engine import get_sessionmaker
+    token = ws.query_params.get("token", "")
+    if not token:
+        await ws.close(code=4401, reason="missing token")
+        return
 
-    async with get_sessionmaker()() as session:
+    # Initial snapshot — lets a late subscriber paint immediately.
+    sm = get_sessionmaker()
+    async with sm() as session:
+        try:
+            user = await get_current_user_from_token(token, session)
+            await session.commit()
+        except HTTPException:
+            await ws.close(code=4401, reason="invalid token")
+            return
         row = await session.get(Job, job_id)
-        if row is None:
+        if row is None or row.user_id != user.id:
             await ws.close(code=4404, reason="job not found")
             return
         await _ws_send(ws, {"topic": "job.snapshot", "payload": JobDetail.model_validate(row).model_dump(mode="json")})
@@ -143,6 +190,8 @@ async def stream_job(ws: WebSocket, job_id: str) -> None:
             async for env in stream:
                 payload = env.payload
                 if payload.get("id") != job_id:
+                    continue
+                if payload.get("user_id") not in (None, user.id):
                     continue
                 await _ws_send(ws, env.to_json())
                 if env.topic in {"job.completed", "job.failed", "job.cancelled"}:

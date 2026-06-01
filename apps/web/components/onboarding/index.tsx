@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { useOnboarding } from "@/lib/stores/onboarding";
+import { useOnboardingState, useUpdateOnboarding } from "@/lib/onboarding-queries";
 import { useAnalytics } from "@/lib/stores/analytics";
 import { useUpdateAnalyticsConfig, useAnalyticsConfig } from "@/lib/analytics-queries";
 
@@ -15,44 +16,63 @@ import { PrivacyStep } from "./steps/privacy-step";
 import { UploadStep } from "./steps/upload-step";
 import { ModulesStep } from "./steps/modules-step";
 
-const STEP_COUNT = 4;
-type Step = 0 | 1 | 2 | 3;
+type StepKey = "welcome" | "privacy" | "upload" | "modules";
 
 export function OnboardingOverlay() {
   const router = useRouter();
-  const completed = useOnboarding((s) => s.completed);
-  const complete = useOnboarding((s) => s.complete);
+  const onboardingQuery = useOnboardingState();
+  const updateOnboarding = useUpdateOnboarding();
+  const experienceLevel = useOnboarding((s) => s.experienceLevel);
   const promptResolved = useAnalytics((s) => s.promptResolved);
   const resolvePrompt = useAnalytics((s) => s.resolvePrompt);
   const cfgQuery = useAnalyticsConfig();
   const updateMut = useUpdateAnalyticsConfig();
 
-  const [step, setStep] = useState<Step>(0);
+  const [step, setStep] = useState(0);
   const [uploadedLogId, setUploadedLogId] = useState<string | null>(null);
 
-  if (completed) return null;
+  // Wait for the server's per-user answer before deciding — never flash the
+  // overlay for a user who already finished it.
+  if (onboardingQuery.isLoading || !onboardingQuery.data) return null;
+  if (onboardingQuery.data.completed) return null;
+  // Hold until the tracking config is settled so the step list (which depends
+  // on the mode) is stable before the user can navigate. On error, fall back
+  // to showing the privacy step rather than silently hiding the choice.
+  if (cfgQuery.data === undefined && !cfgQuery.isError) return null;
 
-  const isLast = step === STEP_COUNT - 1;
+  const mode = cfgQuery.data?.onboarding_mode ?? "on";
+  // `force` removes the privacy step entirely — tracking is mandated and the
+  // choice is never presented.
+  const steps: StepKey[] =
+    mode === "force"
+      ? ["welcome", "upload", "modules"]
+      : ["welcome", "privacy", "upload", "modules"];
+
+  const current = steps[Math.min(step, steps.length - 1)];
+  const isLast = step === steps.length - 1;
   const canGoBack = step > 0;
 
   const ensurePrivacyDefault = () => {
-    // Opt-in is the pre-selected default in the privacy step, so finishing
-    // or skipping without an explicit click persists opt-in to the server.
+    // The privacy step pre-selects a choice based on the mode (opt-in for
+    // `on`/`force`, opt-out for `off`). Finishing or skipping without an
+    // explicit click persists that default to the server.
     if (promptResolved) return;
-    resolvePrompt(true);
+    const optIn = mode !== "off";
+    resolvePrompt(optIn);
     const cfg = cfgQuery.data;
-    if (cfg && !cfg.enabled) {
+    if (cfg && cfg.enabled !== optIn) {
       updateMut.mutate({
         ...cfg,
-        enabled: true,
-        opted_in_at: new Date().toISOString(),
+        enabled: optIn,
+        opted_in_at: optIn ? new Date().toISOString() : null,
       });
     }
   };
 
   const finish = () => {
     ensurePrivacyDefault();
-    complete();
+    // Persist completion per-user so it never re-shows for this account.
+    updateOnboarding.mutate({ completed: true, experience_level: experienceLevel });
     if (uploadedLogId) {
       router.push(`/processes?focus=${uploadedLogId}`);
     }
@@ -62,38 +82,37 @@ export function OnboardingOverlay() {
     if (isLast) {
       finish();
     } else {
-      setStep((s) => ((s + 1) as Step));
+      setStep((s) => s + 1);
     }
   };
 
   const onBack = () => {
-    if (canGoBack) setStep((s) => ((s - 1) as Step));
+    if (canGoBack) setStep((s) => s - 1);
   };
 
   const onSkip = () => {
     if (isLast) {
       finish();
     } else {
-      setStep((s) => ((s + 1) as Step));
+      setStep((s) => s + 1);
     }
   };
 
-  // Step indices: 0 welcome, 1 privacy, 2 upload, 3 modules
-  const uploadInProgress = step === 2 && !uploadedLogId;
+  const uploadInProgress = current === "upload" && !uploadedLogId;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       <div className="flex justify-center pt-10">
-        <StepIndicator current={step} total={STEP_COUNT} />
+        <StepIndicator current={step} total={steps.length} />
       </div>
 
       <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-8">
-        {step === 0 && <WelcomeStep />}
-        {step === 1 && <PrivacyStep />}
-        {step === 2 && (
+        {current === "welcome" && <WelcomeStep />}
+        {current === "privacy" && <PrivacyStep />}
+        {current === "upload" && (
           <UploadStep uploadedLogId={uploadedLogId} onUploaded={setUploadedLogId} />
         )}
-        {step === 3 && <ModulesStep />}
+        {current === "modules" && <ModulesStep />}
       </div>
 
       <div className="border-t border-border bg-background">

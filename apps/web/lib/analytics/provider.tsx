@@ -24,6 +24,7 @@ interface ServerConfig {
   capture_errors: boolean;
   opted_in_at: string | null;
   anon_user_id_seed: string;
+  onboarding_mode: "force" | "on" | "off";
 }
 
 /**
@@ -50,7 +51,9 @@ export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
           capturePerf: cfg.capture_perf,
           captureErrors: cfg.capture_errors,
         });
-        if (shouldRespectPrivacySignal()) {
+        // Under `force` the admin mandates tracking for every user, so we
+        // honour the server's enabled=true even past a browser DNT/GPC signal.
+        if (cfg.onboarding_mode !== "force" && shouldRespectPrivacySignal()) {
           store.setEnabled(false);
         } else {
           store.setEnabled(cfg.enabled);

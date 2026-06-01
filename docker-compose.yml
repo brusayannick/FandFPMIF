@@ -1,4 +1,60 @@
 services:
+  keycloak-db:
+    image: postgres:16-alpine
+    container_name: flows-funds-keycloak-db
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+    volumes:
+      - kc-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: flows-funds-keycloak
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Browser-facing hostname; the issuer claim is built from this. We use
+      # the docker DNS name `keycloak` so a single issuer string works from
+      # both the browser and the containers. This requires `127.0.0.1 keycloak`
+      # in the host's /etc/hosts so the browser can resolve it too.
+      KC_HOSTNAME: keycloak
+      KC_HOSTNAME_PORT: "8080"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_BACKCHANNEL: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infra/keycloak/realm-export:/opt/keycloak/data/import:ro
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 && grep -q '"status": "UP"' <&3
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -18,13 +74,25 @@ services:
       MODULES_DIR: /app/modules
       DATABASE_URL: sqlite+aiosqlite:////app/data/metadata.db
       LOG_LEVEL: info
+      # Usage-tracking default/policy: force | on | off. `force` keeps tracking
+      # on for everyone and hides the privacy step + Settings → Privacy tab.
+      USER_TRACKING_ONBOARDING: ${USER_TRACKING_ONBOARDING:-force}
       # Allow the web container's browser-side origin (the host's port 3000).
       CORS_ORIGINS: '["http://localhost:3000"]'
       # Persist uv-managed Python runtimes to the data volume so they survive
       # container rebuilds and don't need to be re-downloaded on every start.
       UV_PYTHON_INSTALL_DIR: /app/data/uv-python
+      # Keycloak: API validates `iss` against the browser-facing URL.
+      # JWKS is fetched over the docker DNS name; the issuer string is what
+      # tokens claim. With KC_HOSTNAME_STRICT_BACKCHANNEL=false this works.
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/flows-funds}
+      KEYCLOAK_JWKS_URL: ${KEYCLOAK_JWKS_URL:-http://keycloak:8080/realms/flows-funds/protocol/openid-connect/certs}
+      KEYCLOAK_AUDIENCE: ${KEYCLOAK_AUDIENCE:-flows-funds-api}
     ports:
       - "8000:8000"
+    depends_on:
+      keycloak:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
       interval: 10s
@@ -55,9 +123,22 @@ services:
     environment:
       INTERNAL_API_URL: http://api:8000
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # Auth.js v5 — encrypts the session cookie. Rotate per environment.
+      AUTH_SECRET: ${AUTH_SECRET:-dev-only-change-me-with-openssl-rand-base64-32}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      AUTH_TRUST_HOST: "true"
+      # Keycloak (server-side; never exposed to the browser).
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/flows-funds}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-flows-funds-web}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-flows-funds-web-dev-secret}
     ports:
       - "3000:3000"
     depends_on:
       api:
         condition: service_healthy
+      keycloak:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  kc-data:

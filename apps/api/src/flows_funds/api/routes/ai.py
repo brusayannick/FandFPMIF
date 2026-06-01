@@ -32,6 +32,7 @@ from flows_funds.api.ai_config import (
     _load_config,
     _provider_creds,
 )
+from flows_funds.api.auth import CurrentUserDep
 from flows_funds.api.db.models import UserSetting
 from flows_funds.api.db.session import SessionDep
 
@@ -58,8 +59,10 @@ _PRICING_TTL_SECONDS = 3600
 
 
 @router.get("/config", response_model=AiConfigPayload)
-async def get_config(session: SessionDep) -> AiConfigPayload:
-    row = await session.get(UserSetting, AI_CONFIG_KEY)
+async def get_config(
+    session: SessionDep, user: CurrentUserDep
+) -> AiConfigPayload:
+    row = await session.get(UserSetting, (user.id, AI_CONFIG_KEY))
     return _load_config(row)
 
 
@@ -67,11 +70,14 @@ async def get_config(session: SessionDep) -> AiConfigPayload:
 async def put_config(
     payload: AiConfigPayload,
     session: SessionDep,
+    user: CurrentUserDep,
 ) -> AiConfigPayload:
-    row = await session.get(UserSetting, AI_CONFIG_KEY)
+    row = await session.get(UserSetting, (user.id, AI_CONFIG_KEY))
     data = payload.model_dump()
     if row is None:
-        session.add(UserSetting(key=AI_CONFIG_KEY, value_json=data))
+        session.add(
+            UserSetting(user_id=user.id, key=AI_CONFIG_KEY, value_json=data)
+        )
     else:
         row.value_json = data
     await session.commit()
@@ -116,8 +122,9 @@ def _openai_compat_models_url(base_url: str) -> str:
 async def fetch_models(
     provider: Annotated[Provider, Path()],
     session: SessionDep,
+    user: CurrentUserDep,
 ) -> FetchModelsResponse:
-    api_key, base_url = await _provider_creds(session, provider)
+    api_key, base_url = await _provider_creds(session, provider, user.id)
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -236,7 +243,7 @@ _pricing_lock = asyncio.Lock()
 
 
 @router.get("/pricing")
-async def get_pricing() -> dict[str, Any]:
+async def get_pricing(user: CurrentUserDep) -> dict[str, Any]:
     """Return the litellm price catalog keyed by model id.
 
     Cached in-process for one hour. The shape is whatever litellm publishes —
@@ -304,7 +311,7 @@ def _sse(data: dict[str, Any]) -> str:
 _CONTEXT_CHAR_BUDGET = 12_000
 
 
-async def _build_context_block(context: ChatContext | None) -> str:
+async def _build_context_block(context: ChatContext | None, user_id: str) -> str:
     if context is None or not context.log_id:
         return ""
     # Local imports keep `routes/ai.py` free of module-loader symbols at import
@@ -339,7 +346,7 @@ async def _build_context_block(context: ChatContext | None) -> str:
             continue
         # Prefer the module's curated payload over scanning raw cache keys.
         try:
-            ctx = await loader._make_context(mid, context.log_id)
+            ctx = await loader._make_context(mid, context.log_id, user_id)
         except Exception:
             continue
         try:
@@ -352,7 +359,7 @@ async def _build_context_block(context: ChatContext | None) -> str:
             _shutil.rmtree(ctx.workdir, ignore_errors=True)
         if data is None:
             # Fall back to dumping every JSON cache entry the module wrote.
-            cache = ResultCache(context.log_id, mid)
+            cache = ResultCache(context.log_id, mid, user_id)
             try:
                 files = list(cache.dir.glob("*.json"))
             except OSError:
@@ -378,8 +385,10 @@ async def _build_context_block(context: ChatContext | None) -> str:
 
 
 @router.post("/chat")
-async def chat(payload: ChatRequest, session: SessionDep) -> StreamingResponse:
-    row = await session.get(UserSetting, AI_CONFIG_KEY)
+async def chat(
+    payload: ChatRequest, session: SessionDep, user: CurrentUserDep
+) -> StreamingResponse:
+    row = await session.get(UserSetting, (user.id, AI_CONFIG_KEY))
     cfg = _load_config(row)
 
     if not cfg.selected_provider or not cfg.selected_model:
@@ -399,7 +408,7 @@ async def chat(payload: ChatRequest, session: SessionDep) -> StreamingResponse:
             detail=f"{cfg.selected_provider!r} requires a base URL. Go to Settings → AI.",
         )
 
-    context_block = await _build_context_block(payload.context)
+    context_block = await _build_context_block(payload.context, user.id)
     if context_block:
         # Prepend the context to the user's saved system prompt for this call
         # only — we do NOT persist the augmented prompt.

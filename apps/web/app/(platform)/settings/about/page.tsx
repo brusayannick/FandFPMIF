@@ -7,13 +7,22 @@ import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useOnboarding } from "@/lib/stores/onboarding";
+import { useUpdateOnboarding } from "@/lib/onboarding-queries";
 import { api } from "@/lib/api";
 import { toastError } from "@/lib/toast";
 
 export default function AboutPage() {
-  const resetOnboarding = useOnboarding((s) => s.reset);
+  const clearLocalOnboarding = useOnboarding((s) => s.clear);
+  const updateOnboarding = useUpdateOnboarding();
   const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const onRestartOnboarding = () => {
+    clearLocalOnboarding();
+    // Flip the per-user server flag back to incomplete; the overlay (mounted
+    // in the platform layout) re-appears as soon as the query cache updates.
+    updateOnboarding.mutate({ completed: false, experience_level: null });
+  };
 
   const onCopyDiagnostics = async () => {
     setCopying(true);
@@ -63,7 +72,8 @@ export default function AboutPage() {
           <Button
             variant="outline"
             className="cursor-pointer gap-2"
-            onClick={() => resetOnboarding()}
+            disabled={updateOnboarding.isPending}
+            onClick={onRestartOnboarding}
           >
             <RotateCcw className="h-3.5 w-3.5" />
             Restart onboarding

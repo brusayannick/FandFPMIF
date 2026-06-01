@@ -17,8 +17,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from flows_funds.api.auth import CurrentUserDep, get_owned_event_log
 from flows_funds.api.config import get_settings
-from flows_funds.api.db.models import EventLog, ModuleConfig, ModuleLayout
+from flows_funds.api.db.models import ModuleConfig, ModuleLayout, UserSetting
 from flows_funds.api.db.session import SessionDep
 from flows_funds.api.jobs.runtime import get_job_runtime
 from flows_funds.api.modules import get_module_loader
@@ -29,8 +30,55 @@ from flows_funds.api.modules.install_jobs import (
     JOB_TYPE_UPLOAD,
 )
 from flows_funds.api.modules.installer import remove_module_artifacts
+from flows_funds.api.modules.installs import (
+    owner_count,
+    remove_install,
+    seed_default_modules,
+    user_module_ids,
+    user_owns_module,
+)
+
+# UserSetting flag marking that a user has had the default module set seeded
+# at least once. Lets unlocked users intentionally remove a default without it
+# being resurrected on the next list call.
+_DEFAULTS_SEEDED_KEY = "modules_defaults_seeded"
 
 router = APIRouter(prefix="/modules", tags=["modules"])
+
+
+async def _assert_owns_module(session: SessionDep, user_id: str, module_id: str) -> None:
+    """404 unless *user_id* has *module_id* installed.
+
+    Module code is shared in-process, so a non-owner could otherwise read a
+    module's manifest/config they never installed. 404 (not 403) avoids
+    leaking which module ids exist.
+    """
+    if not await user_owns_module(session, user_id, module_id):
+        raise HTTPException(
+            status_code=404, detail=f"Module {module_id!r} is not installed."
+        )
+
+
+async def _reconcile_default_modules(
+    session: SessionDep, user_id: str, default_ids: set[str]
+) -> None:
+    """Ensure *user_id* owns the default module set on first sighting.
+
+    Seeding is one-shot, gated by a per-user flag: the brand-new user is granted
+    the full default set, and the flag is set so a user can later intentionally
+    uninstall a default without it being resurrected on the next list call.
+    """
+    flag = await session.get(UserSetting, (user_id, _DEFAULTS_SEEDED_KEY))
+    if flag and flag.value_json:
+        return
+
+    await seed_default_modules(session, user_id, default_ids)
+    if flag is None:
+        session.add(
+            UserSetting(user_id=user_id, key=_DEFAULTS_SEEDED_KEY, value_json=True)
+        )
+    else:
+        flag.value_json = True
 
 
 class ModuleSummary(BaseModel):
@@ -45,6 +93,7 @@ class ModuleSummary(BaseModel):
     consumes: list[str]
     has_frontend: bool
     enabled: bool = True
+    is_confidential_safe: bool = False
     availability: Availability | None = None
 
 
@@ -56,6 +105,7 @@ class ModuleConfigPayload(BaseModel):
 @router.get("", response_model=list[ModuleSummary])
 async def list_modules(
     session: SessionDep,
+    user: CurrentUserDep,
     log_id: Annotated[str | None, Query()] = None,
 ) -> list[ModuleSummary]:
     try:
@@ -66,18 +116,33 @@ async def list_modules(
     if not manifests:
         return []
 
+    # Lazily reconcile the per-user default set. We do it here (not in the auth
+    # layer) because this is the path that already holds both the loader and a
+    # session, and it runs on every visit to the modules surface.
+    await _reconcile_default_modules(session, user.id, loader.default_module_ids)
+
+    # Per-user visibility: only modules this user has installed. The loader
+    # holds every module loaded into the process (shared), so we intersect.
+    owned = await user_module_ids(session, user.id)
+    manifests = [m for m in manifests if m.id in owned]
+    if not manifests:
+        return []
+
     avail_map: dict[str, Availability] = {}
     if log_id is not None:
-        log_row = await session.get(EventLog, log_id)
-        if log_row is None or log_row.deleted_at is not None:
-            raise HTTPException(status_code=404, detail="Event log not found.")
+        log_row = await get_owned_event_log(session, log_id, user.id)
         avail_map = loader.availability_for(
             detected_schema=log_row.detected_schema,
             events_count=log_row.events_count,
             cases_count=log_row.cases_count,
+            installed_module_ids=owned,
         )
 
-    rows = await session.execute(select(ModuleConfig.module_id, ModuleConfig.enabled))
+    rows = await session.execute(
+        select(ModuleConfig.module_id, ModuleConfig.enabled).where(
+            ModuleConfig.user_id == user.id
+        )
+    )
     enabled_map: dict[str, bool] = {module_id: enabled for module_id, enabled in rows.all()}
 
     return [
@@ -93,6 +158,7 @@ async def list_modules(
             consumes=list(m.consumes),
             has_frontend=bool(m.frontend.panel),
             enabled=enabled_map.get(m.id, m.default_enabled),
+            is_confidential_safe=m.is_confidential_safe,
             availability=avail_map.get(m.id),
         )
         for m in manifests
@@ -100,7 +166,10 @@ async def list_modules(
 
 
 @router.get("/{module_id}/manifest")
-async def get_manifest(module_id: str) -> dict[str, Any]:
+async def get_manifest(
+    module_id: str, session: SessionDep, user: CurrentUserDep
+) -> dict[str, Any]:
+    await _assert_owns_module(session, user.id, module_id)
     try:
         loader = get_module_loader()
     except HTTPException as exc:
@@ -115,7 +184,10 @@ async def get_manifest(module_id: str) -> dict[str, Any]:
 
 
 @router.get("/{module_id}/config-schema")
-async def get_config_schema(module_id: str) -> dict[str, Any]:
+async def get_config_schema(
+    module_id: str, session: SessionDep, user: CurrentUserDep
+) -> dict[str, Any]:
+    await _assert_owns_module(session, user.id, module_id)
     try:
         loader = get_module_loader()
     except HTTPException as exc:
@@ -130,10 +202,19 @@ async def get_config_schema(module_id: str) -> dict[str, Any]:
 
 
 @router.get("/{module_id}/config", response_model=ModuleConfigPayload)
-async def get_config(module_id: str, session: SessionDep) -> ModuleConfigPayload:
-    row = await session.get(ModuleConfig, module_id)
+async def get_config(
+    module_id: str, session: SessionDep, user: CurrentUserDep
+) -> ModuleConfigPayload:
+    await _assert_owns_module(session, user.id, module_id)
+    row = await session.get(ModuleConfig, (user.id, module_id))
     if row is None:
-        return ModuleConfigPayload(config={}, enabled=True)
+        # No saved config → fall back to the manifest's default_enabled, the
+        # same fallback list_modules uses. Hardcoding True here made modules
+        # shipping default_enabled=false (e.g. cv4cdd) read "Disabled" in the
+        # process grid but "Enabled" on the detail toggle.
+        loaded = get_module_loader().loaded.get(module_id)
+        default_enabled = loaded.manifest.default_enabled if loaded else True
+        return ModuleConfigPayload(config={}, enabled=default_enabled)
     return ModuleConfigPayload(config=row.config_json, enabled=row.enabled)
 
 
@@ -142,10 +223,17 @@ async def put_config(
     module_id: str,
     payload: ModuleConfigPayload,
     session: SessionDep,
+    user: CurrentUserDep,
 ) -> ModuleConfigPayload:
-    row = await session.get(ModuleConfig, module_id)
+    await _assert_owns_module(session, user.id, module_id)
+    row = await session.get(ModuleConfig, (user.id, module_id))
     if row is None:
-        row = ModuleConfig(module_id=module_id, config_json=payload.config, enabled=payload.enabled)
+        row = ModuleConfig(
+            user_id=user.id,
+            module_id=module_id,
+            config_json=payload.config,
+            enabled=payload.enabled,
+        )
         session.add(row)
     else:
         row.config_json = payload.config
@@ -178,7 +266,9 @@ def _has_allowed_upload_suffix(name: str) -> bool:
 
 
 @router.post("/install", response_model=InstallJobResponse, status_code=status.HTTP_202_ACCEPTED)
-async def install_from_upload(file: UploadFile = File(...)) -> InstallJobResponse:
+async def install_from_upload(
+    user: CurrentUserDep, file: UploadFile = File(...)
+) -> InstallJobResponse:
     """Accept a zip / tar.gz, persist it to a staging dir, and submit a job
     that unpacks and registers the module. Returns the job id so the dock can
     stream progress (`WS /api/v1/events` filtered by `job.*`).
@@ -205,6 +295,7 @@ async def install_from_upload(file: UploadFile = File(...)) -> InstallJobRespons
     runtime = get_job_runtime()
     job_id = await runtime.submit(
         type_=JOB_TYPE_UPLOAD,
+        user_id=user.id,
         title=f"Install module — {filename}",
         subtitle="Unpacking and registering",
         payload={"archive_path": str(archive_path), "original_name": filename},
@@ -215,13 +306,16 @@ async def install_from_upload(file: UploadFile = File(...)) -> InstallJobRespons
 @router.post(
     "/install/git", response_model=InstallJobResponse, status_code=status.HTTP_202_ACCEPTED
 )
-async def install_from_git(payload: GitInstallPayload) -> InstallJobResponse:
+async def install_from_git(
+    payload: GitInstallPayload, user: CurrentUserDep
+) -> InstallJobResponse:
     runtime = get_job_runtime()
     title = f"Install module — {payload.url.rsplit('/', 1)[-1]}"
     if payload.ref:
         title += f" ({payload.ref})"
     job_id = await runtime.submit(
         type_=JOB_TYPE_GIT,
+        user_id=user.id,
         title=title,
         subtitle="Cloning and registering",
         payload={"url": payload.url, "ref": payload.ref},
@@ -234,13 +328,16 @@ async def install_from_git(payload: GitInstallPayload) -> InstallJobResponse:
     response_model=InstallJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def install_from_registry(payload: RegistryInstallPayload) -> InstallJobResponse:
+async def install_from_registry(
+    payload: RegistryInstallPayload, user: CurrentUserDep
+) -> InstallJobResponse:
     runtime = get_job_runtime()
     title = f"Install module — {payload.source}:{payload.id}"
     if payload.version:
         title += f"@{payload.version}"
     job_id = await runtime.submit(
         type_=JOB_TYPE_REGISTRY,
+        user_id=user.id,
         title=title,
         subtitle="Fetching from registry",
         payload={"source": payload.source, "id": payload.id, "version": payload.version},
@@ -256,14 +353,16 @@ class ModuleLayoutPayload(BaseModel):
 async def get_module_layout(
     module_id: str,
     session: SessionDep,
+    user: CurrentUserDep,
     log_id: Annotated[str, Query(..., min_length=1)],
-    user_id: Annotated[str, Query()] = "local",
 ) -> ModuleLayoutPayload:
     """Return the saved layout JSON for this `(user, log, module)` triple, or
     an empty object if none saved (§7.7). Frontend uses this to restore
     react-grid-layout positions across reloads.
     """
-    row = await session.get(ModuleLayout, (user_id, log_id, module_id))
+    await _assert_owns_module(session, user.id, module_id)
+    await get_owned_event_log(session, log_id, user.id)
+    row = await session.get(ModuleLayout, (user.id, log_id, module_id))
     return ModuleLayoutPayload(layout=row.layout_json if row else {})
 
 
@@ -271,14 +370,16 @@ async def get_module_layout(
 async def put_module_layout(
     module_id: str,
     session: SessionDep,
+    user: CurrentUserDep,
     payload: ModuleLayoutPayload,
     log_id: Annotated[str, Query(..., min_length=1)],
-    user_id: Annotated[str, Query()] = "local",
 ) -> ModuleLayoutPayload:
-    row = await session.get(ModuleLayout, (user_id, log_id, module_id))
+    await _assert_owns_module(session, user.id, module_id)
+    await get_owned_event_log(session, log_id, user.id)
+    row = await session.get(ModuleLayout, (user.id, log_id, module_id))
     if row is None:
         row = ModuleLayout(
-            user_id=user_id, log_id=log_id, module_id=module_id, layout_json=payload.layout
+            user_id=user.id, log_id=log_id, module_id=module_id, layout_json=payload.layout
         )
         session.add(row)
     else:
@@ -288,16 +389,24 @@ async def put_module_layout(
 
 
 @router.get("/{module_id}/assets/{asset_path:path}")
-async def get_module_asset(module_id: str, asset_path: str) -> FileResponse:
-    """Serve a file from `modules/<id>/.dist/` (§5.4).
+async def get_module_asset(
+    module_id: str, asset_path: str, user: CurrentUserDep
+) -> FileResponse:
+    """Serve a file from the loaded module's `.dist/` (§5.4).
 
     The frontend dynamic loader fetches `panel.js` / `widget-*.js` from this
     route, runs them through a CJS shim that resolves `require(...)` against
     `window.__FF_RUNTIME__`. Layout matches what
     `apps/web/scripts/bundle-modules.mjs` writes at build time / dev watch.
+
+    Resolved from the *loaded* module's folder rather than a fixed root so it
+    serves defaults (repo `modules/`) and uploads (`uploaded_modules/`) alike.
     """
-    settings = get_settings()
-    dist_root = (settings.modules_dir / module_id / ".dist").resolve()
+    loader = get_module_loader()
+    loaded = loader.loaded.get(module_id)
+    if loaded is None:
+        raise HTTPException(status_code=404, detail="Module not found.")
+    dist_root = (loaded.discovered.folder / ".dist").resolve()
     # Reject path traversal — resolve() collapses `..` so the prefix check is
     # what actually enforces containment.
     candidate = (dist_root / asset_path).resolve()
@@ -313,14 +422,63 @@ async def get_module_asset(module_id: str, asset_path: str) -> FileResponse:
     return FileResponse(candidate, media_type=media_type)
 
 
-@router.delete("/{module_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def uninstall(module_id: str) -> None:
-    settings = get_settings()
-    target = settings.modules_dir.resolve() / module_id
-    if not target.exists():
-        raise HTTPException(status_code=404, detail=f"Module {module_id!r} is not installed.")
+class RestoreDefaultsResponse(BaseModel):
+    restored: list[str]
+
+
+@router.post("/restore-defaults", response_model=RestoreDefaultsResponse)
+async def restore_defaults(
+    session: SessionDep, user: CurrentUserDep
+) -> RestoreDefaultsResponse:
+    """Re-add any default modules the user has removed (idempotent).
+
+    Only ever *adds* the shared defaults — never touches custom uploads.
+    Publishes ``module.installed`` per re-added id so other tabs refresh their
+    listing.
+    """
     loader = get_module_loader()
-    await loader.unload_one(module_id)
-    remove_module_artifacts(target)
-    shutil.rmtree(target, ignore_errors=True)
-    await loader.bus.publish("module.uninstalled", {"id": module_id})
+    default_ids = set(loader.default_module_ids)
+    owned = await user_module_ids(session, user.id)
+    missing = sorted(default_ids - owned)
+    if missing:
+        await seed_default_modules(session, user.id, default_ids)
+        await session.commit()
+        for module_id in missing:
+            await loader.bus.publish(
+                "module.installed",
+                {"id": module_id, "source": "default", "user_id": user.id},
+            )
+    return RestoreDefaultsResponse(restored=missing)
+
+
+@router.delete("/{module_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def uninstall(
+    module_id: str, session: SessionDep, user: CurrentUserDep
+) -> None:
+    # Per-user uninstall: drop this user's ownership record. The shared
+    # on-disk artifact and in-process load are only torn down once the last
+    # owner removes it — other users keep using it untouched.
+    await _assert_owns_module(session, user.id, module_id)
+    loader = get_module_loader()
+    await remove_install(session, user.id, module_id)
+    await session.commit()
+
+    # Never tear down a default's shared repo code — only the user's install row
+    # is removed above. Uploads live under uploaded_modules_dir and are removed
+    # only once their last owner uninstalls. Entry-point/registry modules live
+    # in neither root, so the existence check below leaves them alone.
+    if (
+        module_id not in loader.default_module_ids
+        and await owner_count(session, module_id) == 0
+    ):
+        target = get_settings().uploaded_modules_dir.resolve() / module_id
+        await loader.unload_one(module_id)
+        if target.exists():
+            remove_module_artifacts(target)
+            shutil.rmtree(target, ignore_errors=True)
+
+    # Scope the event to this user so the WS only notifies their sessions —
+    # other owners' module lists are unaffected.
+    await loader.bus.publish(
+        "module.uninstalled", {"id": module_id, "user_id": user.id}
+    )

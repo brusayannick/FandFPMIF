@@ -36,6 +36,7 @@ async def build_chat_model(
     session: AsyncSession,
     provider: Provider,
     model: str,
+    user_id: str,
     *,
     temperature: float = 0.0,
     max_tokens: int | None = None,
@@ -45,7 +46,7 @@ async def build_chat_model(
 
     Raises 422 if no API key is stored for ``provider``.
     """
-    api_key, base_url = await _provider_creds(session, provider)
+    api_key, base_url = await _provider_creds(session, provider, user_id)
 
     kwargs: dict[str, Any] = {
         "model": model,
@@ -82,6 +83,7 @@ async def build_embeddings(
     session: AsyncSession,
     provider: Provider,
     model: str,
+    user_id: str,
     *,
     dimensions: int | None = None,
 ) -> "Embeddings":
@@ -106,7 +108,7 @@ async def build_embeddings(
             ),
         )
 
-    api_key, base_url = await _provider_creds(session, provider)
+    api_key, base_url = await _provider_creds(session, provider, user_id)
 
     if provider in ("unigpt", "custom") and not base_url:
         raise HTTPException(

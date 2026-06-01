@@ -1,11 +1,19 @@
 /**
- * Tiny typed-fetch wrapper.
+ * Typed-fetch wrapper that auto-attaches the Keycloak access token.
  *
- * The browser hits the FastAPI backend directly via `NEXT_PUBLIC_API_URL`
- * (CORS is configured on the API side). Server-side code (RSC, route
- * handlers) uses `INTERNAL_API_URL` so it can talk to the api service over
- * the docker-compose network without going through the host.
+ * - The browser hits the FastAPI backend directly via `NEXT_PUBLIC_API_URL`
+ *   (CORS is configured on the API side). It reads the token through Auth.js's
+ *   `getSession()` (works in client components and event handlers).
+ * - Server-side callers (RSCs, route handlers) should use `apiServer()` from
+ *   `./api-server` so the token comes from the cookie-backed `auth()` helper.
+ *
+ * If the session is missing or `session.error === "RefreshAccessTokenError"`,
+ * the request still goes out *without* a bearer header. The API will return
+ * 401 and the middleware redirect on the next navigation will sign the user
+ * back in.
  */
+
+import type { Session } from "next-auth";
 
 const SERVER_BASE = process.env.INTERNAL_API_URL ?? "http://localhost:8000";
 const PUBLIC_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -25,6 +33,23 @@ export class ApiError extends Error {
   }
 }
 
+async function browserToken(): Promise<string | undefined> {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const { getSession } = await import("next-auth/react");
+    const session = (await getSession()) as Session | null;
+    if (session?.error === "RefreshAccessTokenError") return undefined;
+    return session?.accessToken;
+  } catch {
+    return undefined;
+  }
+}
+
+async function attachAuth(headers: Headers): Promise<void> {
+  const token = await browserToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+}
+
 export async function api<T = unknown>(
   path: string,
   init: RequestInit & { json?: unknown } = {},
@@ -34,6 +59,7 @@ export async function api<T = unknown>(
     headers.set("Content-Type", "application/json");
     init.body = JSON.stringify(init.json);
   }
+  await attachAuth(headers);
   const res = await fetch(`${apiBase()}${path}`, { ...init, headers, cache: "no-store" });
   if (!res.ok) {
     let detail: unknown = await res.text();
@@ -59,6 +85,7 @@ export async function rawFetch(
     headers.set("Content-Type", "application/json");
     init.body = JSON.stringify(init.json);
   }
+  await attachAuth(headers);
   return fetch(`${apiBase()}${path}`, { ...init, headers });
 }
 
@@ -69,7 +96,11 @@ export function wsUrl(path: string): string {
 }
 
 /** Build an absolute URL pointing at the backend. Use for `<img src>`, `<a href>`,
- * and any other browser-side reference that bypasses the `api()` helper. */
+ * and any other browser-side reference that bypasses the `api()` helper.
+ *
+ * Static module assets are served from this URL — the API doesn't require a
+ * token for `/api/v1/modules/{id}/assets/*` (they're public bundles).
+ */
 export function apiUrl(path: string): string {
   return `${apiBase()}${path}`;
 }

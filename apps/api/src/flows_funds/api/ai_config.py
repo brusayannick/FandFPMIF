@@ -43,15 +43,15 @@ def _load_config(row: UserSetting | None) -> AiConfigPayload:
     return AiConfigPayload.model_validate(row.value_json)
 
 
-async def load_ai_config(session: AsyncSession) -> AiConfigPayload:
-    row = await session.get(UserSetting, AI_CONFIG_KEY)
+async def load_ai_config(session: AsyncSession, user_id: str) -> AiConfigPayload:
+    row = await session.get(UserSetting, (user_id, AI_CONFIG_KEY))
     return _load_config(row)
 
 
 async def _provider_creds(
-    session: AsyncSession, provider: Provider
+    session: AsyncSession, provider: Provider, user_id: str
 ) -> tuple[str, str | None]:
-    cfg = await load_ai_config(session)
+    cfg = await load_ai_config(session, user_id)
     p = getattr(cfg, provider)
     if not p.api_key:
         raise HTTPException(

@@ -1,7 +1,7 @@
-"""Per-(log_id, module_id) result cache (§5.5).
+"""Per-(user_id, log_id, module_id) result cache (§5.5).
 
-Stores under ``data/module_results/{log_id}/{module_id}/{key}.{ext}``. We
-serialise dicts/lists/scalars to JSON; pandas DataFrames to Parquet; bytes
+Stores under ``data/users/{user_id}/module_results/{log_id}/{module_id}/{key}.{ext}``.
+We serialise dicts/lists/scalars to JSON; pandas DataFrames to Parquet; bytes
 verbatim. Module authors decide what to cache; the SDK only mediates the
 filesystem layout.
 """
@@ -18,8 +18,14 @@ from flows_funds.api.config import get_settings
 
 
 class ResultCache:
-    def __init__(self, log_id: str, module_id: str, root: Path | None = None) -> None:
-        base = root or get_settings().module_results_dir
+    def __init__(
+        self,
+        log_id: str,
+        module_id: str,
+        user_id: str,
+        root: Path | None = None,
+    ) -> None:
+        base = root or get_settings().module_results_dir_for(user_id)
         self.dir = base / log_id / module_id
         self.dir.mkdir(parents=True, exist_ok=True)
 

@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from flows_funds.api import __version__
+from flows_funds.api.auth import CurrentUserDep
 from flows_funds.api.config import get_settings
 from flows_funds.api.modules import get_module_loader
 
@@ -40,7 +41,7 @@ def _dir_size_bytes(path: Path, *, max_entries: int = 100_000) -> int:
 
 
 @router.get("/storage")
-async def storage() -> dict[str, Any]:
+async def storage(user: CurrentUserDep) -> dict[str, Any]:
     """Disk usage breakdown for the platform's bind-mounted data + modules
     directories, plus filesystem total/free so the frontend can render a
     gauge. All values in bytes.
@@ -66,7 +67,7 @@ async def storage() -> dict[str, Any]:
 
 
 @router.get("/diagnostics")
-async def diagnostics() -> dict[str, Any]:
+async def diagnostics(user: CurrentUserDep) -> dict[str, Any]:
     """Single JSON blob for the *Copy diagnostics* button. Everything a
     support thread might ask for, in one round-trip.
     """

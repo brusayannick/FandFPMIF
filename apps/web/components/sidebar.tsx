@@ -7,7 +7,6 @@ import {
   Activity,
   Cog,
   FolderKanban,
-  Monitor,
   Moon,
   PanelLeftClose,
   Pickaxe,
@@ -18,15 +17,10 @@ import { useShallow } from "zustand/react/shallow";
 import { cn } from "@/lib/cn";
 import { useUi } from "@/lib/stores/ui";
 import { Button } from "@/components/ui/button";
+import { UserMenu } from "@/components/user-menu";
 import { useTrack } from "@/lib/analytics/hooks";
 import { EV } from "@/lib/analytics/events";
 import { selectCounts, useJobsStore } from "@/lib/stores/jobs";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Tooltip,
   TooltipContent,
@@ -148,6 +142,7 @@ export function Sidebar() {
       >
         <ThemeToggle collapsed={collapsed} />
         <JobsSidebarButton collapsed={collapsed} />
+        <UserMenu collapsed={collapsed} />
       </div>
       {!collapsed && (
         <div className="border-t border-sidebar-border px-4 py-2 text-[10px] uppercase tracking-wide text-sidebar-foreground/40">
@@ -199,32 +194,27 @@ function JobsSidebarButton({ collapsed }: { collapsed: boolean }) {
 }
 
 function ThemeToggle({ collapsed }: { collapsed: boolean }) {
-  const { theme, setTheme } = useTheme();
-  const Icon = theme === "dark" ? Moon : theme === "light" ? Sun : Monitor;
+  const { resolvedTheme, setTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  const Icon = isDark ? Moon : Sun;
+  const button = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      className="h-8 w-8 cursor-pointer text-sidebar-foreground/70"
+    >
+      <Icon className="h-4 w-4" />
+    </Button>
+  );
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Theme"
-          className="h-8 w-8 cursor-pointer text-sidebar-foreground/70"
-        >
-          <Icon className="h-4 w-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side={collapsed ? "right" : "top"} align="start">
-        <DropdownMenuItem onSelect={() => setTheme("light")} className="cursor-pointer">
-          <Sun className="mr-2 h-4 w-4" /> Light
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => setTheme("dark")} className="cursor-pointer">
-          <Moon className="mr-2 h-4 w-4" /> Dark
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => setTheme("system")} className="cursor-pointer">
-          <Monitor className="mr-2 h-4 w-4" /> System
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side={collapsed ? "right" : "top"}>
+        {isDark ? "Light mode" : "Dark mode"}
+      </TooltipContent>
+    </Tooltip>
   );
 }

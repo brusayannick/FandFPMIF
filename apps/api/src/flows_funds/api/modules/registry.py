@@ -54,6 +54,16 @@ class CapabilityRegistry:
     def has(self, capability_or_module_id: str) -> bool:
         return capability_or_module_id in self._caps or capability_or_module_id in self._modules
 
+    def owner_of(self, capability: str) -> str | None:
+        """Return the module id that provides *capability*, or None.
+
+        Used by the per-user registry view to reject cross-tenant RPC: a
+        capability whose provider the calling user hasn't installed is treated
+        as if it doesn't exist.
+        """
+        cap = self._caps.get(capability)
+        return cap.module_id if cap is not None else None
+
     def installed_modules(self) -> list[str]:
         return sorted(self._modules)
 

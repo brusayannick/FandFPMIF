@@ -9,6 +9,8 @@ from flows_funds.api.routes.events_ws import router as events_ws_router
 from flows_funds.api.routes.folders import router as folders_router
 from flows_funds.api.routes.jobs import router as jobs_router
 from flows_funds.api.routes.modules import router as modules_router
+from flows_funds.api.routes.onboarding import router as onboarding_router
+from flows_funds.api.routes.preferences import router as preferences_router
 from flows_funds.api.routes.system import router as system_router
 
 v1 = APIRouter(prefix="/api/v1")
@@ -21,6 +23,8 @@ v1.include_router(system_router)
 v1.include_router(ai_router)
 v1.include_router(ai_guidance_router)
 v1.include_router(analytics_router)
+v1.include_router(onboarding_router)
+v1.include_router(preferences_router)
 v1.include_router(events_ws_router)
 
 __all__ = ["v1"]

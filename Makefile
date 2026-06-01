@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install dev dev-api dev-web up up-dev down build test typecheck fmt clean codegen
+.PHONY: help install dev dev-api dev-web up up-dev down build test typecheck fmt clean codegen deploy
 
 # Tab indentation is required for Make recipes.
 
@@ -48,6 +48,10 @@ fmt: ## Format Python with ruff
 codegen: ## Regenerate TS types from the running API's /openapi.json
 	cd apps/web && pnpm codegen
 
-clean: ## Wipe local data — irrevocable
-	rm -rf data/event_logs/* data/module_results/* data/metadata.db data/metadata.db-wal data/metadata.db-shm
-	@echo "data/ wiped. Module folders under modules/ are kept."
+deploy: ## Push + redeploy to the uni VM (run on the FB4-DEV-VPN)
+	./scripts/deploy.sh
+
+clean: ## Wipe local data + Keycloak Postgres volume — irrevocable
+	rm -rf data/event_logs/* data/module_results/* data/users data/metadata.db data/metadata.db-wal data/metadata.db-shm data/.multi_user_migrated
+	-docker volume rm flows-and-funds_kc-data 2>/dev/null || true
+	@echo "data/ wiped and Keycloak volume removed. Module folders under modules/ are kept."

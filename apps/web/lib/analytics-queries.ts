@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
 
+export type OnboardingMode = "force" | "on" | "off";
+
 export interface AnalyticsConfig {
   enabled: boolean;
   retention_days: number | null;
@@ -12,6 +14,9 @@ export interface AnalyticsConfig {
   capture_errors: boolean;
   opted_in_at: string | null;
   anon_user_id_seed: string;
+  // Server-side policy from USER_TRACKING_ONBOARDING; read-only on the client.
+  // `force` hides the privacy step/tab and keeps tracking on for everyone.
+  onboarding_mode: OnboardingMode;
 }
 
 export interface AnalyticsTypeCount {

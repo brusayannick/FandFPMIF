@@ -396,8 +396,9 @@ export default function ModuleDetailPage() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <p className="text-muted-foreground">
-            Removes the module folder, its venv, and any cached results. The
-            platform&apos;s own dependencies are unaffected.
+            Removes the module from your account. Default modules can be brought
+            back with <span className="font-medium text-foreground">Restore defaults</span>;
+            custom uploads are deleted from disk once no one else has them installed.
           </p>
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -413,8 +414,9 @@ export default function ModuleDetailPage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Uninstall {m.name}?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This deletes <code>modules/{m.id}/</code> from disk and unmounts its
-                  routes / event handlers. Your data and other modules are unaffected.
+                  This removes <code>{m.id}</code> from your installed modules and
+                  unmounts it for you. Your event-log data and other users are
+                  unaffected.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

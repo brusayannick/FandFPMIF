@@ -19,6 +19,8 @@ export default function GeneralSettingsPage() {
   const { theme = "system", setTheme } = useTheme();
   const muted = useUi((s) => s.notificationsMuted);
   const setMuted = useUi((s) => s.setNotificationsMuted);
+  const confidentialOnly = useUi((s) => s.confidentialOnly);
+  const setConfidentialOnly = useUi((s) => s.setConfidentialOnly);
   const timezone = useUi((s) => s.timezone);
   const setTimezone = useUi((s) => s.setTimezone);
   const dateFormat = useUi((s) => s.dateFormat);
@@ -69,6 +71,29 @@ export default function GeneralSettingsPage() {
               </span>
             </span>
             <Switch checked={muted} onCheckedChange={setMuted} className="cursor-pointer" />
+          </Label>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Modules</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Label className="flex items-center justify-between gap-3">
+            <span className="space-y-0.5">
+              <span className="block text-sm">Show only confidential modules</span>
+              <span className="block text-xs text-muted-foreground">
+                When on, only modules that declare <code className="rounded bg-muted px-1">isConfidentialSafe: true</code> in
+                their manifest are available. Modules that may ship data to an
+                external service are hidden.
+              </span>
+            </span>
+            <Switch
+              checked={confidentialOnly}
+              onCheckedChange={setConfidentialOnly}
+              className="cursor-pointer"
+            />
           </Label>
         </CardContent>
       </Card>

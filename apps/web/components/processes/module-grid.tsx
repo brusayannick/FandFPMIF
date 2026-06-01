@@ -25,17 +25,19 @@ export function ModuleGrid({ logId }: { logId: string }) {
   const { data: modules, isLoading, isError } = useModules(logId);
   const showUnavailable = useUi((s) => s.showUnavailableModules);
   const setShowUnavailable = useUi((s) => s.setShowUnavailableModules);
+  const confidentialOnly = useUi((s) => s.confidentialOnly);
 
   const grouped = useMemo(() => {
     const out = new Map<string, ModuleSummary[]>();
     for (const c of CATEGORIES) out.set(c.id, []);
     for (const m of modules ?? []) {
+      if (confidentialOnly && !m.is_confidential_safe) continue;
       if (!showUnavailable && m.availability?.status === "unavailable") continue;
       const bucket = out.get(m.category) ?? out.get("other")!;
       bucket.push(m);
     }
     return out;
-  }, [modules, showUnavailable]);
+  }, [modules, showUnavailable, confidentialOnly]);
 
   if (isLoading) {
     return (

@@ -43,17 +43,24 @@ class DiscoveredModule:
         return self.manifest.id
 
 
-def discover(modules_dir: Path) -> list[DiscoveredModule]:
+def discover(*roots: Path) -> list[DiscoveredModule]:
     """Return the union of filesystem-discovered + entry-point-discovered
     modules. Filesystem entries take precedence: if both surface the same
     `id`, the entry-point copy is ignored with a warning (lets a developer
     override an installed module by dropping a folder in `modules/`).
+
+    ``roots`` are filesystem roots scanned in order — typically the repo
+    ``modules/`` defaults root first, then the persistent uploads root. A
+    module id declared in two roots (e.g. an upload colliding with a default)
+    is a hard error, which is exactly the protection we want.
     """
 
     discovered: list[DiscoveredModule] = []
     seen_ids: dict[str, Path] = {}
 
-    if modules_dir.exists():
+    for modules_dir in roots:
+        if not modules_dir.exists():
+            continue
         for entry in sorted(modules_dir.iterdir()):
             if not entry.is_dir():
                 continue

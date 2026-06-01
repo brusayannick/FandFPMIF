@@ -1,8 +1,10 @@
 # Flows & Funds
 
-A locally-hosted, modular process mining platform. Two services (`api` + `web`),
-embedded data stores (SQLite + DuckDB + Parquet), no broker, no cloud. Ships
-with a working set of analytics modules and an in-app AI assistant.
+A locally-hosted, modular process mining platform. Two services (`api` + `web`)
+plus a bundled Keycloak (`keycloak` + `keycloak-db`) for OIDC login,
+embedded application data stores (SQLite + DuckDB + Parquet), no broker, no cloud.
+Each user gets a fully isolated workspace — their event logs, jobs, AI keys,
+and module config never bleed across accounts.
 
 For the full design rationale, read [`INSTRUCTIONS.md`](./INSTRUCTIONS.md). For
 the module authoring contract, read [`modules/README.md`](./modules/README.md).
@@ -12,18 +14,24 @@ the module authoring contract, read [`modules/README.md`](./modules/README.md).
 ```bash
 git clone <repo-url> flows-funds
 cd flows-funds
+cp .env.example .env   # then rotate AUTH_SECRET + KEYCLOAK_CLIENT_SECRET
 make up
 ```
 
-Then open <http://localhost:3000>.
+Then open <http://localhost:3000>. On first login use
+`admin@flows-funds.local` / `flowsfunds` — Keycloak forces a password reset.
+
+To add additional users, sign in to the Keycloak admin console at
+<http://localhost:8080/admin> with `admin` / `admin`, switch to the
+`flows-funds` realm, and create users there.
 
 ## Advanced setup
 
 ### Prerequisites
 
 - **Docker Desktop** (macOS / Windows) or **Docker Engine + Compose v2** (Linux). No Python, Node, `uv`, or `pnpm` needed on the host.
-- Free ports `3000` (web) and `8000` (api).
-- ~2 GB free disk for the built images. First boot pulls each module's Python deps (cv4cdd alone pulls TensorFlow, ~500 MB) — subsequent boots reuse the cached wheels under `data/uv-python/`.
+- Free ports `3000` (web), `8000` (api), and `8080` (Keycloak).
+- ~3 GB free disk for the built images. First boot pulls each module's Python deps (cv4cdd alone pulls TensorFlow, ~500 MB) plus Keycloak (~500 MB) and Postgres 16 alpine. Subsequent boots reuse the cached wheels under `data/uv-python/`.
 
 ### Step-by-step
 
@@ -85,9 +93,13 @@ modules, and recent jobs when answering.
 
 ## Privacy & usage
 
-Anonymous usage capture is **on by default**. Toggle it under
-**Settings → Privacy**. Events stay in the local SQLite database; nothing
-ships off the host.
+Anonymous usage capture is **on for every user by default**
+(`USER_TRACKING_ONBOARDING=force`): the onboarding privacy step and the
+**Settings → Privacy** tab are hidden and there's no opt-out. Set the var to
+`on` (enabled by default, but opt-out) or `off` (disabled by default, opt-in)
+to let users choose under **Settings → Privacy**. Either way events stay in the
+local SQLite database; nothing ships off the host. See
+[Configuration](#configuration).
 
 ## Common commands
 
@@ -106,14 +118,33 @@ ships off the host.
 ## Data & persistence
 
 - `./data/` is bind-mounted — SQLite metadata, Parquet event logs, module results, and the cached uv-managed Python runtimes all live here. Back up by copying the directory.
-- `./modules/` is bind-mounted read/write — the install flow writes `modules/<id>/` into the host filesystem, and any module folder you drop in is picked up on the next start. Each module's `.venv/` and `.dist/` (esbuilt frontend bundle) are auto-created and gitignored.
+- `./modules/` is bind-mounted read/write — the bundled **default** modules live here, and any module folder you drop in is picked up on the next start. Each module's `.venv/` and `.dist/` (esbuilt frontend bundle) are auto-created and gitignored.
+- User **uploads** (Settings → Modules → Import) land in `data/uploaded_modules/<id>/` instead, so they never overwrite or mix with the repo defaults. Module ownership is per-user (the `module_installs` table): every user is auto-seeded the default set on first login, and uninstall is reference-counted. A **Restore defaults** button re-adds any defaults a user removed.
 
 ## Configuration
 
-The defaults in [`docker-compose.yml`](./docker-compose.yml) work out of the box for `localhost`. Override when running on a different host:
+The defaults in [`docker-compose.yml`](./docker-compose.yml) work out of the box for `localhost`. Override via `.env` (copy from `.env.example`) when running on a different host or before exposing the stack:
 
 - `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`) — the URL the **browser** uses to reach the API. This is inlined at build time, so changing it requires a rebuild (`make build` or `docker compose up -d --build`).
 - `CORS_ORIGINS` on the api (default `["http://localhost:3000"]`) — extend this if the web origin changes.
+- `USER_TRACKING_ONBOARDING` on the api (default `force`) — usage-tracking default & policy. `force` keeps tracking on for every user and hides both the onboarding privacy step and the **Settings → Privacy** tab (no opt-out); `on` enables tracking by default during onboarding (opt-out); `off` disables it by default (opt-in).
+- `AUTH_SECRET` — encrypts the Auth.js session cookie. Rotate per environment (`openssl rand -base64 32`).
+- `KEYCLOAK_CLIENT_SECRET` — confidential client secret for the `flows-funds-web` client. Rotate before any non-local deployment; the seeded dev value also lives in `infra/keycloak/realm-export/flows-funds-realm.json`.
+- `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` — bootstrap credentials for the Keycloak admin console at `http://localhost:8080/admin`.
+
+### Authentication
+
+Login is mandatory. The web app gates everything behind a Keycloak OIDC flow
+(Auth.js v5 on the Next.js side, PyJWT + JWKS validation on the FastAPI
+side). Sessions are JWT-only — no extra DB tables on the Auth.js side, and
+no Postgres for the app itself; only Keycloak uses Postgres.
+
+User data isolation:
+
+- Every event log / job / AI key is keyed by the Keycloak `sub` claim.
+- On-disk parquet + module results live under `data/users/{user_id}/`.
+- WebSocket envelopes are filtered by `user_id` server-side; a user only
+  ever sees their own jobs and events.
 
 ## Tests
 

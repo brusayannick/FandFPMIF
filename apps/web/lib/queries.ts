@@ -402,6 +402,17 @@ export function useUninstallModule() {
   });
 }
 
+export function useRestoreDefaults() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api<{ restored: string[] }>("/api/v1/modules/restore-defaults", {
+        method: "POST",
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["modules"] }),
+  });
+}
+
 export interface AiModelSlot {
   title: string;
   description?: string | null;

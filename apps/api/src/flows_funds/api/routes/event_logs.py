@@ -19,7 +19,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy import select
 
-from flows_funds.api.db.models import EventLog, Folder
+from flows_funds.api.auth import (
+    CurrentUserDep,
+    get_owned_event_log,
+    get_owned_folder,
+)
+from flows_funds.api.db.models import EventLog
 from flows_funds.api.db.session import SessionDep
 from flows_funds.api.ingest.dispatch import IMPORT_JOB_TYPE, detect_format
 from flows_funds.api.ingest.storage import log_paths
@@ -55,6 +60,7 @@ _RuntimeDep = Annotated[JobRuntime, Depends(_runtime_dep)]
 async def create_event_log(
     session: SessionDep,
     runtime: _RuntimeDep,
+    user: CurrentUserDep,
     file: Annotated[UploadFile, File(description="XES, XES.GZ, CSV, or XML upload")],
     name: Annotated[str | None, Form()] = None,
     csv_mapping: Annotated[str | None, Form(description="JSON-encoded CsvColumnMapping")] = None,
@@ -84,12 +90,10 @@ async def create_event_log(
             raise HTTPException(status_code=422, detail=f"Invalid xml_mapping: {exc}") from exc
 
     if folder_id is not None:
-        folder = await session.get(Folder, folder_id)
-        if folder is None or folder.deleted_at is not None:
-            raise HTTPException(status_code=404, detail="Folder not found.")
+        await get_owned_folder(session, folder_id, user.id)
 
     log_id = uuid7_str()
-    paths = log_paths(log_id)
+    paths = log_paths(log_id, user.id)
     paths.ensure()
 
     ext = source_format if source_format != "xes.gz" else "xes.gz"
@@ -104,6 +108,7 @@ async def create_event_log(
     session.add(
         EventLog(
             id=log_id,
+            user_id=user.id,
             name=display_name,
             source_format=source_format,
             source_filename=file.filename,
@@ -116,6 +121,7 @@ async def create_event_log(
 
     job_id = await runtime.submit(
         type_=IMPORT_JOB_TYPE,
+        user_id=user.id,
         title=f"Import — {display_name}",
         subtitle=f"event_log.import · {source_format}",
         payload={
@@ -152,6 +158,7 @@ async def create_event_log_from_url(
     body: ImportFromUrlRequest,
     session: SessionDep,
     runtime: _RuntimeDep,
+    user: CurrentUserDep,
 ) -> EventLogCreateResponse:
     """Download a remote XES / XES.GZ / CSV and queue it for import."""
     url_str = str(body.url)
@@ -196,7 +203,7 @@ async def create_event_log_from_url(
         raise HTTPException(status_code=400, detail=f"Failed to fetch URL: {exc}") from exc
 
     log_id = uuid7_str()
-    paths = log_paths(log_id)
+    paths = log_paths(log_id, user.id)
     paths.ensure()
 
     ext = source_format if source_format != "xes.gz" else "xes.gz"
@@ -216,6 +223,7 @@ async def create_event_log_from_url(
     session.add(
         EventLog(
             id=log_id,
+            user_id=user.id,
             name=display_name,
             source_format=source_format,
             source_filename=filename,
@@ -227,6 +235,7 @@ async def create_event_log_from_url(
 
     job_id = await runtime.submit(
         type_=IMPORT_JOB_TYPE,
+        user_id=user.id,
         title=f"Import — {display_name}",
         subtitle=f"event_log.import · {source_format} (url)",
         payload={
@@ -299,10 +308,15 @@ async def probe_xml_upload(
 @router.get("", response_model=list[EventLogSummary])
 async def list_event_logs(
     session: SessionDep,
+    user: CurrentUserDep,
     status_filter: Annotated[str | None, Query(alias="status")] = None,
     q: Annotated[str | None, Query()] = None,
 ) -> list[EventLogSummary]:
-    stmt = select(EventLog).where(EventLog.deleted_at.is_(None)).order_by(EventLog.created_at.desc())
+    stmt = (
+        select(EventLog)
+        .where(EventLog.user_id == user.id, EventLog.deleted_at.is_(None))
+        .order_by(EventLog.created_at.desc())
+    )
     if status_filter:
         stmt = stmt.where(EventLog.status == status_filter)
     if q:
@@ -313,10 +327,10 @@ async def list_event_logs(
 
 
 @router.get("/{log_id}", response_model=EventLogDetail)
-async def get_event_log(log_id: str, session: SessionDep) -> EventLogDetail:
-    row = await session.get(EventLog, log_id)
-    if row is None or row.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="Event log not found.")
+async def get_event_log(
+    log_id: str, session: SessionDep, user: CurrentUserDep
+) -> EventLogDetail:
+    row = await get_owned_event_log(session, log_id, user.id)
     return EventLogDetail.model_validate(row)
 
 
@@ -325,10 +339,9 @@ async def delete_event_log(
     log_id: str,
     session: SessionDep,
     runtime: _RuntimeDep,
+    user: CurrentUserDep,
 ) -> None:
-    row = await session.get(EventLog, log_id)
-    if row is None or row.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="Event log not found.")
+    row = await get_owned_event_log(session, log_id, user.id)
     # Terminate active jobs (import / re-import / module runs) before tearing
     # down the row + on-disk data so workers don't keep writing to a directory
     # we're about to rmtree.
@@ -337,7 +350,7 @@ async def delete_event_log(
         log.info("event_log.jobs_cancelled", log_id=log_id, count=cancelled)
     row.deleted_at = datetime.now(UTC).replace(tzinfo=None)
     await session.commit()
-    paths = log_paths(log_id)
+    paths = log_paths(log_id, user.id)
     if paths.exists():
         try:
             shutil.rmtree(paths.root)
@@ -350,10 +363,9 @@ async def update_event_log(
     log_id: str,
     payload: EventLogUpdate,
     session: SessionDep,
+    user: CurrentUserDep,
 ) -> EventLogDetail:
-    row = await session.get(EventLog, log_id)
-    if row is None or row.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="Event log not found.")
+    row = await get_owned_event_log(session, log_id, user.id)
     if payload.name is not None:
         cleaned = payload.name.strip()
         if not cleaned:
@@ -372,9 +384,7 @@ async def update_event_log(
     # "key wasn't sent" from "explicitly set to null (move to root)".
     if "folder_id" in payload.model_fields_set:
         if payload.folder_id is not None:
-            folder = await session.get(Folder, payload.folder_id)
-            if folder is None or folder.deleted_at is not None:
-                raise HTTPException(status_code=404, detail="Folder not found.")
+            await get_owned_folder(session, payload.folder_id, user.id)
         row.folder_id = payload.folder_id
     if payload.position is not None:
         row.position = payload.position
@@ -391,15 +401,14 @@ async def reimport_event_log(
     log_id: str,
     session: SessionDep,
     runtime: _RuntimeDep,
+    user: CurrentUserDep,
 ) -> EventLogCreateResponse:
     """Re-run the import job using the original upload that's still on disk.
 
     The CSV mapping (when applicable) is recovered from the previous run's
     `meta.json` so column-mapped CSVs don't need to be re-mapped.
     """
-    row = await session.get(EventLog, log_id)
-    if row is None or row.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="Event log not found.")
+    row = await get_owned_event_log(session, log_id, user.id)
     if row.status == "importing":
         raise HTTPException(status_code=409, detail="Import already in progress.")
     if not row.source_format:
@@ -407,7 +416,7 @@ async def reimport_event_log(
             status_code=409, detail="No source format on record — cannot re-run import."
         )
 
-    paths = log_paths(log_id)
+    paths = log_paths(log_id, user.id)
     original_path = paths.original_for(row.source_format)
     if not original_path.exists():
         raise HTTPException(
@@ -442,6 +451,7 @@ async def reimport_event_log(
 
     job_id = await runtime.submit(
         type_=IMPORT_JOB_TYPE,
+        user_id=user.id,
         title=f"Re-import — {row.name}",
         subtitle=f"event_log.import · {row.source_format}",
         payload={
@@ -461,23 +471,23 @@ async def reimport_event_log(
     response_model=EventLogDetail,
     status_code=status.HTTP_201_CREATED,
 )
-async def duplicate_event_log(log_id: str, session: SessionDep) -> EventLogDetail:
+async def duplicate_event_log(
+    log_id: str, session: SessionDep, user: CurrentUserDep
+) -> EventLogDetail:
     """Fast-clone an event log by copying its on-disk directory.
 
     Cheaper than re-importing because the parquet outputs already exist; we
     just clone the bytes into a fresh log id and persist a new metadata row
     in the same folder, immediately after the source log.
     """
-    src = await session.get(EventLog, log_id)
-    if src is None or src.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="Event log not found.")
+    src = await get_owned_event_log(session, log_id, user.id)
     if src.status != "ready":
         raise HTTPException(
             status_code=409,
             detail="Only ready event logs can be duplicated.",
         )
 
-    src_paths = log_paths(log_id)
+    src_paths = log_paths(log_id, user.id)
     if not src_paths.exists():
         raise HTTPException(
             status_code=409,
@@ -485,7 +495,7 @@ async def duplicate_event_log(log_id: str, session: SessionDep) -> EventLogDetai
         )
 
     new_id = uuid7_str()
-    new_paths = log_paths(new_id)
+    new_paths = log_paths(new_id, user.id)
     try:
         shutil.copytree(src_paths.root, new_paths.root)
     except OSError as exc:
@@ -495,6 +505,7 @@ async def duplicate_event_log(log_id: str, session: SessionDep) -> EventLogDetai
     now = datetime.now(UTC).replace(tzinfo=None)
     duplicate = EventLog(
         id=new_id,
+        user_id=user.id,
         name=f"{src.name} (copy)",
         source_format=src.source_format,
         source_filename=src.source_filename,

@@ -31,6 +31,7 @@ import structlog
 from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel
 
+from flows_funds.api.auth import CurrentUser, CurrentUserDep
 from flows_funds.api.db.engine import get_sessionmaker
 from flows_funds.api.db.models import ModuleConfig
 from flows_funds.api.events import EventBus
@@ -42,6 +43,7 @@ from flows_funds.api.modules.discovery import DiscoveredModule, discover, topo_s
 from flows_funds.api.modules.event_log_access import EventLogAccess
 from flows_funds.api.modules.finder import get_finder, module_namespace, reset_finder
 from flows_funds.api.modules.installer import install_module
+from flows_funds.api.modules.installs import user_module_ids, user_owns_module
 from flows_funds.api.modules.registry import CapabilityRegistry
 from flows_funds.api.modules.subprocess_host import SubprocessBridge
 from flows_funds.sdk.context import ModuleContext
@@ -81,16 +83,34 @@ class LoadedModule:
 
 
 class _SdkBusAdapter:
-    """Bridge `flows_funds.sdk.context.EventBusProtocol` over our EventBus."""
+    """Bridge `flows_funds.sdk.context.EventBusProtocol` over our EventBus.
 
-    def __init__(self, bus: EventBus) -> None:
+    Every emitted payload is stamped with the owning user's id (and the active
+    log id) so the event stays inside that user's tenant: the `WS /events`
+    fan-out filters by `user_id`, and the loader's `@on_event` dispatch only
+    delivers to handlers whose owning user matches. Without this stamp a module
+    that emits an event would broadcast it to *every* connected user — a
+    cross-tenant leak of whatever the payload carries.
+    """
+
+    def __init__(self, bus: EventBus, user_id: str, log_id: str = "") -> None:
         self._bus = bus
+        self._user_id = user_id
+        self._log_id = log_id
 
     async def emit(self, topic: str, payload: Any) -> None:
         if hasattr(payload, "model_dump"):
             payload = payload.model_dump()
         elif not isinstance(payload, dict):
             payload = {"value": payload}
+        else:
+            payload = dict(payload)
+        # `user_id` is a reserved routing key — force it to the emitting user so
+        # a module can't (by bug or by design) address another tenant. `log_id`
+        # is a hint, so only fill it when the module didn't set one itself.
+        payload["user_id"] = self._user_id
+        if self._log_id:
+            payload.setdefault("log_id", self._log_id)
         await self._bus.publish(topic, payload)
 
     async def subscribe(self, *patterns: str):
@@ -155,22 +175,33 @@ class _BusForwardingLogger:
     untouched.
     """
 
-    def __init__(self, base, bus: EventBus, module_id: str) -> None:
+    def __init__(self, base, bus: EventBus, module_id: str, user_id: str) -> None:
         self._base = base
         self._bus = bus
         self._module_id = module_id
+        self._user_id = user_id
 
     def bind(self, **kwargs: Any) -> "_BusForwardingLogger":
-        return _BusForwardingLogger(self._base.bind(**kwargs), self._bus, self._module_id)
+        return _BusForwardingLogger(
+            self._base.bind(**kwargs), self._bus, self._module_id, self._user_id
+        )
 
     def _emit(self, level: str, event: str, **kwargs: Any) -> None:
         getattr(self._base, level)(event, **kwargs)
         # Best-effort: never let a logging side-effect break the handler.
+        # `user_id` scopes the line to the owning tenant — the Settings logs
+        # tail subscribes to `module.log.*` over the per-user WS, so without it
+        # one user would see another's log fields (which can embed their data).
         try:
             asyncio.create_task(
                 self._bus.publish(
                     f"module.log.{level}",
-                    {"module_id": self._module_id, "event": event, "fields": kwargs},
+                    {
+                        "module_id": self._module_id,
+                        "user_id": self._user_id,
+                        "event": event,
+                        "fields": kwargs,
+                    },
                 )
             )
         except Exception:  # noqa: BLE001
@@ -190,6 +221,41 @@ class _BusForwardingLogger:
 
     def exception(self, event: str, **kw: Any) -> None:
         self._emit("error", event, exc_info=True, **kw)
+
+
+class _UserScopedRegistry:
+    """Per-invocation view of the process-global `CapabilityRegistry`.
+
+    The underlying registry holds every module loaded into the process —
+    shared across all tenants. This view filters it down to the modules the
+    *owning user* has installed, so cross-module RPC (`ctx.registry.call`),
+    capability probing (`has`) and listing (`installed_modules`) can never
+    reach a module another tenant installed. Module code only ever talks to
+    its own user's modules.
+    """
+
+    def __init__(self, registry: CapabilityRegistry, allowed_module_ids: frozenset[str]) -> None:
+        self._registry = registry
+        self._allowed = allowed_module_ids
+
+    def has(self, capability_or_module_id: str) -> bool:
+        if capability_or_module_id in self._allowed:
+            return True
+        owner = self._registry.owner_of(capability_or_module_id)
+        return owner is not None and owner in self._allowed
+
+    def installed_modules(self) -> list[str]:
+        return sorted(m for m in self._registry.installed_modules() if m in self._allowed)
+
+    async def call(self, capability: str, **kwargs: Any) -> Any:
+        owner = self._registry.owner_of(capability)
+        if owner is None or owner not in self._allowed:
+            # Same message whether the capability is unknown or just not the
+            # caller's — avoids leaking which modules other tenants installed.
+            raise LookupError(
+                f"Capability {capability!r} is not provided by any module you have installed."
+            )
+        return await self._registry.call(capability, **kwargs)
 
 
 def _resolve_dynamic(
@@ -255,12 +321,23 @@ def _extra_handler_params(bound_method: Callable[..., Any]) -> list[inspect.Para
 
 
 def _build_endpoint_signature(extras: list[inspect.Parameter]) -> inspect.Signature:
-    """Build a FastAPI-friendly signature: `log_id` + any forwarded kwargs."""
+    """Build a FastAPI-friendly signature: `log_id` + auth + any forwarded kwargs.
+
+    ``__ff_user`` is the Keycloak-validated user, injected via
+    ``CurrentUserDep`` so module routes inherit auth without each module having
+    to wire it up. The endpoint pops it out of kwargs before forwarding.
+    """
     log_id_param = inspect.Parameter(
         "log_id",
         kind=inspect.Parameter.KEYWORD_ONLY,
         default=None,
         annotation=str | None,
+    )
+    user_param = inspect.Parameter(
+        "__ff_user",
+        kind=inspect.Parameter.KEYWORD_ONLY,
+        default=inspect.Parameter.empty,
+        annotation=CurrentUserDep,
     )
     forwarded: list[inspect.Parameter] = []
     for p in extras:
@@ -276,7 +353,7 @@ def _build_endpoint_signature(extras: list[inspect.Parameter]) -> inspect.Signat
                 annotation=annotation,
             )
         )
-    return inspect.Signature(parameters=[log_id_param, *forwarded])
+    return inspect.Signature(parameters=[log_id_param, user_param, *forwarded])
 
 
 # ---------------------------------------------------------------------------
@@ -292,20 +369,42 @@ class ModuleLoader:
         bus: EventBus,
         runtime: JobRuntime,
         registry: CapabilityRegistry,
+        uploaded_modules_dir: Path | None = None,
         api_app: FastAPI | None = None,
     ) -> None:
         self.modules_dir = modules_dir
+        # User uploads live in their own persistent root so they never mix with
+        # or clobber the repo defaults. Falls back to a sibling of modules_dir
+        # when not supplied (kept optional for tests / older call sites).
+        self.uploaded_modules_dir = (
+            uploaded_modules_dir
+            if uploaded_modules_dir is not None
+            else modules_dir.parent / "uploaded_modules"
+        )
         self.bus = bus
         self.runtime = runtime
         self.registry = registry
         self.api_app = api_app
         self.loaded: dict[str, LoadedModule] = {}
+        # Ids discovered under ``modules_dir`` at boot — the shared "default"
+        # set every user is seeded with. Uploads added later via ``load_one``
+        # must never land here, so it is only ever populated in ``load_all``.
+        self.default_module_ids: set[str] = set()
         self._mount_router: APIRouter | None = None
         self._sub_event_tasks: list[asyncio.Task] = []
         self._bridges: dict[str, SubprocessBridge] = {}
 
     async def load_all(self) -> list[LoadedModule]:
-        discovered = discover(self.modules_dir)
+        discovered = discover(self.modules_dir, self.uploaded_modules_dir)
+        # Snapshot which ids are repo defaults by *root* (not manifest source):
+        # an upload already present on disk at boot must not be mistaken for a
+        # default just because it discovers as "filesystem".
+        defaults_root = self.modules_dir.resolve()
+        self.default_module_ids = {
+            d.id
+            for d in discovered
+            if d.folder.resolve().is_relative_to(defaults_root)
+        }
         if not discovered:
             log.info("modules.loader.no_modules", dir=str(self.modules_dir))
             return []
@@ -446,25 +545,16 @@ class ModuleLoader:
             self._bind_event(loaded, getattr(loaded.instance, attr_name), event_sub, job_spec)
 
     async def _seed_module_config(self, manifest: Manifest) -> None:
-        """Insert a `module_configs` row honouring `manifest.default_enabled`
-        on first discovery. Existing rows are left untouched (user choice wins).
+        """No-op since the multi-user migration.
+
+        ``module_configs`` is now keyed by ``(user_id, module_id)`` — seeding
+        without a user_id would either leave the row orphaned or require
+        materialising defaults for every existing user. Instead, routes
+        treat "no row" as ``enabled = manifest.default_enabled`` (see
+        ``routes/modules.py`` GET ``/config`` and ``_make_context`` below).
+        Kept around so existing call sites still link.
         """
-        try:
-            sm = get_sessionmaker()
-        except Exception:
-            return
-        async with sm() as session:
-            existing = await session.get(ModuleConfig, manifest.id)
-            if existing is not None:
-                return
-            session.add(
-                ModuleConfig(
-                    module_id=manifest.id,
-                    config_json={},
-                    enabled=manifest.default_enabled,
-                )
-            )
-            await session.commit()
+        return None
 
     def manifests(self) -> list[Manifest]:
         return [m.manifest for m in self.loaded.values()]
@@ -475,8 +565,17 @@ class ModuleLoader:
         detected_schema: dict[str, Any] | None,
         events_count: int | None,
         cases_count: int | None,
+        installed_module_ids: set[str] | None = None,
     ) -> dict[str, Availability]:
-        ids = {m.id for m in self.loaded.values()}
+        # Resolve hard/soft module requirements against *this user's* installed
+        # set, not every module loaded in the process. Otherwise a module would
+        # show "available" because its dependency happens to be loaded for some
+        # other tenant, even though the current user never installed it.
+        ids = (
+            installed_module_ids
+            if installed_module_ids is not None
+            else {m.id for m in self.loaded.values()}
+        )
         return {
             m.id: evaluate_availability(
                 m.manifest,
@@ -486,6 +585,7 @@ class ModuleLoader:
                 installed_module_ids=ids,
             )
             for m in self.loaded.values()
+            if installed_module_ids is None or m.id in ids
         }
 
     # -- internal -----------------------------------------------------------
@@ -616,7 +716,8 @@ class ModuleLoader:
         if job_spec is None:
             async def _endpoint(**kwargs: Any) -> Any:
                 log_id = kwargs.pop("log_id", None)
-                ctx = await self._make_context(module_id, log_id or "")
+                user: CurrentUser = kwargs.pop("__ff_user")
+                ctx = await self._make_context(module_id, log_id or "", user.id)
                 return await self._invoke_handler(bound_method, ctx, **kwargs)
 
             _endpoint.__signature__ = _build_endpoint_signature(extras)  # type: ignore[attr-defined]
@@ -633,6 +734,7 @@ class ModuleLoader:
 
             async def _endpoint(**kwargs: Any) -> dict[str, str]:  # type: ignore[misc]
                 ctx_log_id = kwargs.pop("log_id", None) or ""
+                user: CurrentUser = kwargs.pop("__ff_user")
 
                 # Serialize forwarded args into the job payload. Pydantic
                 # models dump to dicts; primitives pass through. This is the
@@ -649,6 +751,7 @@ class ModuleLoader:
                     ctx = await self._make_context(
                         module_id,
                         handle.payload.get("log_id", ""),
+                        handle.user_id,
                         progress=_JobProgressAdapter(handle),
                     )
                     raw = handle.payload.get("_extras") or {}
@@ -686,6 +789,7 @@ class ModuleLoader:
 
                 job_id = await self.runtime.submit(
                     type_=job_type,
+                    user_id=user.id,
                     title=resolved_title,
                     subtitle=resolved_subtitle,
                     module_id=module_id,
@@ -721,8 +825,22 @@ class ModuleLoader:
                     async with self.bus.subscribe([topic]) as stream:
                         async for env in stream:
                             try:
+                                event_user_id = env.payload.get("user_id")
+                                if not event_user_id:
+                                    # System events without user ownership are
+                                    # only forwarded to module handlers that
+                                    # don't need per-user paths.
+                                    continue
+                                # The bus is process-global, but a module must
+                                # only react to events from users who installed
+                                # it — otherwise user B's import would run user
+                                # A's module against B's data.
+                                if not await self._user_owns(event_user_id, module_id):
+                                    continue
                                 ctx = await self._make_context(
-                                    module_id, env.payload.get("log_id", "")
+                                    module_id,
+                                    env.payload.get("log_id", ""),
+                                    event_user_id,
                                 )
                                 await self._invoke_handler(bound_method, ctx, env.payload)
                             except Exception:
@@ -746,6 +864,7 @@ class ModuleLoader:
             ctx = await self._make_context(
                 module_id,
                 handle.payload.get("log_id", ""),
+                handle.user_id,
                 progress=_JobProgressAdapter(handle),
             )
             await self._invoke_handler(bound_method, ctx, event_payload)
@@ -762,6 +881,13 @@ class ModuleLoader:
                     async for env in stream:
                         try:
                             log_id = env.payload.get("log_id", "")
+                            event_user_id = env.payload.get("user_id")
+                            if not event_user_id:
+                                continue
+                            # Only enqueue work for users who installed this
+                            # module — see the no-job runner above.
+                            if not await self._user_owns(event_user_id, module_id):
+                                continue
                             resolved_title = _resolve_dynamic(
                                 job_spec.title, log_id, module_id, static_title_default
                             )
@@ -770,6 +896,7 @@ class ModuleLoader:
                             )
                             await self.runtime.submit(
                                 type_=job_type,
+                                user_id=event_user_id,
                                 title=resolved_title,
                                 subtitle=resolved_subtitle,
                                 module_id=module_id,
@@ -807,10 +934,27 @@ class ModuleLoader:
         finally:
             shutil.rmtree(ctx.workdir, ignore_errors=True)
 
+    async def _user_owns(self, user_id: str, module_id: str) -> bool:
+        """Whether *user_id* has *module_id* installed.
+
+        Gate for the process-global event bus: a module subscribes once at
+        load time but must only fire for events belonging to users who
+        installed it. Failures fall closed (treat as not-owned) so a transient
+        DB error never leaks one tenant's event into another's module.
+        """
+        try:
+            sm = get_sessionmaker()
+            async with sm() as session:
+                return await user_owns_module(session, user_id, module_id)
+        except Exception:  # noqa: BLE001
+            log.exception("modules.ownership_check_failed", module_id=module_id)
+            return False
+
     async def _make_context(
         self,
         module_id: str,
         log_id: str,
+        user_id: str,
         *,
         progress: Any | None = None,
     ) -> ModuleContext:
@@ -820,28 +964,34 @@ class ModuleLoader:
         workdir = Path(tempfile.mkdtemp(prefix=f"ff-mod-{module_id}-"))
 
         cfg_json: dict[str, Any] = {}
+        owned_ids: set[str] = set()
         try:
             sm = get_sessionmaker()
             async with sm() as session:
-                row = await session.get(ModuleConfig, module_id)
+                row = await session.get(ModuleConfig, (user_id, module_id))
                 if row is not None and row.config_json:
                     cfg_json = dict(row.config_json)
+                # Modules this user has installed — scopes ctx.registry so
+                # cross-module RPC can only reach the user's own modules.
+                owned_ids = await user_module_ids(session, user_id)
         except Exception:
             cfg_json = {}
 
         return ModuleContext(
             log_id=log_id,
             module_id=module_id,
-            event_log=EventLogAccess(log_id) if log_id else _UnboundEventLog(),  # type: ignore[arg-type]
-            bus=_SdkBusAdapter(self.bus),  # type: ignore[arg-type]
-            registry=self.registry,
-            cache=ResultCache(log_id, module_id) if log_id else _UnboundCache(),  # type: ignore[arg-type]
+            user_id=user_id,
+            event_log=EventLogAccess(log_id, user_id) if log_id else _UnboundEventLog(),  # type: ignore[arg-type]
+            bus=_SdkBusAdapter(self.bus, user_id, log_id),  # type: ignore[arg-type]
+            registry=_UserScopedRegistry(self.registry, frozenset(owned_ids)),  # type: ignore[arg-type]
+            cache=ResultCache(log_id, module_id, user_id) if log_id else _UnboundCache(),  # type: ignore[arg-type]
             config=_ModuleConfigAdapter(cfg_json),
             progress=progress or _NoopProgress(),
             logger=_BusForwardingLogger(  # type: ignore[arg-type]
-                log.bind(module_id=module_id, log_id=log_id),
+                log.bind(module_id=module_id, log_id=log_id, user_id=user_id),
                 self.bus,
                 module_id,
+                user_id,
             ),
             workdir=workdir,
             run_in_process=self.runtime.run_in_process,  # type: ignore[arg-type]

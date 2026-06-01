@@ -47,9 +47,10 @@ class EventLogAccess:
     inherit them, the call raises a clear error.
     """
 
-    def __init__(self, log_id: str) -> None:
+    def __init__(self, log_id: str, user_id: str) -> None:
         self.log_id = log_id
-        self._paths = log_paths(log_id)
+        self.user_id = user_id
+        self._paths = log_paths(log_id, user_id)
         self._conn: duckdb.DuckDBPyConnection | None = None
 
     async def __aenter__(self) -> "EventLogAccess":

@@ -1,0 +1,34 @@
+# Flows & Funds — on-VM reverse proxy (production).
+#
+# The uni edge proxy forwards pm-mate.uni-muenster.de:80/443 to this VM's :443
+# as a single HTTPS pipe. This Caddy instance terminates that TLS with the
+# provided Let's Encrypt cert and fans the one origin out to the three
+# app containers by path. See DEPLOY.md for the full picture.
+
+{
+	# We ship our own cert and sit behind the uni proxy — no ACME.
+	auto_https off
+}
+
+# Bind by port (not hostname): the cert's name (pm-mate-vm) differs from the
+# public name (pm-mate), and we're behind another proxy, so match any SNI/Host.
+:443 {
+	tls /etc/letsencrypt/live/pm-mate-vm.uni-muenster.de/fullchain.pem /etc/letsencrypt/live/pm-mate-vm.uni-muenster.de/privkey.pem
+
+	# FastAPI backend — REST under /api/v1, plus WebSocket (live jobs/events)
+	# and SSE (Mate AI streaming). Caddy proxies both transparently.
+	@api path /api/v1/*
+	reverse_proxy @api api:8000
+
+	# Unauthenticated liveness probe (root-level /health on the API).
+	@health path /health
+	reverse_proxy @health api:8000
+
+	# Keycloak, served under the /auth relative path (KC_HTTP_RELATIVE_PATH).
+	@kc path /auth/*
+	reverse_proxy @kc keycloak:8080
+
+	# Everything else — the Next.js app, its static assets, and Auth.js
+	# routes at /api/auth/*.
+	reverse_proxy web:3000
+}

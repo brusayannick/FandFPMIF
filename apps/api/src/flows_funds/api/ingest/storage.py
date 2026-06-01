@@ -1,6 +1,6 @@
-"""On-disk layout for an imported event log (INSTRUCTIONS.md §3.2).
+"""On-disk layout for an imported event log (per-user; INSTRUCTIONS.md §3.2).
 
-    data/event_logs/{log_id}/
+    data/users/{user_id}/event_logs/{log_id}/
     ├── meta.json          # source format, ingest stats, detected schema, mapping
     ├── events.parquet     # flat event table, sorted by (case_id, timestamp)
     ├── cases.parquet      # cached case-level aggregates
@@ -51,8 +51,8 @@ class LogPaths:
             shutil.rmtree(self.root)
 
 
-def log_paths(log_id: str) -> LogPaths:
-    root = get_settings().event_logs_dir / log_id
+def log_paths(log_id: str, user_id: str) -> LogPaths:
+    root = get_settings().event_logs_dir_for(user_id) / log_id
     return LogPaths(
         root=root,
         meta=root / "meta.json",

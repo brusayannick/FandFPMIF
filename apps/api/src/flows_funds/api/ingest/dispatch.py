@@ -69,7 +69,7 @@ async def _import_handler(handle: JobHandle) -> None:
     csv_mapping_data: dict[str, Any] | None = payload.get("csv_mapping")
     xml_mapping_data: dict[str, Any] | None = payload.get("xml_mapping")
 
-    paths = log_paths(log_id)
+    paths = log_paths(log_id, handle.user_id)
     paths.ensure()
 
     log.info(
@@ -226,6 +226,7 @@ async def _import_handler(handle: JobHandle) -> None:
         "log.imported",
         {
             "log_id": log_id,
+            "user_id": handle.user_id,
             "events_count": meta["events_count"],
             "cases_count": meta["cases_count"],
             "detected_schema": detected_schema,

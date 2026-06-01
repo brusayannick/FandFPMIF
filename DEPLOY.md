@@ -1,0 +1,223 @@
+# Deploying Flows & Funds to the uni VM
+
+Production deployment to `pm-mate.uni-muenster.de`, fronted by the FB4 reverse
+proxy. For the local-`localhost` setup, see [`README.md`](./README.md) — this
+doc only covers the server.
+
+## How the two proxies fit together
+
+```
+        Internet
+           │  https://pm-mate.uni-muenster.de  (public cert on the uni proxy)
+           ▼
+   ┌──────────────────┐
+   │  uni edge proxy  │   forwards :80 and :443  ──►  the VM's :443
+   └──────────────────┘
+           │  HTTPS (one pipe, one port)
+           ▼
+   ┌────────────────────────────────────────────────────────┐
+   │  VM :443  →  proxy container (Caddy)                     │
+   │  terminates TLS with the pm-mate-vm Let's Encrypt cert   │
+   │  and routes by path:                                     │
+   │    /api/v1/*  + /health   →  api:8000                    │
+   │    /auth/*                →  keycloak:8080               │
+   │    everything else        →  web:3000  (incl. /api/auth) │
+   └────────────────────────────────────────────────────────┘
+```
+
+The uni edge proxy only knows "this hostname → that one port"; it can't split
+your three services. The **on-VM Caddy container does that split** and
+terminates TLS using the cert the uni dropped at
+`/etc/letsencrypt/live/pm-mate-vm.uni-muenster.de/`. The public cert
+(`pm-mate`) lives on the uni proxy; the VM cert (`pm-mate-vm`) just secures the
+proxy↔VM hop, which is why Caddy binds by port and ignores the hostname
+mismatch.
+
+Result: the browser talks to a **single same-origin** `https://pm-mate.uni-muenster.de`,
+so the per-port CORS and `/etc/hosts` Keycloak hacks from the local setup are gone.
+
+## Prerequisites
+
+- Access to the **FB4-DEV-VPN** (Cisco Secure Client → `https://vpn.uni-muenster.de/fb4-dev`, uni username + password + OTP).
+- SSH to the VM: `ssh -p 2222 pm-admin@pm-mate-vm.uni-muenster.de`.
+- Docker Engine + Compose v2 (≥ 2.24 for the `!reset`/`!override` merge tags) on the VM.
+- The cert files present at `/etc/letsencrypt/live/pm-mate-vm.uni-muenster.de/{fullchain,privkey}.pem` and readable by the Docker daemon (root) — they are, by default. Certbot auto-renews them; Caddy re-reads on restart.
+
+## Files this deployment adds
+
+| File | Purpose |
+| --- | --- |
+| [`docker-compose.prod.yml`](./docker-compose.prod.yml) | Prod overlay — adds the proxy, repoints URLs, drops public ports + the macOS cv4cdd mount. |
+| [`infra/caddy/Caddyfile`](./infra/caddy/Caddyfile) | TLS termination on `:443` + path routing. |
+| `.env` (you create it on the VM — see §4) | Rotated secrets + Keycloak admin creds. |
+
+## 0. Smoke-test the `:443` pipe first
+
+Before deploying the app, confirm the uni forwarding + cert chain work
+end-to-end. On the VM, serve a one-line page on `:443` with the real cert
+(this exercises the same `tls <cert> <key>` mechanism production uses):
+
+```bash
+cat > /tmp/hello.Caddyfile <<'EOF'
+{
+	auto_https off
+}
+:443 {
+	tls /etc/letsencrypt/live/pm-mate-vm.uni-muenster.de/fullchain.pem /etc/letsencrypt/live/pm-mate-vm.uni-muenster.de/privkey.pem
+	respond "hello from pm-mate"
+}
+EOF
+
+docker run --rm -p 443:443 \
+  -v /etc/letsencrypt:/etc/letsencrypt:ro \
+  -v /tmp/hello.Caddyfile:/etc/caddy/Caddyfile:ro \
+  caddy:2-alpine
+```
+
+From your laptop (outside the uni net): `curl https://pm-mate.uni-muenster.de`.
+Seeing `hello from pm-mate` means the pipe is good. `Ctrl-C` to stop, then
+proceed.
+
+## 1. Clone on the VM
+
+```bash
+ssh -p 2222 pm-admin@pm-mate-vm.uni-muenster.de
+git clone <repo-url> flows-funds && cd flows-funds
+```
+
+`docker-compose.prod.yml` and `infra/caddy/Caddyfile` come with the repo.
+
+## 2. Keycloak realm — allow the prod origin + rotate the secret
+
+The realm imports from `infra/keycloak/realm-export/flows-funds-realm.json`
+**only on the first boot** (empty Keycloak DB). Edit it before the first `up`
+so the new origin is allowed — add the prod entries alongside the localhost
+ones in the `flows-funds-web` client:
+
+- `redirectUris`: add `"https://pm-mate.uni-muenster.de/api/auth/callback/keycloak"`
+- `webOrigins`: add `"https://pm-mate.uni-muenster.de"`
+- `attributes."post.logout.redirect.uris"`: append `##https://pm-mate.uni-muenster.de/login##https://pm-mate.uni-muenster.de/`
+- `rootUrl` / `baseUrl`: set to `https://pm-mate.uni-muenster.de`
+- `secret`: replace `flows-funds-web-dev-secret` with a fresh value (`openssl rand -base64 32`) — use the **same** value for `KEYCLOAK_CLIENT_SECRET` in `.env` (§4).
+
+If the Keycloak DB already has the realm (a re-deploy), the import is skipped —
+make these edits in the admin console at
+`https://pm-mate.uni-muenster.de/auth/admin` instead (login = `KEYCLOAK_ADMIN` /
+`KEYCLOAK_ADMIN_PASSWORD`).
+
+## 3. cv4cdd model (optional)
+
+The base compose mounts a macOS-only path for the cv4cdd model; the prod
+overlay drops it. If you want cv4cdd on the VM, copy the model onto the host
+and add a mount under `api.volumes` in `docker-compose.prod.yml`:
+
+```yaml
+    volumes: !override
+      - ./data:/app/data
+      - ./modules:/app/modules
+      - /srv/flows-funds/cv4cdd_model:/srv/flows-funds/cv4cdd_model:ro
+```
+
+Then set its `model_path` under **Settings → Modules → Temporal Dynamics** to
+that absolute path. Otherwise just disable the cv4cdd module in the UI.
+
+## 4. Create `.env` (rotated secrets)
+
+```dotenv
+# Public origin / Auth.js
+AUTH_SECRET=<openssl rand -base64 32>
+
+# Keycloak (the web client's confidential secret — must equal the realm JSON)
+KEYCLOAK_CLIENT_SECRET=<same fresh secret as in the realm JSON>
+
+# Keycloak Postgres + admin console
+KEYCLOAK_DB_PASSWORD=<fresh>
+KEYCLOAK_ADMIN=admin
+KEYCLOAK_ADMIN_PASSWORD=<fresh — this is your admin console login>
+```
+
+The URL-derived, non-secret settings (issuer, JWKS, CORS, `NEXT_PUBLIC_API_URL`,
+`AUTH_URL`, Keycloak hostname/relative-path) are all set in
+`docker-compose.prod.yml`, so they don't belong in `.env`.
+
+## 5. Bring it up
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose logs -f api      # first boot installs module deps — up to ~10 min (cv4cdd pulls TensorFlow)
+```
+
+Subsequent boots reuse the cached wheels under `data/uv-python/` and start in
+seconds.
+
+## 6. Verify (in order — each step rules out one layer)
+
+```bash
+# 1. Next.js reachable through the proxy
+curl -I https://pm-mate.uni-muenster.de
+
+# 2. API reachable through the proxy (unauthenticated liveness)
+curl https://pm-mate.uni-muenster.de/health
+
+# 3. Keycloak issuer is the PUBLIC URL (not `keycloak`/localhost) — if this is
+#    wrong, the OIDC login loop breaks
+curl https://pm-mate.uni-muenster.de/auth/realms/flows-funds/.well-known/openid-configuration | grep '"issuer"'
+#    expect: "issuer":"https://pm-mate.uni-muenster.de/auth/realms/flows-funds"
+```
+
+Then in a browser:
+
+4. Log in with `admin@flows-funds.local` / `flowsfunds` (Keycloak forces a
+   password reset) — exercises the full OIDC redirect chain.
+5. **Upload a log, run a job, and open Mate AI.** This confirms WebSockets
+   (live job/event updates) and SSE (AI streaming) survive *both* proxies. If
+   live updates stall but everything else works, the uni proxy likely needs
+   WebSocket/streaming passthrough enabled for this alias — that's the first
+   thing to raise with FB4 IT.
+
+## Updating a running deployment
+
+### One-command deploy from your laptop (recommended)
+
+With the VM clone in place and `.env` set, push-to-deploy from your machine
+**while on the FB4-DEV-VPN**:
+
+```bash
+make deploy          # or: ./scripts/deploy.sh
+```
+
+This pushes the current branch, then over SSH does `git reset --hard origin/<branch>`,
+rebuilds, restarts, and health-checks `https://pm-mate.uni-muenster.de/health`.
+A cloud GitHub Action can't do this — GitHub's runners aren't on the VPN, so
+they can't reach the VM's SSH port. The deploy clone mirrors git; your secrets
+stay safe in the gitignored `.env` (untouched by the reset). Override the
+target with `DEPLOY_HOST` / `DEPLOY_DIR` / `DEPLOY_BRANCH` env vars if needed,
+and run `ssh-copy-id -p 2222 pm-admin@pm-mate-vm.uni-muenster.de` once to skip
+the password prompt.
+
+### Or manually on the VM
+
+```bash
+cd flows-funds && git pull
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+- Changing `NEXT_PUBLIC_API_URL` (or any `NEXT_PUBLIC_*`) requires `--build` — it's inlined into the client bundle.
+- After editing only `infra/caddy/Caddyfile`: `docker compose -f docker-compose.yml -f docker-compose.prod.yml restart proxy`.
+- The realm JSON is **not** re-imported once the Keycloak DB exists — change realm settings in the admin console, or `docker compose down -v` to wipe the Keycloak volume and re-import (this also drops all Keycloak users).
+
+## Backup
+
+`./data/` (SQLite metadata + Parquet logs + module results + cached runtimes)
+is bind-mounted — back it up by copying the directory. Keycloak users live in
+the `kc-data` Docker volume; include it if you need to preserve logins.
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+| --- | --- |
+| Every API call 401s after login | `KEYCLOAK_JWKS_URL` missing the `/auth` prefix, or `KEYCLOAK_ISSUER` ≠ the issuer Keycloak actually mints (check §6 step 3). |
+| Redirect loop / "invalid redirect_uri" at login | Prod `redirectUris`/`webOrigins` not added to the realm (§2), or realm imported before the edit. |
+| Login page styled wrong / 404 on `/auth/...` assets | `KC_HTTP_RELATIVE_PATH` and the Caddy `/auth/*` route out of sync. |
+| Live jobs/AI never update, page otherwise fine | WebSocket/SSE not passed through by the uni proxy (§6 step 5). |
+| `tls` cert errors on proxy start | Mounted only `live/` instead of all of `/etc/letsencrypt` — the symlinks into `archive/` break. |

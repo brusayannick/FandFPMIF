@@ -14,11 +14,13 @@ import {
   type LiveJob,
 } from "@/lib/stores/jobs";
 import { useCancelJob } from "@/lib/queries";
+import { useUi } from "@/lib/stores/ui";
 
 export function JobsDock() {
   const active = useJobsStore(useShallow(selectActiveJobs));
   const counts = useJobsStore(useShallow(selectCounts));
   const setOpen = useJobsStore((s) => s.setDrawerOpen);
+  const collapsed = useUi((s) => s.sidebarCollapsed);
   const [hover, setHover] = useState(false);
   const cancel = useCancelJob();
 
@@ -46,7 +48,10 @@ export function JobsDock() {
   return (
     <div
       className={cn(
-        "pointer-events-auto fixed bottom-4 left-4 z-40 max-w-md transition-all duration-150 ease-out",
+        // Offset past the sidebar so the dock floats over the content area and
+        // never overlaps the sidebar's footer controls (theme / jobs / profile).
+        "pointer-events-auto fixed bottom-4 z-40 max-w-md transition-all duration-150 ease-out",
+        collapsed ? "left-[4.5rem]" : "left-[15rem]",
         active.length > 0 ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0",
       )}
       onMouseEnter={() => setHover(true)}

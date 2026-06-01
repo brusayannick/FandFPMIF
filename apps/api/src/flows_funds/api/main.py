@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import sys
 from contextlib import asynccontextmanager
 
@@ -77,10 +78,29 @@ def _configure_logging(level: str) -> None:
     )
 
 
+def _purge_legacy_storage_once(settings) -> None:
+    """One-shot wipe of pre-multi-user on-disk layout.
+
+    The fresh-start migration in Alembic drops the rows for ``process_logs``
+    etc. but leaves the parquet directories behind. Without this, the next
+    boot would still have orphan ``data/event_logs/<id>/`` directories. We
+    write a sentinel after the wipe so subsequent boots skip the check.
+    """
+    sentinel = settings.data_dir / ".multi_user_migrated"
+    if sentinel.exists():
+        return
+    for legacy in (settings.data_dir / "event_logs", settings.data_dir / "module_results"):
+        if legacy.exists():
+            shutil.rmtree(legacy, ignore_errors=True)
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    sentinel.write_text("multi-user storage layout active\n")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.ensure_dirs()
+    _purge_legacy_storage_once(settings)
     _configure_logging(settings.log_level)
 
     bus = EventBus()
@@ -94,6 +114,7 @@ async def lifespan(app: FastAPI):
     registry = CapabilityRegistry()
     loader = ModuleLoader(
         modules_dir=settings.modules_dir.resolve(),
+        uploaded_modules_dir=settings.uploaded_modules_dir.resolve(),
         bus=bus,
         runtime=runtime,
         registry=registry,

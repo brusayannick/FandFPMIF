@@ -19,6 +19,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 
+from flows_funds.api.auth import CurrentUserDep
+from flows_funds.api.config import get_settings
 from flows_funds.api.db.models import (
     AnalyticsEvent,
     AnalyticsSession,
@@ -43,6 +45,9 @@ MAX_BATCH_BYTES = 256 * 1024
 # --------------------------------------------------------------------------
 
 
+OnboardingMode = Literal["force", "on", "off"]
+
+
 class AnalyticsConfigPayload(BaseModel):
     enabled: bool = False
     retention_days: int | None = None
@@ -51,6 +56,11 @@ class AnalyticsConfigPayload(BaseModel):
     capture_errors: bool = True
     opted_in_at: datetime | None = None
     anon_user_id_seed: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    # Read-only: surfaced from the USER_TRACKING_ONBOARDING env var so the
+    # frontend can pick the onboarding default and hide the privacy step/tab
+    # under `force`. Never persisted (excluded in ``_save_config``) and any
+    # client-supplied value on PUT is ignored (overwritten by ``_effective``).
+    onboarding_mode: OnboardingMode = "on"
 
 
 def _load_config(row: UserSetting | None) -> AnalyticsConfigPayload:
@@ -59,13 +69,33 @@ def _load_config(row: UserSetting | None) -> AnalyticsConfigPayload:
     return AnalyticsConfigPayload.model_validate(row.value_json)
 
 
+def _effective(cfg: AnalyticsConfigPayload) -> AnalyticsConfigPayload:
+    """Overlay the server tracking policy onto a stored/loaded config.
+
+    ``onboarding_mode`` always reflects ``USER_TRACKING_ONBOARDING`` rather
+    than anything the client stored. Under ``force`` tracking is enabled
+    unconditionally — the user cannot opt out, so the stored ``enabled`` flag
+    is irrelevant and we report (and gate ingestion on) ``True``.
+    """
+    mode = get_settings().user_tracking_onboarding
+    update: dict[str, Any] = {"onboarding_mode": mode}
+    if mode == "force":
+        update["enabled"] = True
+    return cfg.model_copy(update=update)
+
+
 async def _save_config(
-    session: SessionDep, cfg: AnalyticsConfigPayload
+    session: SessionDep, cfg: AnalyticsConfigPayload, user_id: str
 ) -> AnalyticsConfigPayload:
-    row = await session.get(UserSetting, ANALYTICS_CONFIG_KEY)
-    data = cfg.model_dump(mode="json")
+    row = await session.get(UserSetting, (user_id, ANALYTICS_CONFIG_KEY))
+    # ``onboarding_mode`` is server policy, not user state — never persist it.
+    data = cfg.model_dump(mode="json", exclude={"onboarding_mode"})
     if row is None:
-        session.add(UserSetting(key=ANALYTICS_CONFIG_KEY, value_json=data))
+        session.add(
+            UserSetting(
+                user_id=user_id, key=ANALYTICS_CONFIG_KEY, value_json=data
+            )
+        )
     else:
         row.value_json = data
     await session.commit()
@@ -73,24 +103,27 @@ async def _save_config(
 
 
 @router.get("/config", response_model=AnalyticsConfigPayload)
-async def get_config(session: SessionDep) -> AnalyticsConfigPayload:
-    row = await session.get(UserSetting, ANALYTICS_CONFIG_KEY)
+async def get_config(
+    session: SessionDep, user: CurrentUserDep
+) -> AnalyticsConfigPayload:
+    row = await session.get(UserSetting, (user.id, ANALYTICS_CONFIG_KEY))
     cfg = _load_config(row)
     # Persist the lazily-generated seed so the anon id is stable across calls.
     if row is None:
-        await _save_config(session, cfg)
-    return cfg
+        await _save_config(session, cfg, user.id)
+    return _effective(cfg)
 
 
 @router.put("/config", response_model=AnalyticsConfigPayload)
 async def put_config(
-    payload: AnalyticsConfigPayload, session: SessionDep
+    payload: AnalyticsConfigPayload, session: SessionDep, user: CurrentUserDep
 ) -> AnalyticsConfigPayload:
     if payload.enabled and payload.opted_in_at is None:
         payload = payload.model_copy(
             update={"opted_in_at": datetime.now(UTC).replace(tzinfo=None)}
         )
-    return await _save_config(session, payload)
+    saved = await _save_config(session, payload, user.id)
+    return _effective(saved)
 
 
 # --------------------------------------------------------------------------
@@ -128,15 +161,17 @@ class IngestPayload(BaseModel):
 
 
 @router.post("/sync", status_code=status.HTTP_202_ACCEPTED)
-async def ingest_events(request: Request, session: SessionDep) -> Response:
+async def ingest_events(
+    request: Request, session: SessionDep, user: CurrentUserDep
+) -> Response:
     """Append a batch of events.
 
     Accepts ``application/json`` and ``text/plain`` (so ``navigator.sendBeacon``
     works without triggering a CORS preflight). Rejects with 204 if analytics
     is disabled — this is the privacy safety net independent of the client.
     """
-    cfg_row = await session.get(UserSetting, ANALYTICS_CONFIG_KEY)
-    cfg = _load_config(cfg_row)
+    cfg_row = await session.get(UserSetting, (user.id, ANALYTICS_CONFIG_KEY))
+    cfg = _effective(_load_config(cfg_row))
     if not cfg.enabled:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -166,9 +201,13 @@ async def ingest_events(request: Request, session: SessionDep) -> Response:
     now = datetime.now(UTC).replace(tzinfo=None)
 
     sess_row = await session.get(AnalyticsSession, payload.session.id)
+    if sess_row is not None and sess_row.user_id != user.id:
+        # Another user's session id collision — refuse silently.
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     if sess_row is None:
         sess_row = AnalyticsSession(
             id=payload.session.id,
+            user_id=user.id,
             anon_user_id=payload.session.anon_user_id,
             started_at=_naive(payload.session.started_at),
             last_seen_at=now,
@@ -182,6 +221,7 @@ async def ingest_events(request: Request, session: SessionDep) -> Response:
 
     rows = [
         AnalyticsEvent(
+            user_id=user.id,
             session_id=payload.session.id,
             anon_user_id=payload.session.anon_user_id,
             event_type=e.event_type,
@@ -231,31 +271,53 @@ class AnalyticsSummary(BaseModel):
 
 
 @router.get("/summary", response_model=AnalyticsSummary)
-async def get_summary(session: SessionDep) -> AnalyticsSummary:
-    cfg_row = await session.get(UserSetting, ANALYTICS_CONFIG_KEY)
-    cfg = _load_config(cfg_row)
+async def get_summary(
+    session: SessionDep, user: CurrentUserDep
+) -> AnalyticsSummary:
+    cfg_row = await session.get(UserSetting, (user.id, ANALYTICS_CONFIG_KEY))
+    cfg = _effective(_load_config(cfg_row))
 
     total_events = (
-        await session.scalar(select(func.count()).select_from(AnalyticsEvent))
+        await session.scalar(
+            select(func.count())
+            .select_from(AnalyticsEvent)
+            .where(AnalyticsEvent.user_id == user.id)
+        )
     ) or 0
     total_sessions = (
-        await session.scalar(select(func.count()).select_from(AnalyticsSession))
+        await session.scalar(
+            select(func.count())
+            .select_from(AnalyticsSession)
+            .where(AnalyticsSession.user_id == user.id)
+        )
     ) or 0
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
     sessions_30d = (
         await session.scalar(
             select(func.count())
             .select_from(AnalyticsSession)
-            .where(AnalyticsSession.last_seen_at >= cutoff)
+            .where(
+                AnalyticsSession.user_id == user.id,
+                AnalyticsSession.last_seen_at >= cutoff,
+            )
         )
     ) or 0
 
-    oldest = await session.scalar(select(func.min(AnalyticsEvent.occurred_at)))
-    newest = await session.scalar(select(func.max(AnalyticsEvent.occurred_at)))
+    oldest = await session.scalar(
+        select(func.min(AnalyticsEvent.occurred_at)).where(
+            AnalyticsEvent.user_id == user.id
+        )
+    )
+    newest = await session.scalar(
+        select(func.max(AnalyticsEvent.occurred_at)).where(
+            AnalyticsEvent.user_id == user.id
+        )
+    )
 
     by_type_rows = (
         await session.execute(
             select(AnalyticsEvent.event_type, func.count())
+            .where(AnalyticsEvent.user_id == user.id)
             .group_by(AnalyticsEvent.event_type)
             .order_by(func.count().desc())
         )
@@ -279,20 +341,34 @@ class WipeResponse(BaseModel):
 
 
 @router.delete("/sync", response_model=WipeResponse)
-async def wipe_events(session: SessionDep) -> WipeResponse:
+async def wipe_events(
+    session: SessionDep, user: CurrentUserDep
+) -> WipeResponse:
     events_deleted = (
-        await session.scalar(select(func.count()).select_from(AnalyticsEvent))
+        await session.scalar(
+            select(func.count())
+            .select_from(AnalyticsEvent)
+            .where(AnalyticsEvent.user_id == user.id)
+        )
     ) or 0
     sessions_deleted = (
-        await session.scalar(select(func.count()).select_from(AnalyticsSession))
+        await session.scalar(
+            select(func.count())
+            .select_from(AnalyticsSession)
+            .where(AnalyticsSession.user_id == user.id)
+        )
     ) or 0
-    await session.execute(delete(AnalyticsEvent))
-    await session.execute(delete(AnalyticsSession))
+    await session.execute(
+        delete(AnalyticsEvent).where(AnalyticsEvent.user_id == user.id)
+    )
+    await session.execute(
+        delete(AnalyticsSession).where(AnalyticsSession.user_id == user.id)
+    )
 
-    cfg_row = await session.get(UserSetting, ANALYTICS_CONFIG_KEY)
+    cfg_row = await session.get(UserSetting, (user.id, ANALYTICS_CONFIG_KEY))
     cfg = _load_config(cfg_row)
     cfg = cfg.model_copy(update={"anon_user_id_seed": str(uuid.uuid4())})
-    await _save_config(session, cfg)
+    await _save_config(session, cfg, user.id)
 
     return WipeResponse(
         deleted_events=int(events_deleted),
@@ -302,11 +378,15 @@ async def wipe_events(session: SessionDep) -> WipeResponse:
 
 
 @router.get("/export")
-async def export_events(session: SessionDep) -> StreamingResponse:
+async def export_events(
+    session: SessionDep, user: CurrentUserDep
+) -> StreamingResponse:
     """NDJSON dump of every event row, oldest first."""
     rows = (
         await session.execute(
-            select(AnalyticsEvent).order_by(AnalyticsEvent.occurred_at.asc())
+            select(AnalyticsEvent)
+            .where(AnalyticsEvent.user_id == user.id)
+            .order_by(AnalyticsEvent.occurred_at.asc())
         )
     ).scalars().all()
 
@@ -351,23 +431,35 @@ async def export_events(session: SessionDep) -> StreamingResponse:
 
 
 async def prune_expired(session: SessionDep) -> int:
-    """Delete events + sessions older than the configured retention window.
+    """Delete events + sessions older than each user's configured retention.
 
-    Returns the number of event rows removed. Called from the daily sweeper
-    task in ``main.py``; safe to invoke ad-hoc from tests too.
+    Returns the number of event rows removed across all users. Called from the
+    daily sweeper task in ``main.py``; safe to invoke ad-hoc from tests too.
     """
-    cfg_row = await session.get(UserSetting, ANALYTICS_CONFIG_KEY)
-    cfg = _load_config(cfg_row)
-    if not cfg.retention_days or cfg.retention_days <= 0:
-        return 0
-    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(
-        days=cfg.retention_days
-    )
-    result = await session.execute(
-        delete(AnalyticsEvent).where(AnalyticsEvent.occurred_at < cutoff)
-    )
-    await session.execute(
-        delete(AnalyticsSession).where(AnalyticsSession.last_seen_at < cutoff)
-    )
+    cfg_rows = (
+        await session.execute(
+            select(UserSetting).where(UserSetting.key == ANALYTICS_CONFIG_KEY)
+        )
+    ).scalars().all()
+    total_removed = 0
+    now = datetime.now(UTC).replace(tzinfo=None)
+    for cfg_row in cfg_rows:
+        cfg = _load_config(cfg_row)
+        if not cfg.retention_days or cfg.retention_days <= 0:
+            continue
+        cutoff = now - timedelta(days=cfg.retention_days)
+        result = await session.execute(
+            delete(AnalyticsEvent).where(
+                AnalyticsEvent.user_id == cfg_row.user_id,
+                AnalyticsEvent.occurred_at < cutoff,
+            )
+        )
+        await session.execute(
+            delete(AnalyticsSession).where(
+                AnalyticsSession.user_id == cfg_row.user_id,
+                AnalyticsSession.last_seen_at < cutoff,
+            )
+        )
+        total_removed += int(result.rowcount or 0)
     await session.commit()
-    return int(result.rowcount or 0)
+    return total_removed

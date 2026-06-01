@@ -44,8 +44,8 @@ export default function ImportModulePage() {
       <header className="space-y-1">
         <h2 className="text-lg font-semibold">Install a module</h2>
         <p className="text-sm text-muted-foreground">
-          Pick a source. The platform unpacks the module under <code className="rounded bg-muted px-1 text-[11px]">modules/&lt;id&gt;/</code>,
-          resolves dependencies, and registers it without a restart.
+          Pick a source. The platform unpacks the module, resolves its
+          dependencies, and registers it without a restart.
         </p>
       </header>
 

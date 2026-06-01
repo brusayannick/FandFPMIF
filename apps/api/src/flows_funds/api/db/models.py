@@ -30,6 +30,26 @@ class Base(DeclarativeBase):
     type_annotation_map = {dict[str, Any]: JSON}
 
 
+class User(Base):
+    """Local mirror of Keycloak users.
+
+    Populated JIT on the first authenticated request from a new `sub`. The
+    `id` column is the Keycloak `sub` claim (UUID) and the FK target for
+    every per-user table below.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    email: Mapped[str | None] = mapped_column(String(320))
+    preferred_username: Mapped[str | None] = mapped_column(String(255))
+    name: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class Folder(Base):
     """Hierarchical folder for organising event logs on /processes.
 
@@ -40,6 +60,9 @@ class Folder(Base):
     __tablename__ = "process_folders"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     parent_id: Mapped[str | None] = mapped_column(
         String(36),
@@ -50,7 +73,7 @@ class Folder(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     __table_args__ = (
-        Index("ix_process_folders_parent_id", "parent_id"),
+        Index("ix_process_folders_user_parent", "user_id", "parent_id"),
     )
 
 
@@ -62,6 +85,9 @@ class EventLog(Base):
     __tablename__ = "process_logs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
 
     source_format: Mapped[str | None] = mapped_column(String(32))
@@ -93,9 +119,9 @@ class EventLog(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     __table_args__ = (
-        Index("ix_process_logs_status", "status"),
-        Index("ix_process_logs_created_at", "created_at"),
-        Index("ix_process_logs_folder_id", "folder_id"),
+        Index("ix_process_logs_user_status", "user_id", "status"),
+        Index("ix_process_logs_user_created_at", "user_id", "created_at"),
+        Index("ix_process_logs_user_folder_id", "user_id", "folder_id"),
     )
 
 
@@ -109,6 +135,9 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     type: Mapped[str] = mapped_column(String(64), nullable=False)
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -136,18 +165,21 @@ class Job(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     __table_args__ = (
-        Index("ix_jobs_status", "status"),
-        Index("ix_jobs_type", "type"),
-        Index("ix_jobs_module_id", "module_id"),
-        Index("ix_jobs_created_at", "created_at"),
+        Index("ix_jobs_user_status", "user_id", "status"),
+        Index("ix_jobs_user_type", "user_id", "type"),
+        Index("ix_jobs_user_module", "user_id", "module_id"),
+        Index("ix_jobs_user_created_at", "user_id", "created_at"),
     )
 
 
 class ModuleConfig(Base):
-    """Per-module user configuration — populated by phase 5 / Settings → Modules."""
+    """Per-module per-user configuration — populated by Settings → Modules."""
 
     __tablename__ = "module_configs"
 
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
     module_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
@@ -156,12 +188,38 @@ class ModuleConfig(Base):
     )
 
 
+class ModuleInstall(Base):
+    """Per-user record of which modules a user has installed / made available.
+
+    Module *code* lives once on shared disk (``modules/<id>/``) and is loaded
+    once into the process — true per-user code isolation is out of scope. This
+    table reference-counts *ownership* so listing, availability, and deletion
+    are per-user: a user only sees and can manage modules they installed, and
+    the on-disk artifact is removed only when its last owner uninstalls it.
+    """
+
+    __tablename__ = "module_installs"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    module_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source: Mapped[str | None] = mapped_column(String(16))
+    installed_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, nullable=False
+    )
+
+    __table_args__ = (Index("ix_module_installs_module_id", "module_id"),)
+
+
 class ModuleLayout(Base):
     """Per-user, per-(log, module) widget layout."""
 
     __tablename__ = "module_layouts"
 
-    user_id: Mapped[str] = mapped_column(String(64), primary_key=True, default="local")
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
     log_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("process_logs.id", ondelete="CASCADE"),
@@ -175,10 +233,13 @@ class ModuleLayout(Base):
 
 
 class UserSetting(Base):
-    """Free-form key/value settings (Settings → General)."""
+    """Free-form per-user key/value settings (Settings → General, AI, Privacy)."""
 
     __tablename__ = "user_settings"
 
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
     value_json: Mapped[dict[str, Any] | list[Any] | str | int | float | bool | None] = (
         mapped_column(JSON)
@@ -198,6 +259,9 @@ class EventEdit(Base):
     __tablename__ = "event_edits"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     log_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("process_logs.id", ondelete="CASCADE"),
@@ -210,7 +274,7 @@ class EventEdit(Base):
     edited_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     __table_args__ = (
-        Index("ix_event_edits_log_id_edited_at", "log_id", "edited_at"),
+        Index("ix_event_edits_user_log_edited_at", "user_id", "log_id", "edited_at"),
     )
 
 
@@ -224,6 +288,9 @@ class AnalyticsSession(Base):
     __tablename__ = "analytics_sessions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     anon_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -231,8 +298,8 @@ class AnalyticsSession(Base):
     event_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     __table_args__ = (
-        Index("ix_analytics_sessions_anon_user_id", "anon_user_id"),
-        Index("ix_analytics_sessions_last_seen_at", "last_seen_at"),
+        Index("ix_analytics_sessions_user_anon", "user_id", "anon_user_id"),
+        Index("ix_analytics_sessions_user_last_seen", "user_id", "last_seen_at"),
     )
 
 
@@ -248,6 +315,9 @@ class AnalyticsEvent(Base):
     __tablename__ = "analytics_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     session_id: Mapped[str] = mapped_column(String(36), nullable=False)
     anon_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
     event_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -266,7 +336,7 @@ class AnalyticsEvent(Base):
     )
 
     __table_args__ = (
-        Index("ix_analytics_events_session", "session_id", "occurred_at"),
-        Index("ix_analytics_events_type_name", "event_type", "event_name"),
-        Index("ix_analytics_events_occurred", "occurred_at"),
+        Index("ix_analytics_events_user_session", "user_id", "session_id", "occurred_at"),
+        Index("ix_analytics_events_user_type_name", "user_id", "event_type", "event_name"),
+        Index("ix_analytics_events_user_occurred", "user_id", "occurred_at"),
     )

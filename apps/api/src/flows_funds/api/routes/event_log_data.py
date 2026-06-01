@@ -16,6 +16,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import desc, func, select
 
+from flows_funds.api.auth import CurrentUserDep, get_owned_event_log
 from flows_funds.api.db.models import EventEdit, EventLog
 from flows_funds.api.db.session import SessionDep
 from flows_funds.api.modules.event_editing import apply_bulk_fill, apply_cell_edit
@@ -52,10 +53,10 @@ _VARIANT_SORTS = {"case_count", "avg_duration_seconds", "last_seen", "first_seen
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-async def _require_ready(log_id: str, session: SessionDep) -> EventLog:
-    row = await session.get(EventLog, log_id)
-    if row is None or row.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="Event log not found.")
+async def _require_ready(
+    log_id: str, session: SessionDep, user_id: str
+) -> EventLog:
+    row = await get_owned_event_log(session, log_id, user_id)
     if row.status != "ready":
         raise HTTPException(
             status_code=409,
@@ -202,6 +203,7 @@ async def _events_header(access: EventLogAccess, log_row: EventLog) -> EventsHea
 async def list_events(
     log_id: str,
     session: SessionDep,
+    user: CurrentUserDep,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     sort: Annotated[str | None, Query()] = None,
@@ -210,10 +212,10 @@ async def list_events(
     missing_only: Annotated[bool, Query()] = False,
     case_id: Annotated[str | None, Query()] = None,
 ) -> EventsPage:
-    log_row = await _require_ready(log_id, session)
+    log_row = await _require_ready(log_id, session, user.id)
     overrides = log_row.column_overrides if isinstance(log_row.column_overrides, dict) else None
 
-    async with EventLogAccess(log_id) as access:
+    async with EventLogAccess(log_id, user.id) as access:
         specs = await access.column_specs(overrides)
         col_names = {s.name for s in specs}
         required = [s.name for s in specs if s.required]
@@ -254,15 +256,18 @@ async def patch_event(
     row_index: int,
     payload: CellPatch,
     session: SessionDep,
+    user: CurrentUserDep,
 ) -> CellPatchResult:
-    log_row = await _require_ready(log_id, session)
+    log_row = await _require_ready(log_id, session, user.id)
     overrides = log_row.column_overrides if isinstance(log_row.column_overrides, dict) else None
 
-    async with EventLogAccess(log_id) as access:
+    async with EventLogAccess(log_id, user.id) as access:
         specs = await access.column_specs(overrides)
 
     try:
-        outcome = await apply_cell_edit(log_id, row_index, payload.field, payload.value, specs, session)
+        outcome = await apply_cell_edit(
+            log_id, row_index, payload.field, payload.value, specs, session, user.id
+        )
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except IndexError as exc:
@@ -281,16 +286,17 @@ async def bulk_fill_events(
     log_id: str,
     payload: BulkFillBody,
     session: SessionDep,
+    user: CurrentUserDep,
 ) -> BulkFillResult:
-    log_row = await _require_ready(log_id, session)
+    log_row = await _require_ready(log_id, session, user.id)
     overrides = log_row.column_overrides if isinstance(log_row.column_overrides, dict) else None
 
-    async with EventLogAccess(log_id) as access:
+    async with EventLogAccess(log_id, user.id) as access:
         specs = await access.column_specs(overrides)
 
     try:
         outcome = await apply_bulk_fill(
-            log_id, payload.row_indices, payload.field, payload.value, specs, session
+            log_id, payload.row_indices, payload.field, payload.value, specs, session, user.id
         )
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -307,15 +313,17 @@ async def bulk_fill_events(
 async def list_variants(
     log_id: str,
     session: SessionDep,
+    user: CurrentUserDep,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     sort: Annotated[str, Query()] = "case_count:desc",
     activity_contains: Annotated[str | None, Query()] = None,
     min_case_count: Annotated[int | None, Query(ge=1)] = None,
 ) -> VariantsPage:
-    log_row = await _require_ready(log_id, session)
+    log_row = await _require_ready(log_id, session, user.id)
     rows, total = await _variant_rows(
         log_id,
+        user.id,
         offset=offset,
         limit=limit,
         sort=sort,
@@ -328,6 +336,7 @@ async def list_variants(
 
 async def _variant_rows(
     log_id: str,
+    user_id: str,
     *,
     offset: int,
     limit: int,
@@ -381,7 +390,7 @@ async def _variant_rows(
         {("WHERE " + " AND ".join(extra_where)) if extra_where else ""}
         ORDER BY {sort_col} {direction.upper()}
     """
-    rows = await _duckdb_fetch_all(log_id, sql, extra_params)
+    rows = await _duckdb_fetch_all(log_id, user_id, sql, extra_params)
     total = len(rows)
     page = rows[offset : offset + limit]
 
@@ -408,8 +417,10 @@ async def _variant_rows(
     return out, total
 
 
-async def _duckdb_fetch_all(log_id: str, sql: str, params: list[Any]) -> list[tuple]:
-    async with EventLogAccess(log_id) as access:
+async def _duckdb_fetch_all(
+    log_id: str, user_id: str, sql: str, params: list[Any]
+) -> list[tuple]:
+    async with EventLogAccess(log_id, user_id) as access:
         return await access.duckdb_fetch(sql, params)
 
 
@@ -418,13 +429,15 @@ async def get_variant(
     log_id: str,
     variant_id: str,
     session: SessionDep,
+    user: CurrentUserDep,
 ) -> VariantDetail:
-    log_row = await _require_ready(log_id, session)
+    log_row = await _require_ready(log_id, session, user.id)
     total_cases = int(log_row.cases_count or 0)
 
     # Pull all variants ordered by case_count desc to determine rank + activities.
     rows, _ = await _variant_rows(
         log_id,
+        user.id,
         offset=0,
         limit=10**9,
         sort="case_count:desc",
@@ -437,7 +450,7 @@ async def get_variant(
         raise HTTPException(status_code=404, detail="Variant not found.")
 
     # Histogram + p90 + per-attribute breakdowns from the same DuckDB conn.
-    async with EventLogAccess(log_id) as access:
+    async with EventLogAccess(log_id, user.id) as access:
         # Compute case durations for this variant.
         sep = "→"
         durations_sql = f"""
@@ -538,11 +551,12 @@ async def list_variant_cases(
     log_id: str,
     variant_id: str,
     session: SessionDep,
+    user: CurrentUserDep,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> VariantCasesPage:
-    await _require_ready(log_id, session)
-    async with EventLogAccess(log_id) as access:
+    await _require_ready(log_id, session, user.id)
+    async with EventLogAccess(log_id, user.id) as access:
         # Rebuild the variant's activity sequence on the fly so we can match cases.
         # The variant_id alone isn't enough since it's a hash — but we have the
         # cases.parquet which already stores variant_id per case (computed at
@@ -588,10 +602,12 @@ async def list_variant_cases(
 
 
 @router.get("/data-quality", response_model=DataQuality)
-async def get_data_quality(log_id: str, session: SessionDep) -> DataQuality:
-    log_row = await _require_ready(log_id, session)
+async def get_data_quality(
+    log_id: str, session: SessionDep, user: CurrentUserDep
+) -> DataQuality:
+    log_row = await _require_ready(log_id, session, user.id)
     overrides = log_row.column_overrides if isinstance(log_row.column_overrides, dict) else None
-    async with EventLogAccess(log_id) as access:
+    async with EventLogAccess(log_id, user.id) as access:
         specs = await access.column_specs(overrides)
         return await access.data_quality(specs)
 
@@ -600,19 +616,22 @@ async def get_data_quality(log_id: str, session: SessionDep) -> DataQuality:
 async def list_edits(
     log_id: str,
     session: SessionDep,
+    user: CurrentUserDep,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> EventEditsPage:
-    await _require_ready(log_id, session)
+    await _require_ready(log_id, session, user.id)
     total = (
         await session.execute(
-            select(func.count()).select_from(EventEdit).where(EventEdit.log_id == log_id)
+            select(func.count())
+            .select_from(EventEdit)
+            .where(EventEdit.user_id == user.id, EventEdit.log_id == log_id)
         )
     ).scalar_one()
     rows = (
         await session.execute(
             select(EventEdit)
-            .where(EventEdit.log_id == log_id)
+            .where(EventEdit.user_id == user.id, EventEdit.log_id == log_id)
             .order_by(desc(EventEdit.edited_at))
             .offset(offset)
             .limit(limit)
@@ -630,7 +649,9 @@ async def list_edits(
 
 
 @router.get("/activities", response_model=ActivitiesPage)
-async def list_activities(log_id: str, session: SessionDep) -> ActivitiesPage:
+async def list_activities(
+    log_id: str, session: SessionDep, user: CurrentUserDep
+) -> ActivitiesPage:
     """Unique activities + per-activity event count, ordered by frequency.
 
     The display-name overrides users set in the Activities tab live in
@@ -638,8 +659,8 @@ async def list_activities(log_id: str, session: SessionDep) -> ActivitiesPage:
     this endpoint always returns raw activity names so analytics modules
     keep operating on the canonical values.
     """
-    await _require_ready(log_id, session)
-    async with EventLogAccess(log_id) as access:
+    await _require_ready(log_id, session, user.id)
+    async with EventLogAccess(log_id, user.id) as access:
         rows = await access.duckdb_fetch(
             "SELECT activity, COUNT(*) AS n FROM events GROUP BY activity ORDER BY n DESC, activity ASC"
         )

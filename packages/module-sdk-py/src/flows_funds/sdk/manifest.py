@@ -107,7 +107,7 @@ class AiModelsManifest(BaseModel):
 class Manifest(BaseModel):
     """The top-level manifest object — `manifest.yaml`."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     id: str
     name: str
@@ -124,6 +124,13 @@ class Manifest(BaseModel):
     frontend: ManifestFrontend = Field(default_factory=ManifestFrontend)
     permissions: list[str] = Field(default_factory=list)
     default_enabled: bool = True
+    # Whether the module is safe to run against confidential data — i.e. it
+    # processes the event log entirely locally and never ships data to an
+    # external service. When the user enables "Show only confidential modules"
+    # in platform settings, modules with this set to `false` are hidden.
+    # Defaults to `false` so a module is only treated as safe when it
+    # explicitly opts in.
+    is_confidential_safe: bool = Field(default=False, alias="isConfidentialSafe")
     # JSON-Schema-flavoured dict so module authors write it in YAML. The
     # platform passes it through to the frontend as-is (`/config-schema`);
     # form-rendering and validation are the frontend's responsibility.

@@ -65,6 +65,9 @@ jq --arg s "$CLIENT_SECRET" --arg u "$PUBLIC_URL" '
           | map(select(length > 0)) | unique | join("##"))
   )
 ' "$REALM" > "$tmp" && mv "$tmp" "$REALM"
+# mktemp creates the file 0600; the Keycloak container (uid 1000) must be able
+# to read the bind-mounted realm, so make it world-readable.
+chmod 644 "$REALM"
 echo "• Realm gepatcht für $PUBLIC_URL (redirect URI, web origin, secret synchron mit .env)."
 
 echo

@@ -69,9 +69,14 @@ services:
       # https://pm-mate.uni-muenster.de/auth/realms/flows-funds.
       KC_HOSTNAME: https://pm-mate.uni-muenster.de
       KC_HTTP_RELATIVE_PATH: /auth
-      # Ignored once KC_HOSTNAME is a full URL; cleared so the base's "8080"
-      # doesn't leak into generated URLs.
-      KC_HOSTNAME_PORT: ""
+      # Keep the management endpoints (port 9000: /health, /metrics) at root so
+      # the base healthcheck's `/health/ready` keeps working — otherwise the
+      # /auth relative path would move them and Keycloak would read as unhealthy.
+      KC_HTTP_MANAGEMENT_RELATIVE_PATH: /
+      # A full-URL KC_HOSTNAME carries its own scheme/port, so hostname-port
+      # must NOT be set (Keycloak rejects an empty/conflicting value and exits).
+      # Drop the base file's "8080" entirely from the merged config.
+      KC_HOSTNAME_PORT: !reset null
     ports: !reset []
 
 volumes:

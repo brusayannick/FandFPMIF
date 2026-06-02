@@ -10,7 +10,10 @@ FROM quay.io/keycloak/keycloak:26.0 AS upstream
 
 FROM eclipse-temurin:21-jdk-jammy
 COPY --from=upstream /opt/keycloak /opt/keycloak
-RUN groupadd -g 1000 keycloak \
+# The compose healthcheck uses bash's /dev/tcp; on Ubuntu /bin/sh is dash
+# (no /dev/tcp), so point sh at bash like the upstream UBI9 image does.
+RUN ln -sf /bin/bash /bin/sh \
+ && groupadd -g 1000 keycloak \
  && useradd -u 1000 -g 1000 -m keycloak \
  && chown -R 1000:0 /opt/keycloak \
  && chmod -R g+rwX /opt/keycloak

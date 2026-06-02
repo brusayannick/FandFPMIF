@@ -64,6 +64,14 @@ services:
     ports: !reset []
 
   keycloak:
+    # Debian-based rebuild of the same Keycloak 26.0 — runs on CPUs without
+    # x86-64-v2 (the official UBI9 image fatally aborts there). See
+    # infra/keycloak/Dockerfile. Remove this block once the VM's CPU model
+    # exposes x86-64-v2 (host-passthrough) to go back to the upstream image.
+    image: flowsfunds-keycloak:26-debian
+    build:
+      context: .
+      dockerfile: infra/keycloak/Dockerfile
     environment:
       # Full public URL → issuer becomes
       # https://pm-mate.uni-muenster.de/auth/realms/flows-funds.

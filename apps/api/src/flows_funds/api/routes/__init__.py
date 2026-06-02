@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from flows_funds.api.routes.admin import router as admin_router
 from flows_funds.api.routes.ai import router as ai_router
 from flows_funds.api.routes.ai_guidance import router as ai_guidance_router
 from flows_funds.api.routes.analytics import router as analytics_router
@@ -14,6 +15,7 @@ from flows_funds.api.routes.preferences import router as preferences_router
 from flows_funds.api.routes.system import router as system_router
 
 v1 = APIRouter(prefix="/api/v1")
+v1.include_router(admin_router)
 v1.include_router(event_logs_router)
 v1.include_router(event_log_data_router)
 v1.include_router(folders_router)

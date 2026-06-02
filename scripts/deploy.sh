@@ -24,7 +24,7 @@ set -euo pipefail
 SSH_HOST="${DEPLOY_HOST:-pm-mate-vm.uni-muenster.de}"
 SSH_PORT="${DEPLOY_PORT:-2222}"
 SSH_USER="${DEPLOY_USER:-pm-admin}"
-REMOTE_DIR="${DEPLOY_DIR:-~/flows-funds}"
+REMOTE_DIR="${DEPLOY_DIR:-~/mate}"
 BRANCH="${DEPLOY_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 PUBLIC_URL="${DEPLOY_PUBLIC_URL:-https://pm-mate.uni-muenster.de}"
 

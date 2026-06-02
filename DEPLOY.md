@@ -82,28 +82,58 @@ proceed.
 
 ```bash
 ssh -p 2222 pm-admin@pm-mate-vm.uni-muenster.de
-git clone <repo-url> flows-funds && cd flows-funds
+git clone <repo-url> ~/mate && cd ~/mate
 ```
 
 `docker-compose.prod.yml` and `infra/caddy/Caddyfile` come with the repo.
+(`~/mate` is the path `scripts/deploy.sh` expects — override with `DEPLOY_DIR`
+if you clone elsewhere.)
 
-## 2. Keycloak realm — allow the prod origin + rotate the secret
+## 2. Secrets + realm — one command
+
+`infra/bootstrap-vm.sh` does the two fiddly bits in one go (covers §4 too):
+
+```bash
+sudo apt install -y jq        # the script needs jq
+./infra/bootstrap-vm.sh
+```
+
+It (1) generates `.env` with fresh secrets, (2) patches the realm so the prod
+domain is allowed and the client secret matches `.env`, and (3) starts the
+stack (`docker compose … up -d --build`) after a free-port check — so it
+covers §4 and §5 too. Pass `--no-start` to only write config. It's idempotent
+and prints the Keycloak admin login at the end. Then jump to §6 (verify).
+
+### Why this is needed / what it touches
+
+Two things must line up or login fails:
+
+- **Client secret** — the web app authenticates to Keycloak with a shared
+  secret. It lives in **both** `.env` (`KEYCLOAK_CLIENT_SECRET`) and the realm
+  JSON (`secret`); they must be **identical**. The script generates one value
+  and writes it to both.
+- **Redirect URI / web origin** — Keycloak only redirects back to URLs that are
+  pre-approved. The default is `localhost:3000`; the script adds
+  `https://pm-mate.uni-muenster.de` (keeping localhost, so local dev still
+  works). Without it: "Invalid redirect_uri".
 
 The realm imports from `infra/keycloak/realm-export/flows-funds-realm.json`
-**only on the first boot** (empty Keycloak DB). Edit it before the first `up`
-so the new origin is allowed — add the prod entries alongside the localhost
-ones in the `flows-funds-web` client:
+**only on the first boot** (empty Keycloak DB). On a re-deploy the import is
+skipped — change realm settings in the admin console at
+`https://pm-mate.uni-muenster.de/auth/admin` (login = `KEYCLOAK_ADMIN` /
+`KEYCLOAK_ADMIN_PASSWORD`) instead.
+
+<details>
+<summary>Manual alternative (no script)</summary>
+
+In the `flows-funds-web` client of the realm JSON, before first boot:
 
 - `redirectUris`: add `"https://pm-mate.uni-muenster.de/api/auth/callback/keycloak"`
 - `webOrigins`: add `"https://pm-mate.uni-muenster.de"`
 - `attributes."post.logout.redirect.uris"`: append `##https://pm-mate.uni-muenster.de/login##https://pm-mate.uni-muenster.de/`
 - `rootUrl` / `baseUrl`: set to `https://pm-mate.uni-muenster.de`
-- `secret`: replace `flows-funds-web-dev-secret` with a fresh value (`openssl rand -base64 32`) — use the **same** value for `KEYCLOAK_CLIENT_SECRET` in `.env` (§4).
-
-If the Keycloak DB already has the realm (a re-deploy), the import is skipped —
-make these edits in the admin console at
-`https://pm-mate.uni-muenster.de/auth/admin` instead (login = `KEYCLOAK_ADMIN` /
-`KEYCLOAK_ADMIN_PASSWORD`).
+- `secret`: replace with a fresh value and use the **same** one for `KEYCLOAK_CLIENT_SECRET` in `.env` (§4).
+</details>
 
 ## 3. cv4cdd model (optional)
 

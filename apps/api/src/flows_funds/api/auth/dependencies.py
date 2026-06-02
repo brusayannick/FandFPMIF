@@ -167,5 +167,26 @@ async def get_current_user(
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 
 
+# Realm role that gates cross-user/admin operations (e.g. the full-database
+# export). Assign it to an account in the Keycloak admin console under
+# Realm roles → admin → Users in role.
+ADMIN_ROLE = "admin"
+
+
+async def require_admin(user: CurrentUserDep) -> CurrentUser:
+    """Like ``CurrentUserDep`` but additionally requires the ``admin`` realm
+    role. Used by endpoints that read across *all* users' data.
+    """
+    if ADMIN_ROLE not in user.roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin role required",
+        )
+    return user
+
+
+AdminUserDep = Annotated[CurrentUser, Depends(require_admin)]
+
+
 def reset_user_cache_for_tests() -> None:  # pragma: no cover - test helper
     _seen_user_ids.clear()

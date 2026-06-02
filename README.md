@@ -139,6 +139,16 @@ Login is mandatory. The web app gates everything behind a Keycloak OIDC flow
 side). Sessions are JWT-only — no extra DB tables on the Auth.js side, and
 no Postgres for the app itself; only Keycloak uses Postgres.
 
+### Admin data export
+
+Visit **`/admin/export`** to download a consistent snapshot of the entire
+metadata database (every user's accounts, usage analytics, process metadata,
+and settings) as a single SQLite `.db` file. The download requires the Keycloak
+realm role **`admin`** — assign it in the Keycloak admin console under *Realm
+roles → admin → Users in role*. Users without the role see an explanatory
+message instead of the button. The file contains all users' data, so treat the
+download as sensitive.
+
 User data isolation:
 
 - Every event log / job / AI key is keyed by the Keycloak `sub` claim.

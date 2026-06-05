@@ -18,13 +18,18 @@ import {
 } from "@/components/ui/breadcrumb";
 import { CommandPalette } from "@/components/cmdk";
 import { useEventLogs } from "@/lib/queries";
+import { useDashboards } from "@/lib/dashboard-queries";
 
 function isMac() {
   if (typeof navigator === "undefined") return false;
   return /Mac|iPhone|iPad/.test(navigator.platform);
 }
 
-function deriveCrumbs(pathname: string, logNames?: Map<string, string>) {
+function deriveCrumbs(
+  pathname: string,
+  logNames?: Map<string, string>,
+  dashboardNames?: Map<string, string>,
+) {
   const parts = pathname.split("/").filter(Boolean);
   if (parts.length === 0) return [{ href: "/processes", label: "Processes", current: true }];
   const out: { href: string; label: string; current: boolean }[] = [];
@@ -39,10 +44,13 @@ function deriveCrumbs(pathname: string, logNames?: Map<string, string>) {
 
     const isLast = i === parts.length - 1;
 
-    // Use process name if this is the logId (comes after "processes")
+    // Use the resource's name (not its UUID) when this segment is an id that
+    // follows a known collection.
     let label = prettify(parts[i]);
     if (parts[i - 1] === "processes" && logNames?.has(parts[i])) {
       label = logNames.get(parts[i])!;
+    } else if (parts[i - 1] === "dashboards" && dashboardNames?.has(parts[i])) {
+      label = dashboardNames.get(parts[i])!;
     }
 
     out.push({
@@ -62,10 +70,12 @@ function prettify(seg: string): string {
 export function Topbar() {
   const pathname = usePathname();
   const { data: logs } = useEventLogs();
+  const { data: dashboards } = useDashboards();
   const [open, setOpen] = useState(false);
 
   const logNames = new Map(logs?.map((log) => [log.id, log.name]) ?? []);
-  const crumbs = deriveCrumbs(pathname, logNames);
+  const dashboardNames = new Map(dashboards?.map((d) => [d.id, d.name]) ?? []);
+  const crumbs = deriveCrumbs(pathname, logNames, dashboardNames);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

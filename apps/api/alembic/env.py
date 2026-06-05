@@ -11,8 +11,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from flows_funds.api.config import get_settings
-from flows_funds.api.db.models import Base
+from mate.api.config import get_settings
+from mate.api.db.models import Base
 
 config = context.config
 if config.config_file_name is not None:

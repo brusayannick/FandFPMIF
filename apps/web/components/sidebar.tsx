@@ -7,6 +7,7 @@ import {
   Activity,
   Cog,
   FolderKanban,
+  LayoutDashboard,
   Moon,
   PanelLeftClose,
   Pickaxe,
@@ -40,6 +41,12 @@ const NAV: NavItem[] = [
     label: "Processes",
     icon: FolderKanban,
     match: (p) => p === "/" || p.startsWith("/processes"),
+  },
+  {
+    href: "/dashboards",
+    label: "Dashboards",
+    icon: LayoutDashboard,
+    match: (p) => p.startsWith("/dashboards"),
   },
   {
     href: "/settings",

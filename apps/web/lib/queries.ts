@@ -3,11 +3,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type {
+  ActiveFilterResult,
   ActivitiesPage,
   BulkFillBody,
   BulkFillResult,
   CellPatch,
   CellPatchResult,
+  ColumnValuesPage,
   DataQuality,
   EventEditsPage,
   EventLogCreateResponse,
@@ -19,11 +21,25 @@ import type {
   FolderSummary,
   JobDetail,
   ModuleSummary,
+  OcelEventsPage,
+  OcelObjectsPage,
+  OcelObjectTypeEntry,
+  OcelOverview,
+  OcelRelationsPage,
+  RemapColumnRoles,
   ReorderItem,
   VariantCasesPage,
   VariantDetail,
   VariantsPage,
 } from "@/lib/api-types";
+
+export interface OcelListParams {
+  offset?: number;
+  limit?: number;
+  object_type?: string;
+  activity?: string;
+  q?: string;
+}
 
 export interface EventsListParams {
   offset?: number;
@@ -57,6 +73,16 @@ export const queryKeys = {
     ["event-logs", logId, "variants", variantId, "cases", offset, limit] as const,
   dataQuality: (logId: string) => ["event-logs", logId, "data-quality"] as const,
   activities: (logId: string) => ["event-logs", logId, "activities"] as const,
+  ocelOverview: (logId: string) => ["event-logs", logId, "ocel", "overview"] as const,
+  ocelObjectTypes: (logId: string) => ["event-logs", logId, "ocel", "object-types"] as const,
+  ocelObjects: (logId: string, params: OcelListParams) =>
+    ["event-logs", logId, "ocel", "objects", params] as const,
+  ocelEvents: (logId: string, params: OcelListParams) =>
+    ["event-logs", logId, "ocel", "events", params] as const,
+  ocelRelationships: (logId: string, params: OcelListParams) =>
+    ["event-logs", logId, "ocel", "relationships", params] as const,
+  columnValues: (logId: string, field: string, q: string) =>
+    ["event-logs", logId, "column-values", field, q] as const,
   edits: (logId: string, offset: number, limit: number) =>
     ["event-logs", logId, "edits", offset, limit] as const,
   modules: (logId?: string | null) => ["modules", logId ?? null] as const,
@@ -112,6 +138,55 @@ export function useEventLog(id: string | null) {
   });
 }
 
+// ── Object-centric (OCEL) hooks ──────────────────────────────────────────────
+
+function ocelListPath(logId: string, kind: string, params: OcelListParams): string {
+  const qs = new URLSearchParams();
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.object_type) qs.set("object_type", params.object_type);
+  if (params.activity) qs.set("activity", params.activity);
+  if (params.q) qs.set("q", params.q);
+  return `/api/v1/event-logs/${logId}/ocel/${kind}${qs.toString() ? `?${qs}` : ""}`;
+}
+
+export function useOcelOverview(logId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: logId ? queryKeys.ocelOverview(logId) : ["event-logs", "noop"],
+    queryFn: () => api<OcelOverview>(`/api/v1/event-logs/${logId}/ocel/overview`),
+    enabled: !!logId && enabled,
+  });
+}
+
+export function useOcelObjectTypes(logId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: logId ? queryKeys.ocelObjectTypes(logId) : ["event-logs", "noop"],
+    queryFn: () => api<OcelObjectTypeEntry[]>(`/api/v1/event-logs/${logId}/ocel/object-types`),
+    enabled: !!logId && enabled,
+  });
+}
+
+export function useOcelObjects(logId: string, params: OcelListParams = {}) {
+  return useQuery({
+    queryKey: queryKeys.ocelObjects(logId, params),
+    queryFn: () => api<OcelObjectsPage>(ocelListPath(logId, "objects", params)),
+  });
+}
+
+export function useOcelEvents(logId: string, params: OcelListParams = {}) {
+  return useQuery({
+    queryKey: queryKeys.ocelEvents(logId, params),
+    queryFn: () => api<OcelEventsPage>(ocelListPath(logId, "events", params)),
+  });
+}
+
+export function useOcelRelationships(logId: string, params: OcelListParams = {}) {
+  return useQuery({
+    queryKey: queryKeys.ocelRelationships(logId, params),
+    queryFn: () => api<OcelRelationsPage>(ocelListPath(logId, "relationships", params)),
+  });
+}
+
 export function useModules(logId?: string | null) {
   const qs = logId ? `?log_id=${encodeURIComponent(logId)}` : "";
   return useQuery({
@@ -128,6 +203,7 @@ export function useImportEventLog() {
       name?: string;
       csvMapping?: unknown;
       xmlMapping?: unknown;
+      jsonMapping?: unknown;
       folderId?: string | null;
     }) => {
       const fd = new FormData();
@@ -135,6 +211,7 @@ export function useImportEventLog() {
       if (input.name) fd.append("name", input.name);
       if (input.csvMapping) fd.append("csv_mapping", JSON.stringify(input.csvMapping));
       if (input.xmlMapping) fd.append("xml_mapping", JSON.stringify(input.xmlMapping));
+      if (input.jsonMapping) fd.append("json_mapping", JSON.stringify(input.jsonMapping));
       if (input.folderId) fd.append("folder_id", input.folderId);
       return api<EventLogCreateResponse>("/api/v1/event-logs", { method: "POST", body: fd });
     },
@@ -152,6 +229,7 @@ export function useImportEventLogFromUrl() {
       name?: string;
       csvMapping?: unknown;
       xmlMapping?: unknown;
+      jsonMapping?: unknown;
     }) =>
       api<EventLogCreateResponse>("/api/v1/event-logs/from-url", {
         method: "POST",
@@ -160,6 +238,7 @@ export function useImportEventLogFromUrl() {
           name: input.name || undefined,
           csv_mapping: input.csvMapping ? JSON.stringify(input.csvMapping) : undefined,
           xml_mapping: input.xmlMapping ? JSON.stringify(input.xmlMapping) : undefined,
+          json_mapping: input.jsonMapping ? JSON.stringify(input.jsonMapping) : undefined,
         },
       }),
     onSuccess: () => {
@@ -175,7 +254,8 @@ export interface XmlProbeField {
 }
 
 export interface XmlProbeResponse {
-  format_hint: "generic" | "xes";
+  // "ocel": object-centric — auto-routed server-side, skip the wizard.
+  format_hint: "generic" | "xes" | "ocel";
   event_element: string | null;
   events_sampled: number;
   fields: XmlProbeField[];
@@ -198,6 +278,37 @@ export function useProbeXml() {
       const fd = new FormData();
       fd.append("file", file);
       return api<XmlProbeResponse>("/api/v1/event-logs/probe-xml", {
+        method: "POST",
+        body: fd,
+      });
+    },
+  });
+}
+
+export interface JsonProbeResponse {
+  format_hint: "generic" | "ocel";
+  event_path: string | null;
+  events_sampled: number;
+  fields: XmlProbeField[];
+  auto_mapping: {
+    event_path?: string | null;
+    case_id: string;
+    activity: string;
+    timestamp: string;
+    end_timestamp?: string | null;
+    resource?: string | null;
+    cost?: string | null;
+    timestamp_format?: string | null;
+    extra?: Record<string, string>;
+  } | null;
+}
+
+export function useProbeJson() {
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return api<JsonProbeResponse>("/api/v1/event-logs/probe-json", {
         method: "POST",
         body: fd,
       });
@@ -334,6 +445,22 @@ export function useReimportEventLog() {
     onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
       qc.invalidateQueries({ queryKey: queryKeys.eventLog(id) });
+    },
+  });
+}
+
+/** Re-import a log with a user-chosen column-role mapping (settings → Column roles). */
+export function useRemapEventLog(logId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (roles: RemapColumnRoles) =>
+      api<EventLogCreateResponse>(`/api/v1/event-logs/${logId}/remap`, {
+        method: "POST",
+        json: roles,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
+      qc.invalidateQueries({ queryKey: queryKeys.eventLog(logId) });
     },
   });
 }
@@ -514,6 +641,50 @@ export function useBulkFillEventRows(logId: string) {
       qc.invalidateQueries({ queryKey: ["event-logs", logId, "variants"] });
       qc.invalidateQueries({ queryKey: queryKeys.dataQuality(logId) });
       qc.invalidateQueries({ queryKey: ["event-logs", logId, "edits"] });
+    },
+  });
+}
+
+/** Distinct values + counts for one column — backs the filter checklist. */
+export function useColumnValues(
+  logId: string,
+  field: string,
+  q: string,
+  enabled = true,
+) {
+  const qs = new URLSearchParams();
+  if (q) qs.set("q", q);
+  const path = `/api/v1/event-logs/${logId}/columns/${encodeURIComponent(
+    field,
+  )}/values${qs.toString() ? `?${qs}` : ""}`;
+  return useQuery({
+    queryKey: queryKeys.columnValues(logId, field, q),
+    queryFn: () => api<ColumnValuesPage>(path),
+    enabled: enabled && !!logId && !!field,
+    placeholderData: (prev) => prev,
+    staleTime: 30_000,
+  });
+}
+
+/** Commit the Events-tab filter as the applied dataset filter, re-running all
+ * modules. Pass `[]` to clear it (Restore). */
+export function useApplyActiveFilter(logId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (filter: FilterEntry[]) =>
+      api<ActiveFilterResult>(`/api/v1/event-logs/${logId}/active-filter`, {
+        method: "PUT",
+        json: { filter },
+      }),
+    onSuccess: () => {
+      // The detail carries active_filter; reseed the editor + downstream tabs.
+      qc.invalidateQueries({ queryKey: queryKeys.eventLog(logId) });
+      qc.invalidateQueries({ queryKey: ["event-logs", logId, "variants"] });
+      qc.invalidateQueries({ queryKey: queryKeys.dataQuality(logId) });
+      qc.invalidateQueries({ queryKey: queryKeys.activities(logId) });
+      // Modules reprocess the new dataset; refresh their surfaces + the dock.
+      qc.invalidateQueries({ queryKey: ["modules"] });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
     },
   });
 }

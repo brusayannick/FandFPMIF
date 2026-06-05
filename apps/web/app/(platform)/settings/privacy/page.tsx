@@ -19,7 +19,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { apiUrl } from "@/lib/api";
+import { rawFetch } from "@/lib/api";
 import { useAnalytics } from "@/lib/stores/analytics";
 import {
   useAnalyticsConfig,
@@ -81,6 +81,27 @@ export default function PrivacySettingsPage() {
     });
   }
 
+  async function onExport() {
+    // A plain `<a href={apiUrl(...)} download>` navigates the browser straight
+    // to the API, which omits the bearer token (only `@/lib/api`'s fetch
+    // wrappers attach it) and yields a 401. Fetch with auth, then save the blob.
+    try {
+      const res = await rawFetch("/api/v1/usage/export");
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "analytics-export.ndjson";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(`Export failed: ${(err as Error).message}`);
+    }
+  }
+
   async function onWipe() {
     try {
       const res = await wipeMut.mutateAsync();
@@ -102,10 +123,12 @@ export default function PrivacySettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            Captures which pages you visit, which buttons you click, and how
-            features perform. Data never leaves your machine — it lives in the
-            same SQLite file as your processes. Helps us improve the platform
-            when you choose to share your usage during development.
+            Captures which pages you visit, which buttons you click and where
+            they take you, how features perform, and - on the server - the
+            timing of operations like AI calls and imports plus how your jobs
+            finish. Data never leaves your machine - it lives in the same SQLite
+            file as your processes. Helps us improve the platform when you
+            choose to share your usage during development.
           </p>
 
           <Label className="flex items-center justify-between gap-3">
@@ -166,10 +189,13 @@ export default function PrivacySettingsPage() {
           )}
 
           <div className="flex flex-wrap gap-2 pt-2">
-            <Button asChild variant="outline" size="sm" disabled={!cfg?.enabled}>
-              <a href={apiUrl("/api/v1/usage/export")} download>
-                Export NDJSON
-              </a>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!cfg?.enabled}
+              onClick={() => void onExport()}
+            >
+              Export NDJSON
             </Button>
             <AlertDialog open={wipeOpen} onOpenChange={setWipeOpen}>
               <AlertDialogTrigger asChild>

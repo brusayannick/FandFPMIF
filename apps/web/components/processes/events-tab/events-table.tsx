@@ -106,6 +106,7 @@ export function EventsTable({
                   )}
                 </button>
                 <ColumnFilter
+                  logId={logId}
                   column={col}
                   current={filterByField.get(col.name) ?? null}
                   onChange={(next) => setColumnFilter(col.name, next)}

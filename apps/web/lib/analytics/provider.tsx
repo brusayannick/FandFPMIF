@@ -104,6 +104,9 @@ function AutoTrackers() {
   useEffect(() => {
     if (!pathname) return;
     if (lastPathRef.current === pathname) return;
+    // The path we're navigating away from — lets dashboards reconstruct
+    // "clicked on X → landed on Y" from the from_path → path transition.
+    const fromPath = lastPathRef.current;
     lastPathRef.current = pathname;
     enqueueEvent({
       event_type: "page",
@@ -111,6 +114,7 @@ function AutoTrackers() {
       path: pathname,
       referrer: typeof document !== "undefined" ? document.referrer || null : null,
       properties: {
+        from_path: fromPath,
         has_query: (searchParams?.toString().length ?? 0) > 0,
       },
     });
@@ -142,6 +146,17 @@ function AutoTrackers() {
           return null;
         }
       })();
+      // For in-app links, capture the destination pathname (no query) so a
+      // click records where it was about to take the user.
+      const hrefPath = (() => {
+        if (!href) return null;
+        try {
+          const u = new URL(href, window.location.origin);
+          return u.host === window.location.host ? u.pathname : null;
+        } catch {
+          return null;
+        }
+      })();
       const text = (action?.textContent ?? targetEl.textContent ?? "")
         .trim()
         .slice(0, 80);
@@ -167,6 +182,7 @@ function AutoTrackers() {
           action_id: action?.id || null,
           text: text || null,
           href_host: hrefHost,
+          href_path: hrefPath,
           button: e.button,
           modifiers:
             (e.shiftKey ? "s" : "") +

@@ -35,7 +35,7 @@ export function CapabilityGraph({ focusedModuleId }: CapabilityGraphProps) {
   if (!modules || modules.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground">
-        No modules installed — nothing to graph yet.
+        No modules installed - nothing to graph yet.
       </div>
     );
   }

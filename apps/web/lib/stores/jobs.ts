@@ -205,16 +205,16 @@ export function categorizeJobType(job: LiveJob): JobTypeCategory {
   return "Other";
 }
 
-// Job titles use " — " (em-dash) as a separator between a "type" part and a
+// Job titles use " - " (em-dash) as a separator between a "type" part and a
 // "name" part. Which side is which depends on the job kind:
-//   "Import — env_permit"      → badge: Import,      name: env_permit
-//   "Discovery — precompute"   → badge: precompute,   name: Discovery
+//   "Import - env_permit"      → badge: Import,      name: env_permit
+//   "Discovery - precompute"   → badge: precompute,   name: Discovery
 // Known type-prefixes (first part) are treated as the badge; everything else
 // is assumed to be name-first, type-last.
 const TITLE_TYPE_PREFIXES = new Set(["import", "export"]);
 
 export function parseJobTitle(job: LiveJob): { name: string; badge: string } {
-  const SEP = " — "; // " — "
+  const SEP = " - "; // " - "
   const { title } = job;
 
   if (!title.includes(SEP)) {

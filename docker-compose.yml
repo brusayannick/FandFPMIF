@@ -1,7 +1,7 @@
 services:
   keycloak-db:
     image: postgres:16-alpine
-    container_name: flows-funds-keycloak-db
+    container_name: mate-keycloak-db
     environment:
       POSTGRES_DB: keycloak
       POSTGRES_USER: keycloak
@@ -17,7 +17,7 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
-    container_name: flows-funds-keycloak
+    container_name: mate-keycloak
     command: ["start", "--import-realm"]
     environment:
       KC_DB: postgres
@@ -59,7 +59,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    container_name: flows-funds-api
+    container_name: mate-api
     volumes:
       # Persistent state. Back up by copying ./data.
       - ./data:/app/data
@@ -114,7 +114,7 @@ services:
         # apps/web/lib/api.ts). Set this to the URL the *browser* will use to
         # reach the api — for local docker-compose that's the host's port 8000.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-    container_name: flows-funds-web
+    container_name: mate-web
     volumes:
       # Same modules/ bind-mount as the api container so the entrypoint can
       # esbuild each module's panel into modules/<id>/.dist/ at container

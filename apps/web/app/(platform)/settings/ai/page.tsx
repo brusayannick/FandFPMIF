@@ -107,7 +107,7 @@ const PROVIDERS: ProviderMeta[] = [
     label: "Custom",
     tagline: "Any OpenAI-compatible endpoint",
     blurb:
-      "Self-hosted proxies (vLLM, LM Studio, Ollama with --openai), Azure OpenAI, OpenRouter, etc. Provide the base URL — usually ends with /v1.",
+      "Self-hosted proxies (vLLM, LM Studio, Ollama with --openai), Azure OpenAI, OpenRouter, etc. Provide the base URL - usually ends with /v1.",
     needsBaseUrl: true,
     baseUrlPlaceholder: "https://your-endpoint.example.com/v1",
     keyPlaceholder: "sk-…",
@@ -496,7 +496,7 @@ function ProviderConfigCard({
           <span className="text-xs text-muted-foreground tabular-nums">
             {models.length > 0
               ? `${models.length} model${models.length === 1 ? "" : "s"} available`
-              : "No models fetched yet — paste a key and click Fetch models"}
+              : "No models fetched yet - paste a key and click Fetch models"}
           </span>
           <Button
             type="button"

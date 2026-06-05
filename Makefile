@@ -4,7 +4,7 @@
 # Tab indentation is required for Make recipes.
 
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*##"; printf "\nFlows & Funds — common tasks\n\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nMate — common tasks\n\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 install: ## Resolve all deps (uv + pnpm)
 	uv sync --extra dev
@@ -12,13 +12,13 @@ install: ## Resolve all deps (uv + pnpm)
 
 dev: ## Run the API and the web dev server together (no docker)
 	@trap 'kill 0' INT; \
-	(uv run uvicorn flows_funds.api.main:app --reload --app-dir apps/api/src --host 127.0.0.1 --port 8000) & \
+	(uv run uvicorn mate.api.main:app --reload --app-dir apps/api/src --host 127.0.0.1 --port 8000) & \
 	(cd apps/web && pnpm dev) & \
 	wait
 
 dev-api: ## Run only the API (with --reload)
 	uv run alembic -c apps/api/alembic.ini upgrade head
-	uv run uvicorn flows_funds.api.main:app --reload --app-dir apps/api/src --host 127.0.0.1 --port 8000
+	uv run uvicorn mate.api.main:app --reload --app-dir apps/api/src --host 127.0.0.1 --port 8000
 
 dev-web: ## Run only the web dev server
 	cd apps/web && pnpm dev

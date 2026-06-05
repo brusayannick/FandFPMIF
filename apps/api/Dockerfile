@@ -39,4 +39,4 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic -c apps/api/alembic.ini upgrade head && uvicorn flows_funds.api.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "alembic -c apps/api/alembic.ini upgrade head && uvicorn mate.api.main:app --host 0.0.0.0 --port 8000"]

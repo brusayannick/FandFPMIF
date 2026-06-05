@@ -23,7 +23,7 @@ export function QualitySection({ logId }: { logId: string }) {
   return (
     <SectionShell
       title="Data quality"
-      description="Per-column completeness — click a row to see only events with missing values for that column."
+      description="Per-column completeness - click a row to see only events with missing values for that column."
     >
       {isLoading || !data ? (
         <div className="space-y-2">

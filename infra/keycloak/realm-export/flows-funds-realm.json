@@ -1,6 +1,6 @@
 {
   "realm": "flows-funds",
-  "displayName": "Flows & Funds",
+  "displayName": "Mate",
   "enabled": true,
   "sslRequired": "none",
   "registrationAllowed": false,
@@ -9,17 +9,17 @@
   "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
-  "accessTokenLifespan": 300,
+  "accessTokenLifespan": 900,
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 36000,
   "offlineSessionIdleTimeout": 2592000,
-  "refreshTokenMaxReuse": 0,
+  "refreshTokenMaxReuse": 3,
   "revokeRefreshToken": true,
   "roles": {
     "realm": [
       {
         "name": "user",
-        "description": "Default Flows & Funds user role"
+        "description": "Default Mate user role"
       }
     ]
   },
@@ -37,7 +37,7 @@
   "clients": [
     {
       "clientId": "flows-funds-web",
-      "name": "Flows & Funds Web",
+      "name": "Mate Web",
       "enabled": true,
       "publicClient": false,
       "secret": "flows-funds-web-dev-secret",

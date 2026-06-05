@@ -1,4 +1,4 @@
-# Flows & Funds — on-VM reverse proxy (production).
+# Mate — on-VM reverse proxy (production).
 #
 # The uni edge proxy forwards pm-mate.uni-muenster.de:80/443 to this VM's :443
 # as a single HTTPS pipe. This Caddy instance terminates that TLS with the

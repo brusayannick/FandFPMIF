@@ -73,7 +73,7 @@ export function PrivacyStep() {
         <h1 className="text-3xl font-semibold tracking-tight">Privacy</h1>
         <p className="text-sm text-muted-foreground">
           May we collect anonymous usage events so we can see which features
-          are useful? Nothing ever leaves your machine — everything stays in
+          are useful? Nothing ever leaves your machine - everything stays in
           your local database.
         </p>
       </div>

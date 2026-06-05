@@ -9,7 +9,7 @@ COPY pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/module-sdk-ts/package.json packages/module-sdk-ts/package.json
 COPY packages/shared-types/package.json packages/shared-types/package.json
-RUN pnpm install --frozen-lockfile=false --filter "@flows-funds/web..."
+RUN pnpm install --frozen-lockfile=false --filter "@mate/web..."
 
 FROM base AS builder
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000

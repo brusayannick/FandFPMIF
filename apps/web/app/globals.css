@@ -241,3 +241,20 @@
 .react-flow__edge-interaction {
   cursor: pointer;
 }
+
+/* react-grid-layout: theme the default (red) drop placeholder. */
+.react-grid-item.react-grid-placeholder {
+  background: var(--primary) !important;
+  border-radius: 0.5rem;
+  opacity: 0.15 !important;
+}
+
+/* Dashboard canvas: subtle dotted grid so the board area reads as a workspace
+   and card placement is easier to eyeball. Themed via --border so it adapts to
+   light/dark. */
+.dashboard-canvas-bg {
+  background-color: var(--background);
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-position: -1px -1px;
+}

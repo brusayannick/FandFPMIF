@@ -2,7 +2,15 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Pencil, Search } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Pencil,
+  RotateCcw,
+  Search,
+} from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +23,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useEventLogRows, type EventsListParams } from "@/lib/queries";
+import {
+  useApplyActiveFilter,
+  useEventLogRows,
+  type EventsListParams,
+} from "@/lib/queries";
 import type { EventLogDetail, FilterEntry } from "@/lib/api-types";
 import { formatNumber } from "@/lib/format";
 import { getActivityRenameMap } from "@/lib/activity-rename";
@@ -37,10 +49,16 @@ export function EventsTab({ logId, log }: { logId: string; log: EventLogDetail }
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
   const [sort, setSort] = useState<string>("");
-  const [filters, setFilters] = useState<FilterEntry[]>([]);
+  // The editor draft is seeded from the *applied* filter so the user lands on
+  // what's currently in force and can refine it.
+  const [filters, setFilters] = useState<FilterEntry[]>(() => log.active_filter ?? []);
   const [q, setQ] = useState("");
   const [missingOnly, setMissingOnly] = useState(missingOnlyParam);
   const [editMode, setEditMode] = useState(false);
+
+  const applyFilter = useApplyActiveFilter(logId);
+  const isDirty = normalizeFilters(filters) !== normalizeFilters(log.active_filter);
+  const hasApplied = (log.active_filter?.length ?? 0) > 0;
 
   const params = useMemo<EventsListParams>(
     () => ({
@@ -88,6 +106,28 @@ export function EventsTab({ logId, log }: { logId: string; log: EventLogDetail }
     setPage(0);
   }, []);
 
+  const onApply = useCallback(() => {
+    applyFilter.mutate(filters, {
+      onSuccess: () =>
+        toast.success(
+          filters.length === 0
+            ? "Filter cleared - modules reprocessing the full dataset."
+            : "Filter applied - modules reprocessing the filtered dataset.",
+        ),
+      onError: (e) => toast.error((e as Error)?.message ?? "Could not apply filter."),
+    });
+  }, [applyFilter, filters]);
+
+  const onRestore = useCallback(() => {
+    setFilters([]);
+    setPage(0);
+    applyFilter.mutate([], {
+      onSuccess: () =>
+        toast.success("Filter cleared - modules reprocessing the full dataset."),
+      onError: (e) => toast.error((e as Error)?.message ?? "Could not clear filter."),
+    });
+  }, [applyFilter]);
+
   if (isError) {
     return (
       <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
@@ -123,6 +163,30 @@ export function EventsTab({ logId, log }: { logId: string; log: EventLogDetail }
         )}
         <div className="ml-auto flex items-center gap-2">
           <Button
+            variant="outline"
+            size="sm"
+            className="h-9 cursor-pointer"
+            disabled={(!hasApplied && filters.length === 0) || applyFilter.isPending}
+            onClick={onRestore}
+            title="Clear the applied filter and reprocess every module on the full dataset"
+          >
+            <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+            Restore
+          </Button>
+          <Button
+            variant={isDirty ? "default" : "outline"}
+            size="sm"
+            className="h-9 cursor-pointer"
+            disabled={!isDirty || applyFilter.isPending}
+            onClick={onApply}
+            title="Apply the filter to every module (re-runs all import processes)"
+          >
+            {applyFilter.isPending ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : null}
+            Apply{isDirty ? " •" : ""}
+          </Button>
+          <Button
             variant={editMode ? "default" : "outline"}
             size="sm"
             className="h-9 cursor-pointer"
@@ -133,6 +197,13 @@ export function EventsTab({ logId, log }: { logId: string; log: EventLogDetail }
           </Button>
         </div>
       </div>
+
+      {hasApplied && (
+        <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-muted-foreground">
+          An applied filter is active across all modules and analytics
+          {isDirty ? " - you have unapplied changes." : "."}
+        </div>
+      )}
 
       {missingRows > 0 && !missingOnly && (
         <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
@@ -226,4 +297,19 @@ export function EventsTab({ logId, log }: { logId: string; log: EventLogDetail }
       </div>
     </div>
   );
+}
+
+/** Order-independent serialization so we can compare the editor draft against
+ * the applied filter (field order and `in` value order don't matter). */
+function normalizeFilters(filters: FilterEntry[] | null | undefined): string {
+  const list = (filters ?? [])
+    .map((f) => ({
+      field: f.field,
+      op: f.op,
+      value: Array.isArray(f.value)
+        ? [...f.value].map(String).sort()
+        : (f.value ?? null),
+    }))
+    .sort((a, b) => a.field.localeCompare(b.field) || a.op.localeCompare(b.op));
+  return JSON.stringify(list);
 }

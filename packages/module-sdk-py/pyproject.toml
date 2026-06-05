@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "flows-funds-sdk"
+name = "mate-sdk"
 version = "0.1.0"
-description = "Module SDK for Flows & Funds — public API for module authors."
+description = "Module SDK for Mate — public API for module authors."
 requires-python = ">=3.12"
 readme = "README.md"
 license = { text = "MIT" }
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/flows_funds"]
+packages = ["src/mate"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/flows_funds"]
+include = ["src/mate"]

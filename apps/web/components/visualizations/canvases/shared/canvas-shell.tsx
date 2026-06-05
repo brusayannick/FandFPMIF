@@ -17,6 +17,7 @@ import {
   type NodeMouseHandler,
   type NodeTypes,
   type OnEdgesChange,
+  type OnNodeDrag,
   type OnNodesChange,
   type ReactFlowProps,
 } from "@xyflow/react";
@@ -48,7 +49,7 @@ interface CanvasShellProps {
   // accept the generic-erased forms.
   onNodesChange?: OnNodesChange<Node>;
   onEdgesChange?: OnEdgesChange<Edge>;
-  onNodeDragStop?: NodeMouseHandler;
+  onNodeDragStop?: OnNodeDrag<Node>;
   /** Enable rubber-band (drag-to-select) on the canvas pane. When true,
    *  left-drag creates a selection rectangle; panning moves to middle/right drag. */
   selectionOnDrag?: boolean;

@@ -45,9 +45,11 @@ async def test_xes_round_trip(client: AsyncClient) -> None:
     assert detail["variants_count"] == 2  # case-1/case-3 share a variant; case-2 cancels
 
     # Parquet artefacts on disk
-    from flows_funds.api.ingest.storage import log_paths
+    from mate.api.ingest.storage import log_paths
 
-    paths = log_paths(body["log_id"])
+    from .conftest import TEST_USER_ID
+
+    paths = log_paths(body["log_id"], TEST_USER_ID)
     assert paths.events.exists()
     assert paths.cases.exists()
     assert paths.meta.exists()
@@ -175,6 +177,46 @@ async def test_xml_round_trip_with_explicit_mapping(client: AsyncClient) -> None
     log_id = resp.json()["log_id"]
     detail = await _wait_until_ready(client, log_id)
     assert detail["events_count"] == 9
+
+
+@pytest.mark.asyncio
+async def test_json_round_trip_autodetect(client: AsyncClient) -> None:
+    fixture = FIXTURES / "sample.json"
+    with fixture.open("rb") as f:
+        resp = await client.post(
+            "/api/v1/event-logs",
+            files={"file": ("sample.json", f, "application/json")},
+            data={"name": "Sample JSON"},
+        )
+    assert resp.status_code == 202, resp.text
+    log_id = resp.json()["log_id"]
+    detail = await _wait_until_ready(client, log_id)
+    # A plain .json event array is case-centric, not OCEL.
+    assert detail["source_format"] == "json"
+    assert detail["log_model"] == "case_centric"
+    assert detail["events_count"] == 9
+    assert detail["cases_count"] == 3
+    schema = detail.get("detected_schema") or {}
+    assert schema.get("json_event_path") == "events"
+    assert "case_id" in (schema.get("canonical_columns") or [])
+
+
+@pytest.mark.asyncio
+async def test_json_probe_endpoint(client: AsyncClient) -> None:
+    fixture = FIXTURES / "sample.json"
+    with fixture.open("rb") as f:
+        resp = await client.post(
+            "/api/v1/event-logs/probe-json",
+            files={"file": ("sample.json", f, "application/json")},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["format_hint"] == "generic"
+    assert body["event_path"] == "events"
+    field_names = {f["name"] for f in body["fields"]}
+    assert {"case_id", "activity", "timestamp", "resource"}.issubset(field_names)
+    assert body["auto_mapping"] is not None
+    assert body["auto_mapping"]["case_id"] == "case_id"
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,629 @@
+"""In-process asyncio job runtime.
+
+What's wired (phase 4):
+
+  - SQLite-persisted Job rows; UUID v7 ids.
+  - Configurable worker pool (asyncio tasks) with cooperative cancellation
+    via a per-job `asyncio.Event`.
+  - Lifecycle events emitted on the platform `EventBus`: `job.queued`,
+    `job.started`, `job.progress`, `job.completed`, `job.failed`,
+    `job.cancelled`, `job.queue.paused`, `job.queue.resumed`.
+  - Per-user pause/resume: a paused user's dequeued jobs are parked until
+    they resume; other tenants keep flowing and already-running jobs of the
+    paused user finish (the spec calls pause/resume out in §7.9.5).
+  - Progress is throttled to SQLite (every `progress_persist_every` ticks),
+    but every call broadcasts on the bus — this keeps the drawer's per-job
+    `WS /jobs/{id}/stream` smooth without writing to disk thousands of times
+    per import.
+  - Retry: re-enqueue with the same payload but a fresh job id.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import time
+from collections.abc import Awaitable, Callable
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
+
+import structlog
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from mate.api.config import Settings, get_settings
+from mate.api.db.engine import get_sessionmaker
+from mate.api.db.models import Job
+from mate.api.events import EventBus, get_event_bus
+from mate.api.uuid7 import uuid7_str
+
+log = structlog.get_logger(__name__)
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+class JobCancelled(Exception):
+    """Raised inside a handler when the job is cancelled cooperatively."""
+
+
+JobHandler = Callable[["JobHandle"], Awaitable[None]]
+
+
+@dataclass
+class CancelToken:
+    _flag: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def cancel(self) -> None:
+        self._flag.set()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._flag.is_set()
+
+    def raise_if_cancelled(self) -> None:
+        if self._flag.is_set():
+            raise JobCancelled()
+
+
+@dataclass
+class JobHandle:
+    """Handed to a job handler. Provides progress reporting, payload access,
+    a sessionmaker, the cancel token, and the bus.
+    """
+
+    id: str
+    user_id: str
+    type: str
+    title: str
+    subtitle: str | None
+    module_id: str | None
+    payload: dict[str, Any]
+    sessionmaker: async_sessionmaker
+    settings: Settings
+    bus: EventBus
+    cancel_token: CancelToken
+    started_at: float
+    _last_persist_count: int = 0
+
+    @property
+    def cancelled(self) -> bool:
+        return self.cancel_token.cancelled
+
+    def raise_if_cancelled(self) -> None:
+        self.cancel_token.raise_if_cancelled()
+
+    async def progress(
+        self,
+        current: int,
+        total: int | None = None,
+        *,
+        stage: str | None = None,
+        message: str | None = None,
+        force: bool = False,
+    ) -> None:
+        elapsed = max(time.monotonic() - self.started_at, 1e-6)
+        rate = current / elapsed if current else None
+        eta = ((total - current) / rate) if (rate and total and total > current) else None
+
+        await self.bus.publish(
+            "job.progress",
+            {
+                "id": self.id,
+                "user_id": self.user_id,
+                "type": self.type,
+                "module_id": self.module_id,
+                "current": current,
+                "total": total,
+                "stage": stage,
+                "message": message,
+                "rate": rate,
+                "eta_seconds": eta,
+            },
+        )
+
+        every = self.settings.progress_persist_every
+        if not force and (current - self._last_persist_count) < every:
+            return
+        self._last_persist_count = current
+        async with self.sessionmaker() as session:
+            await session.execute(
+                update(Job)
+                .where(Job.id == self.id)
+                .values(
+                    progress_current=current,
+                    progress_total=total,
+                    stage=stage,
+                    message=message,
+                    rate=rate,
+                    eta_seconds=eta,
+                )
+            )
+            await session.commit()
+
+
+class JobRuntime:
+    """Asyncio queue + worker pool. Handlers register by `type`."""
+
+    def __init__(self, settings: Settings | None = None, bus: EventBus | None = None) -> None:
+        self.settings = settings or get_settings()
+        self._bus = bus
+        self._queue: asyncio.Queue[str] = asyncio.Queue()
+        self._handlers: dict[str, JobHandler] = {}
+        self._workers: list[asyncio.Task[None]] = []
+        self._running = False
+        # Pause is per-user (the queue itself is shared across all tenants). A
+        # user in `_paused_users` has their dequeued jobs parked in `_deferred`
+        # instead of run; everyone else keeps flowing. Resuming re-enqueues the
+        # parked ids. Held in memory only — like queued jobs, deferred ids don't
+        # survive a process restart (the queue isn't rebuilt from SQLite).
+        self._paused_users: set[str] = set()
+        self._deferred: dict[str, list[str]] = {}
+        self._cancel_tokens: dict[str, CancelToken] = {}
+        self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._process_pool: ProcessPoolExecutor | None = None
+
+    def _ensure_bus(self) -> EventBus:
+        return self._bus if self._bus is not None else get_event_bus()
+
+    def _ensure_process_pool(self) -> ProcessPoolExecutor:
+        """Lazily build a `ProcessPoolExecutor` for CPU-bound module work
+        (§8.3). Sized to match `worker_concurrency` so heavy parallel mining
+        on a multi-core box doesn't starve other workers. We don't create
+        the pool eagerly because not every deployment uses module CPU
+        offloading — paying the fork cost on every boot would be wasteful.
+        """
+        if self._process_pool is None:
+            self._process_pool = ProcessPoolExecutor(
+                max_workers=max(1, self.settings.worker_concurrency)
+            )
+        return self._process_pool
+
+    async def run_in_process(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        """Run `fn(*args, **kwargs)` in the platform's `ProcessPoolExecutor`.
+
+        Exposed to module authors via `ctx.run_in_process`. Standard pickling
+        rules apply: `fn` must be importable by qualified name, and all
+        args/return values must be picklable. For non-CPU-bound async I/O,
+        prefer `asyncio.to_thread` (or just `await`); the process pool only
+        wins when GIL contention is the bottleneck.
+        """
+        pool = self._ensure_process_pool()
+        loop = asyncio.get_running_loop()
+        if kwargs:
+            from functools import partial
+            return await loop.run_in_executor(pool, partial(fn, *args, **kwargs))
+        return await loop.run_in_executor(pool, fn, *args)
+
+    def register(self, type_: str, handler: JobHandler) -> None:
+        if type_ in self._handlers:
+            raise RuntimeError(f"Job type already registered: {type_}")
+        self._handlers[type_] = handler
+
+    async def start(self) -> None:
+        if self._running:
+            return
+        await self._reconcile_orphan_running()
+        self._running = True
+        for _ in range(self.settings.worker_concurrency):
+            self._workers.append(asyncio.create_task(self._worker_loop()))
+        log.info("job_runtime.started", workers=self.settings.worker_concurrency)
+
+    async def _reconcile_orphan_running(self) -> None:
+        """Fail any rows left in `running` by a previous process.
+
+        A worker can only ever crash mid-job (process killed, container
+        restart) — there's no recovery thread to resume an in-flight job, so
+        the row would otherwise stay `running` forever and the UI would show
+        a phantom active task.
+        """
+        sm = get_sessionmaker()
+        async with sm() as session:
+            result = await session.execute(
+                update(Job)
+                .where(Job.status == "running")
+                .values(
+                    status="failed",
+                    error="Worker terminated before job completed.",
+                    finished_at=_utcnow_naive(),
+                )
+            )
+            await session.commit()
+            if result.rowcount:
+                log.info(
+                    "job_runtime.orphans_reconciled", count=result.rowcount,
+                )
+
+    async def stop(self) -> None:
+        if not self._running:
+            return
+        self._running = False
+        for w in self._workers:
+            w.cancel()
+        await asyncio.gather(*self._workers, return_exceptions=True)
+        self._workers.clear()
+        for task in self._running_tasks.values():
+            task.cancel()
+        if self._running_tasks:
+            await asyncio.gather(*self._running_tasks.values(), return_exceptions=True)
+        self._running_tasks.clear()
+        for tok in self._cancel_tokens.values():
+            tok.cancel()
+        self._cancel_tokens.clear()
+        if self._process_pool is not None:
+            self._process_pool.shutdown(cancel_futures=True)
+            self._process_pool = None
+        log.info("job_runtime.stopped")
+
+    @contextlib.asynccontextmanager
+    async def lifespan(self):
+        await self.start()
+        try:
+            yield self
+        finally:
+            await self.stop()
+
+    def is_paused(self, user_id: str) -> bool:
+        return user_id in self._paused_users
+
+    async def pause_queue(self, user_id: str) -> None:
+        if user_id in self._paused_users:
+            return
+        self._paused_users.add(user_id)
+        # user_id scopes the event so only the pausing user's sessions flip to
+        # "Paused" — other tenants' jobs (and dock badges) are unaffected.
+        await self._ensure_bus().publish("job.queue.paused", {"user_id": user_id})
+        log.info("job_runtime.queue_paused", user_id=user_id)
+
+    async def resume_queue(self, user_id: str) -> None:
+        if user_id not in self._paused_users:
+            return
+        self._paused_users.discard(user_id)
+        deferred = self._deferred.pop(user_id, [])
+        for job_id in deferred:
+            await self._queue.put(job_id)
+        await self._ensure_bus().publish("job.queue.resumed", {"user_id": user_id})
+        log.info("job_runtime.queue_resumed", user_id=user_id, requeued=len(deferred))
+
+    async def submit(
+        self,
+        *,
+        type_: str,
+        user_id: str,
+        title: str,
+        payload: dict[str, Any],
+        subtitle: str | None = None,
+        module_id: str | None = None,
+        priority: int = 0,
+        parent_job_id: str | None = None,
+        job_id: str | None = None,
+    ) -> str:
+        if type_ not in self._handlers:
+            raise RuntimeError(f"No handler registered for job type: {type_}")
+        job_id = job_id or uuid7_str()
+        sm = get_sessionmaker()
+        async with sm() as session:
+            session.add(
+                Job(
+                    id=job_id,
+                    user_id=user_id,
+                    type=type_,
+                    title=title,
+                    subtitle=subtitle,
+                    module_id=module_id,
+                    payload_json=payload,
+                    status="queued",
+                    priority=priority,
+                    parent_job_id=parent_job_id,
+                )
+            )
+            await session.commit()
+
+        await self._ensure_bus().publish(
+            "job.queued",
+            {
+                "id": job_id,
+                "user_id": user_id,
+                "type": type_,
+                "title": title,
+                "subtitle": subtitle,
+                "module_id": module_id,
+                "priority": priority,
+            },
+        )
+        await self._queue.put(job_id)
+        return job_id
+
+    async def cancel(self, job_id: str) -> bool:
+        """Mark a job cancelled. Returns True if it was queued or running.
+
+        - If running: the cooperative `CancelToken` is set; the handler is
+          expected to call `handle.raise_if_cancelled()` periodically. The
+          worker catches `JobCancelled` and updates the row + emits the event.
+        - If queued: we mark the row cancelled and emit the event right away;
+          when the worker pulls the id off the queue it'll see the status and
+          skip the work.
+        """
+        sm = get_sessionmaker()
+        async with sm() as session:
+            job = await session.get(Job, job_id)
+            if job is None:
+                return False
+            if job.status not in {"queued", "running"}:
+                return False
+            running = job.status == "running"
+            owner_id = job.user_id
+            if not running:
+                job.status = "cancelled"
+                job.finished_at = _utcnow_naive()
+                await session.commit()
+
+        token = self._cancel_tokens.get(job_id)
+        if token is not None:
+            token.cancel()
+
+        task = self._running_tasks.get(job_id)
+        if task is not None:
+            task.cancel()
+
+        if not running:
+            await self._ensure_bus().publish(
+                "job.cancelled",
+                {"id": job_id, "user_id": owner_id, "reason": "queued"},
+            )
+        return True
+
+    async def cancel_for_logs(self, log_ids: list[str]) -> int:
+        """Cancel every queued/running job whose payload references one of `log_ids`.
+
+        Jobs don't carry an indexed `log_id` column — the affiliation lives in
+        `payload_json["log_id"]`. We pull all active jobs and filter in Python,
+        which is fine because the active set is small (bounded by the worker
+        pool + queue depth, not history).
+        """
+        if not log_ids:
+            return 0
+        wanted = set(log_ids)
+        sm = get_sessionmaker()
+        async with sm() as session:
+            rows = (
+                await session.execute(
+                    select(Job.id, Job.payload_json).where(
+                        Job.status.in_(("queued", "running"))
+                    )
+                )
+            ).all()
+
+        cancelled = 0
+        for job_id, payload in rows:
+            if isinstance(payload, dict) and payload.get("log_id") in wanted:
+                if await self.cancel(job_id):
+                    cancelled += 1
+        return cancelled
+
+    async def cancel_all(self) -> int:
+        """Cancel every queued and running job. Returns the count cancelled.
+
+        Issues per-job `cancel()` calls so the existing path (DB row flip,
+        token signal, asyncio task cancel, `job.cancelled` event) runs for
+        each one — keeps the UI in sync without a separate broadcast.
+        """
+        sm = get_sessionmaker()
+        async with sm() as session:
+            rows = (
+                await session.execute(
+                    select(Job.id).where(Job.status.in_(("queued", "running")))
+                )
+            ).scalars().all()
+
+        cancelled = 0
+        for job_id in rows:
+            if await self.cancel(job_id):
+                cancelled += 1
+        return cancelled
+
+    async def retry(self, job_id: str) -> str | None:
+        """Re-enqueue a failed job with the same payload. Returns the new job id."""
+        sm = get_sessionmaker()
+        async with sm() as session:
+            job = await session.get(Job, job_id)
+            if job is None or job.status != "failed":
+                return None
+            new_id = await self.submit(
+                type_=job.type,
+                user_id=job.user_id,
+                title=job.title,
+                subtitle=job.subtitle,
+                module_id=job.module_id,
+                payload=dict(job.payload_json),
+                priority=job.priority,
+                parent_job_id=job.parent_job_id,
+            )
+        return new_id
+
+    async def _worker_loop(self) -> None:
+        sm = get_sessionmaker()
+        while self._running:
+            try:
+                job_id = await self._queue.get()
+            except asyncio.CancelledError:
+                return
+
+            try:
+                # Pause is per-user: if this job's owner is paused, park it and
+                # move on so other tenants' jobs keep running. resume_queue()
+                # re-enqueues the parked ids.
+                if await self._maybe_defer(job_id, sm):
+                    continue
+                await self._run_one(job_id, sm)
+            except Exception as exc:  # noqa: BLE001
+                log.exception("job_runtime.unexpected_error", job_id=job_id, error=str(exc))
+            finally:
+                self._queue.task_done()
+
+    async def _maybe_defer(self, job_id: str, sm: async_sessionmaker) -> bool:
+        """Park *job_id* if its owner is currently paused. Returns True if parked.
+
+        Fast-paths the common case (nobody paused) without touching the DB.
+        """
+        if not self._paused_users:
+            return False
+        async with sm() as session:
+            owner = await session.scalar(select(Job.user_id).where(Job.id == job_id))
+        if owner is not None and owner in self._paused_users:
+            self._deferred.setdefault(owner, []).append(job_id)
+            return True
+        return False
+
+    async def _run_one(self, job_id: str, sm: async_sessionmaker) -> None:
+        bus = self._ensure_bus()
+
+        async with sm() as session:
+            job = await session.get(Job, job_id)
+            if job is None:
+                log.warning("job_runtime.missing_job", job_id=job_id)
+                return
+            if job.status == "cancelled":
+                # Cancelled while queued — already handled in `cancel()`.
+                return
+            handler = self._handlers.get(job.type)
+            if handler is None:
+                job.status = "failed"
+                job.error = f"No handler registered for type {job.type!r}"
+                job.finished_at = _utcnow_naive()
+                await session.commit()
+                await bus.publish(
+                    "job.failed",
+                    {
+                        "id": job.id,
+                        "user_id": job.user_id,
+                        "type": job.type,
+                        "error": job.error,
+                    },
+                )
+                return
+            job.status = "running"
+            job.started_at = _utcnow_naive()
+            await session.commit()
+
+            handle_payload = dict(job.payload_json)
+            handle_title = job.title
+            handle_subtitle = job.subtitle
+            handle_module_id = job.module_id
+            handle_type = job.type
+            handle_user_id = job.user_id
+
+        token = CancelToken()
+        self._cancel_tokens[job_id] = token
+
+        await bus.publish(
+            "job.started",
+            {
+                "id": job_id,
+                "user_id": handle_user_id,
+                "type": handle_type,
+                "title": handle_title,
+                "module_id": handle_module_id,
+            },
+        )
+
+        handle = JobHandle(
+            id=job_id,
+            user_id=handle_user_id,
+            type=handle_type,
+            title=handle_title,
+            subtitle=handle_subtitle,
+            module_id=handle_module_id,
+            payload=handle_payload,
+            sessionmaker=sm,
+            settings=self.settings,
+            bus=bus,
+            cancel_token=token,
+            started_at=time.monotonic(),
+        )
+
+        handler_task = asyncio.create_task(self._handlers[handle_type](handle))
+        self._running_tasks[job_id] = handler_task
+        try:
+            await handler_task
+        except (JobCancelled, asyncio.CancelledError):
+            if not token.cancelled:
+                # Shutdown cancellation — propagate so the worker exits cleanly.
+                handler_task.cancel()
+                with contextlib.suppress(Exception, asyncio.CancelledError):
+                    await handler_task
+                raise
+            async with sm() as session:
+                await session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(status="cancelled", finished_at=_utcnow_naive()),
+                )
+                await session.commit()
+            await bus.publish(
+                "job.cancelled",
+                {"id": job_id, "user_id": handle_user_id, "reason": "running"},
+            )
+            return
+        except Exception as exc:  # noqa: BLE001
+            logging.exception("Job handler failed for %s", job_id)
+            async with sm() as session:
+                await session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        status="failed",
+                        error=str(exc),
+                        finished_at=_utcnow_naive(),
+                    )
+                )
+                await session.commit()
+            await bus.publish(
+                "job.failed",
+                {
+                    "id": job_id,
+                    "user_id": handle_user_id,
+                    "type": handle_type,
+                    "error": str(exc),
+                },
+            )
+            return
+        finally:
+            self._running_tasks.pop(job_id, None)
+            self._cancel_tokens.pop(job_id, None)
+
+        async with sm() as session:
+            await session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(status="completed", finished_at=_utcnow_naive()),
+            )
+            await session.commit()
+
+        await bus.publish(
+            "job.completed",
+            {
+                "id": job_id,
+                "user_id": handle_user_id,
+                "type": handle_type,
+                "module_id": handle_module_id,
+            },
+        )
+
+
+_runtime: JobRuntime | None = None
+
+
+def set_job_runtime(rt: JobRuntime | None) -> None:
+    global _runtime
+    _runtime = rt
+
+
+def get_job_runtime() -> JobRuntime:
+    if _runtime is None:
+        raise RuntimeError("Job runtime is not initialised — startup did not run.")
+    return _runtime

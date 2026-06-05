@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "flows-funds-api"
+name = "mate-api"
 version = "0.1.0"
-description = "FastAPI backend for the Flows & Funds process analysis platform."
+description = "FastAPI backend for the Mate process analysis platform."
 requires-python = ">=3.12"
 readme = "README.md"
 license = { text = "MIT" }
@@ -28,7 +28,7 @@ dependencies = [
     "httpx>=0.27",
     "watchdog>=5.0",
     "pyjwt[crypto]>=2.9",
-    "flows-funds-sdk",
+    "mate-sdk",
 ]
 
 [project.optional-dependencies]
@@ -41,16 +41,16 @@ dev = [
 ]
 
 [project.scripts]
-flows-funds-api = "flows_funds.api.cli:main"
+mate-api = "mate.api.cli:main"
 
 [tool.uv.sources]
-flows-funds-sdk = { workspace = true }
+mate-sdk = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/flows_funds"]
+packages = ["src/mate"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/flows_funds"]
+include = ["src/mate"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

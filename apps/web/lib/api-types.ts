@@ -8,15 +8,26 @@
 
 export type EventLogStatus = "importing" | "ready" | "failed";
 
+/** Case-centric (XES/CSV/XML) vs object-centric (OCEL). The two are fully
+ * isolated — drives the detail-page tabs, header counts, and which endpoints /
+ * modules apply. */
+export type LogModel = "case_centric" | "object_centric";
+
 export interface EventLogSummary {
   id: string;
   name: string;
   status: EventLogStatus | string;
   source_format: string | null;
   source_filename: string | null;
+  log_model: LogModel;
   events_count: number | null;
+  /** Case-centric counts — null for object-centric logs. */
   cases_count: number | null;
   variants_count: number | null;
+  /** Object-centric counts — null for case-centric logs. */
+  objects_count: number | null;
+  object_types_count: number | null;
+  relations_count: number | null;
   date_min: string | null;
   date_max: string | null;
   error: string | null;
@@ -25,7 +36,39 @@ export interface EventLogSummary {
   created_at: string;
   imported_at: string | null;
   last_edited_at: string | null;
+  /** The importer had to guess a mandatory column — prompts a settings review. */
+  mapping_needs_review?: boolean;
 }
+
+// ── Object-centric (OCEL) data shapes (GET /event-logs/{id}/ocel/*) ──────────
+
+export interface OcelObjectTypeEntry {
+  type: string;
+  count: number;
+}
+
+export interface OcelOverview {
+  events_count: number;
+  objects_count: number;
+  object_types_count: number;
+  relations_count: number;
+  date_min: string | null;
+  date_max: string | null;
+  object_types: OcelObjectTypeEntry[];
+  activities: string[];
+}
+
+export interface OcelPage {
+  rows: Record<string, unknown>[];
+  columns: string[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export type OcelObjectsPage = OcelPage;
+export type OcelEventsPage = OcelPage;
+export type OcelRelationsPage = OcelPage;
 
 export interface FolderSummary {
   id: string;
@@ -46,6 +89,23 @@ export interface EventLogDetail extends EventLogSummary {
   detected_schema: Record<string, unknown> | null;
   description: string | null;
   column_overrides: EventLogColumnOverrides | null;
+  /** The committed Events-tab filter applied to every module's view of the
+   * log. `null` means the full dataset. */
+  active_filter: FilterEntry[] | null;
+  /** Resolved role → source-column mapping (case_id / activity / timestamp / …). */
+  column_roles: Record<string, string> | null;
+}
+
+/** Manual column-role mapping submitted from settings → re-imports the log. */
+export interface RemapColumnRoles {
+  case_id: string;
+  activity: string;
+  timestamp: string;
+  end_timestamp?: string | null;
+  resource?: string | null;
+  cost?: string | null;
+  role?: string | null;
+  lifecycle?: string | null;
 }
 
 export interface EventLogColumnOverrides {
@@ -160,12 +220,38 @@ export interface EventsPage {
   header: EventsHeader;
 }
 
-export type FilterOp = "contains" | "equals" | "gte" | "lte" | "is_null" | "is_not_null";
+export type FilterOp =
+  | "contains"
+  | "equals"
+  | "gte"
+  | "lte"
+  | "is_null"
+  | "is_not_null"
+  | "in";
 
 export interface FilterEntry {
   field: string;
   op: FilterOp;
-  value?: string | number | boolean | null;
+  /** A string array when `op` is "in" (the multi-select checklist); a scalar
+   * for the single-value operators; omitted for is_null / is_not_null. */
+  value?: string | number | boolean | string[] | null;
+}
+
+export interface ColumnValueEntry {
+  value: string;
+  count: number;
+}
+
+export interface ColumnValuesPage {
+  field: string;
+  values: ColumnValueEntry[];
+  total_distinct: number;
+  truncated: boolean;
+}
+
+export interface ActiveFilterResult {
+  active_filter: FilterEntry[];
+  modules_retriggered: boolean;
 }
 
 export interface CellPatch {

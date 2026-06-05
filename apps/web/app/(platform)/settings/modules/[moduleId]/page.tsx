@@ -301,7 +301,7 @@ export default function ModuleDetailPage() {
                       <AlertDialogDescription>
                         This deletes the index and creates a fresh one using the dimension
                         currently configured above. <strong>All previously ingested
-                        document vectors will be lost</strong> — you&apos;ll need to re-run
+                        document vectors will be lost</strong> - you&apos;ll need to re-run
                         ingestion afterwards. Save any pending AI-model changes first.
                       </AlertDialogDescription>
                     </AlertDialogHeader>

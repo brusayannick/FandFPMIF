@@ -6,7 +6,7 @@ export default function ImportPage() {
       <header className="space-y-1 pb-6">
         <h1 className="text-2xl font-semibold tracking-tight">Import event log</h1>
         <p className="text-sm text-muted-foreground">
-          Upload a XES, XES.gz, or CSV file — or import directly from a URL.
+          Upload a XES, XES.gz, or CSV file - or import directly from a URL.
         </p>
       </header>
       <ImportForm />

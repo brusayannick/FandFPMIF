@@ -13,7 +13,10 @@ export default async function LoginPage({
   const params = await searchParams;
   const callbackUrl = params.callbackUrl || "/processes";
 
-  if (session) {
+  // A refresh-failed session still exists (valid cookie, flagged error) but has
+  // no usable token — treat it as logged-out so we don't bounce the user back
+  // into the app they can't actually call.
+  if (session && session.error !== "RefreshAccessTokenError") {
     redirect(callbackUrl);
   }
 
@@ -21,7 +24,7 @@ export default async function LoginPage({
     <div className="relative w-full max-w-sm space-y-6 rounded-2xl border border-border bg-card p-8 shadow-sm">
       <ThemeToggleButton className="absolute right-4 top-4 h-8 w-8 cursor-pointer text-muted-foreground" />
       <div className="space-y-2 text-center">
-        <h1 className="text-2xl font-semibold">Flows &amp; Funds</h1>
+        <h1 className="text-2xl font-semibold">Mate</h1>
         <p className="text-sm text-muted-foreground">
           Sign in with your workspace account to continue.
         </p>
@@ -36,11 +39,6 @@ export default async function LoginPage({
           Continue with Keycloak
         </Button>
       </form>
-      <p className="text-center text-xs text-muted-foreground">
-        Default admin: <code>admin@flows-funds.local</code>
-        <br />
-        You&apos;ll be asked to set a new password on first login.
-      </p>
     </div>
   );
 }

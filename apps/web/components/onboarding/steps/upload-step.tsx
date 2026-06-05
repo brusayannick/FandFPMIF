@@ -25,7 +25,7 @@ export function UploadStep({ uploadedLogId, onUploaded }: UploadStepProps) {
           <div className="space-y-0.5 text-sm">
             <div className="font-medium">Import queued</div>
             <div className="text-xs text-muted-foreground">
-              Processing in the background — you can continue setup.
+              Processing in the background - you can continue setup.
             </div>
           </div>
         </div>

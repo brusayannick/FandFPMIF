@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 import tempfile
@@ -36,6 +37,102 @@ async def test_module_route_mounted(client_with_sample_mod: AsyncClient) -> None
     assert body == {"module_id": "sample_mod", "status": "pong"}
 
 
+async def _seed_sample_log(client: AsyncClient) -> str:
+    with (FIXTURES / "sample.csv").open("rb") as f:
+        resp = await client.post(
+            "/api/v1/event-logs",
+            files={"file": ("sample.csv", f, "text/csv")},
+            data={"name": "Sample CSV"},
+        )
+    log_id = resp.json()["log_id"]
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        st = (await client.get(f"/api/v1/event-logs/{log_id}")).json()["status"]
+        if st == "ready":
+            return log_id
+        if st == "failed":
+            raise AssertionError("import failed")
+        await asyncio.sleep(0.05)
+    raise AssertionError("import did not finish")
+
+
+def _encode_filter(entries: list[dict]) -> str:
+    return base64.b64encode(json.dumps({"filter": entries}).encode()).decode()
+
+
+@pytest.mark.asyncio
+async def test_module_route_applies_event_filter_header(
+    client_with_sample_mod: AsyncClient,
+) -> None:
+    """A dashboard's `X-FF-Event-Filter` header narrows what a module sees on
+    that one request, without persisting anything on the log."""
+    log_id = await _seed_sample_log(client_with_sample_mod)
+
+    # No header → the module sees the whole log (9 events in the fixture).
+    full = await client_with_sample_mod.get(f"/api/v1/modules/sample_mod/count?log_id={log_id}")
+    assert full.status_code == 200, full.text
+    assert full.json() == {"events": 9}
+
+    # With the header → only the 2 'ship' events.
+    header = _encode_filter([{"field": "activity", "op": "equals", "value": "ship"}])
+    filtered = await client_with_sample_mod.get(
+        f"/api/v1/modules/sample_mod/count?log_id={log_id}",
+        headers={"X-FF-Event-Filter": header},
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json() == {"events": 2}
+
+    # The override is ephemeral — a subsequent unheadered call sees the full log.
+    again = await client_with_sample_mod.get(f"/api/v1/modules/sample_mod/count?log_id={log_id}")
+    assert again.json() == {"events": 9}
+
+
+@pytest.mark.asyncio
+async def test_event_filter_header_bypasses_stale_result_cache(
+    client_with_sample_mod: AsyncClient,
+) -> None:
+    """A cached endpoint must not serve the unfiltered cache to a filtered
+    request. The ephemeral filter gets its own cache namespace, so the filtered
+    call recomputes (2 'ship' events) even though the full result (9) was cached
+    first — and the unfiltered cache is still returned afterwards."""
+    log_id = await _seed_sample_log(client_with_sample_mod)
+
+    # Warm the cache with the full log.
+    full = await client_with_sample_mod.get(
+        f"/api/v1/modules/sample_mod/cached-count?log_id={log_id}"
+    )
+    assert full.json() == {"events": 9}, full.text
+
+    # Filtered request: must reflect the filter, not the cached full count.
+    header = _encode_filter([{"field": "activity", "op": "equals", "value": "ship"}])
+    filtered = await client_with_sample_mod.get(
+        f"/api/v1/modules/sample_mod/cached-count?log_id={log_id}",
+        headers={"X-FF-Event-Filter": header},
+    )
+    assert filtered.json() == {"events": 2}, filtered.text
+
+    # The unfiltered cache is untouched by the ephemeral variant.
+    again = await client_with_sample_mod.get(
+        f"/api/v1/modules/sample_mod/cached-count?log_id={log_id}"
+    )
+    assert again.json() == {"events": 9}, again.text
+
+
+@pytest.mark.asyncio
+async def test_module_route_ignores_malformed_filter_header(
+    client_with_sample_mod: AsyncClient,
+) -> None:
+    """A garbage / stale header degrades to 'no filter' rather than 500."""
+    log_id = await _seed_sample_log(client_with_sample_mod)
+    for bad in ("not-base64!!", base64.b64encode(b"{not json").decode()):
+        resp = await client_with_sample_mod.get(
+            f"/api/v1/modules/sample_mod/count?log_id={log_id}",
+            headers={"X-FF-Event-Filter": bad},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"events": 9}
+
+
 @pytest.mark.asyncio
 async def test_module_manifest_endpoint(client_with_sample_mod: AsyncClient) -> None:
     resp = await client_with_sample_mod.get("/api/v1/modules/sample_mod/manifest")
@@ -69,7 +166,7 @@ async def test_module_assets_served_and_traversal_rejected(
     fake `panel.js` under the fixture module's `.dist/` so we can exercise the
     route without running esbuild from a test."""
     import os
-    from flows_funds.api.config import get_settings
+    from mate.api.config import get_settings
 
     settings = get_settings()
     dist_dir = settings.modules_dir / "sample_mod" / ".dist"
@@ -89,9 +186,7 @@ async def test_module_assets_served_and_traversal_rejected(
 
     # Traversal — try to escape .dist/ via ../. resolve() collapses it, then
     # the relative_to() check fails.
-    escape = await client_with_sample_mod.get(
-        "/api/v1/modules/sample_mod/assets/..%2Fsecret.txt"
-    )
+    escape = await client_with_sample_mod.get("/api/v1/modules/sample_mod/assets/..%2Fsecret.txt")
     assert escape.status_code in (400, 404)
 
 
@@ -112,12 +207,12 @@ async def test_module_install_from_upload(client_with_sample_mod: AsyncClient) -
         zf.writestr(
             "uploaded_mod/module.py",
             (
-                "from flows_funds.sdk import Module, ModuleContext, route\n\n"
+                "from mate.sdk import Module, ModuleContext, route\n\n"
                 "class UploadedModule(Module):\n"
-                "    id = \"uploaded_mod\"\n\n"
-                "    @route.get(\"/ping\")\n"
+                '    id = "uploaded_mod"\n\n'
+                '    @route.get("/ping")\n'
                 "    async def ping(self, ctx: ModuleContext) -> dict[str, str]:\n"
-                "        return {\"id\": ctx.module_id}\n"
+                '        return {"id": ctx.module_id}\n'
             ),
         )
     buf.seek(0)
@@ -191,7 +286,7 @@ async def test_entry_point_discovery(client_with_sample_mod: AsyncClient) -> Non
     import types
     from pathlib import Path
 
-    from flows_funds.api.modules.discovery import discover_entry_points
+    from mate.api.modules.discovery import discover_entry_points
 
     # Build an in-memory package with a manifest.yaml alongside __init__.py.
     pkg_root = Path(tempfile.mkdtemp(prefix="ff-ep-test-"))
@@ -212,7 +307,7 @@ async def test_entry_point_discovery(client_with_sample_mod: AsyncClient) -> Non
             if filename == "METADATA":
                 return "Metadata-Version: 1.0\nName: ff-ep-test-mod\nVersion: 0.0.1\n"
             if filename == "entry_points.txt":
-                return "[flows_funds.modules]\nep_mod = ff_ep_test_mod\n"
+                return "[mate.modules]\nep_mod = ff_ep_test_mod\n"
             return None
 
         def locate_file(self, path):  # type: ignore[override]
@@ -247,7 +342,7 @@ def test_sweep_stale_workdirs_removes_old_dirs(tmp_path: Path) -> None:
     import tempfile as _tempfile
     from unittest.mock import patch
 
-    from flows_funds.api.modules.hot_reload import sweep_stale_workdirs
+    from mate.api.modules.hot_reload import sweep_stale_workdirs
 
     # Run in an isolated tmp_root so we don't touch real system temp dirs.
     with patch.object(_tempfile, "gettempdir", return_value=str(tmp_path)):
@@ -281,7 +376,7 @@ async def test_subprocess_wire_protocol_bidirectional() -> None:
     """
     import socket
 
-    from flows_funds.api.modules.subprocess_worker import WireConnection
+    from mate.api.modules.subprocess_worker import WireConnection
 
     sa, sb = socket.socketpair()
     reader_a, writer_a = await asyncio.open_connection(sock=sa)
@@ -336,7 +431,9 @@ async def test_handler_workdir_cleaned_up(client_with_sample_mod: AsyncClient) -
 
 
 @pytest.mark.asyncio
-async def test_availability_evaluated_against_log_schema(client_with_sample_mod: AsyncClient) -> None:
+async def test_availability_evaluated_against_log_schema(
+    client_with_sample_mod: AsyncClient,
+) -> None:
     """Upload a small log, then list modules with ?log_id=… and confirm the
     sample module is reported `available` (it requires case_id/activity/timestamp)."""
     with (FIXTURES / "sample.xes").open("rb") as f:

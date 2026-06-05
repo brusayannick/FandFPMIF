@@ -121,9 +121,9 @@ export default function GeneralSettingsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="iso">ISO — 2026-05-20</SelectItem>
-                  <SelectItem value="us">US — 05/20/2026</SelectItem>
-                  <SelectItem value="eu">EU — 20/05/2026</SelectItem>
+                  <SelectItem value="iso">ISO - 2026-05-20</SelectItem>
+                  <SelectItem value="us">US - 05/20/2026</SelectItem>
+                  <SelectItem value="eu">EU - 20/05/2026</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -147,7 +147,7 @@ export default function GeneralSettingsPage() {
                 id="csv-ts"
                 value={csvTimestampFormat}
                 onChange={(e) => setCsvTimestampFormat(e.target.value)}
-                placeholder="(blank — auto-detect)"
+                placeholder="(blank - auto-detect)"
               />
               <p className="text-[11px] text-muted-foreground">strftime pattern; leave blank to let pandas guess.</p>
             </div>
@@ -172,7 +172,7 @@ export default function GeneralSettingsPage() {
           <div className="space-y-2">
             <Label>Worker concurrency</Label>
             <p className="text-xs text-muted-foreground">
-              Backend setting — change <code className="rounded bg-muted px-1 text-[11px]">WORKER_CONCURRENCY</code> in
+              Backend setting - change <code className="rounded bg-muted px-1 text-[11px]">WORKER_CONCURRENCY</code> in
               the API env and restart. The slider below is a placeholder for the
               live-update path that lands with the settings sync (phase 9+).
             </p>

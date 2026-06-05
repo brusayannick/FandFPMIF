@@ -168,7 +168,7 @@ export function AiModelPicker({
                   <SelectItem key={p} value={p} disabled={!isReady}>
                     {PROVIDER_LABELS[p]}
                     {!isReady && (
-                      <span className="text-muted-foreground"> — no key in Settings → AI</span>
+                      <span className="text-muted-foreground"> - no key in Settings → AI</span>
                     )}
                   </SelectItem>
                 );
@@ -284,7 +284,7 @@ export function AiModelPicker({
             Used to size the Pinecone vector index. For the official OpenAI
             provider this is also sent to the API to truncate{" "}
             <code className="rounded bg-muted px-1 py-0.5">text-embedding-3-*</code> output. For
-            UniGPT / Custom providers it&apos;s recorded locally only — most
+            UniGPT / Custom providers it&apos;s recorded locally only - most
             OpenAI-compatible proxies reject the{" "}
             <code className="rounded bg-muted px-1 py-0.5">dimensions</code> parameter, so set this
             to whatever your model natively outputs. Leave blank to default to 1536. Changing this

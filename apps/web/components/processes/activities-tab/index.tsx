@@ -105,7 +105,7 @@ export function ActivitiesTab({ logId, log }: ActivitiesTabProps) {
   return (
     <div className="space-y-4">
       <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-        Renames are display-only — the underlying event log keeps the raw activity names so
+        Renames are display-only - the underlying event log keeps the raw activity names so
         analytics modules continue to operate on the canonical values. Leave a field blank to
         use the raw name.
       </div>

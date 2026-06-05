@@ -1,6 +1,6 @@
-# flows-funds-api
+# mate-api
 
-FastAPI backend for the Flows & Funds platform.
+FastAPI backend for the Mate platform.
 
 ## Local development
 
@@ -9,7 +9,7 @@ From the repo root:
 ```bash
 uv sync
 uv run alembic -c apps/api/alembic.ini upgrade head
-uv run uvicorn flows_funds.api.main:app --reload --app-dir apps/api/src
+uv run uvicorn mate.api.main:app --reload --app-dir apps/api/src
 ```
 
 The API listens on `http://localhost:8000`. OpenAPI is at `/openapi.json`, interactive docs at `/docs`.

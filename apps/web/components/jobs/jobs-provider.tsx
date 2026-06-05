@@ -72,7 +72,7 @@ export function JobsProvider() {
           const job = useJobsStore.getState().byId.get(id);
           const logId = (job?.payload_json as { log_id?: string } | undefined)?.log_id;
           if (!muted) {
-            toast.success(`Imported — ${title}`, {
+            toast.success(`Imported - ${title}`, {
               action: logId
                 ? {
                     label: "Open",
@@ -82,7 +82,7 @@ export function JobsProvider() {
             });
           }
         } else if (!muted) {
-          toast.success(`Completed — ${title}`);
+          toast.success(`Completed - ${title}`);
         }
         return;
       }
@@ -92,7 +92,7 @@ export function JobsProvider() {
         // (populated when `job.queued` arrived) so we show the job name, not the UUID.
         const storedTitle = useJobsStore.getState().byId.get(id)?.title ?? title;
         const error = (env.payload.error as string | undefined) ?? "";
-        toastError(`Failed — ${storedTitle}`, {
+        toastError(`Failed - ${storedTitle}`, {
           description: error || undefined,
           duration: Number.POSITIVE_INFINITY,
           action: {
@@ -104,7 +104,7 @@ export function JobsProvider() {
       }
 
       if (env.topic === "job.cancelled" && !muted) {
-        toast.warning(`Cancelled — ${title}`);
+        toast.warning(`Cancelled - ${title}`);
         return;
       }
     });

@@ -272,9 +272,7 @@ async def test_variant_detail_and_cases(client: AsyncClient) -> None:
     listing = (await client.get(f"/api/v1/event-logs/{log_id}/variants")).json()
     top_id = listing["rows"][0]["variant_id"]
 
-    detail = (
-        await client.get(f"/api/v1/event-logs/{log_id}/variants/{top_id}")
-    ).json()
+    detail = (await client.get(f"/api/v1/event-logs/{log_id}/variants/{top_id}")).json()
     assert detail["case_count"] == 2
     assert detail["activities"] == ["register order", "check stock", "ship"]
     assert detail["duration_histogram"]
@@ -282,9 +280,7 @@ async def test_variant_detail_and_cases(client: AsyncClient) -> None:
     columns = {b["column"] for b in detail["attribute_breakdowns"]}
     assert "resource" in columns
 
-    cases = (
-        await client.get(f"/api/v1/event-logs/{log_id}/variants/{top_id}/cases")
-    ).json()
+    cases = (await client.get(f"/api/v1/event-logs/{log_id}/variants/{top_id}/cases")).json()
     assert cases["total"] == 2
     case_ids = {r["case_id"] for r in cases["rows"]}
     assert case_ids == {"case-1", "case-3"}
@@ -304,6 +300,23 @@ async def test_data_quality_no_missing(client: AsyncClient) -> None:
     assert by_col["case_id"]["null_count"] == 0
     assert by_col["case_id"]["distinct_count"] == 3
     assert by_col["activity"]["distinct_count"] == 4  # register/check/ship/cancel
+
+
+# ── time bounds ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_time_bounds(client: AsyncClient) -> None:
+    """The dashboard time-range slider is seeded from min/max of the timestamp."""
+    log_id = await _seed_log(client)
+    resp = await client.get(f"/api/v1/event-logs/{log_id}/time-bounds")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["field"] == "timestamp"
+    assert body["min_ts"] is not None
+    assert body["max_ts"] is not None
+    # A real span — min strictly precedes max in the fixture.
+    assert body["min_ts"] < body["max_ts"]
 
 
 # ── activities ───────────────────────────────────────────────────────────────

@@ -31,7 +31,7 @@ export function EditHistorySection({ logId }: { logId: string }) {
         </div>
       ) : !data || data.rows.length === 0 ? (
         <p className="text-sm italic text-muted-foreground">
-          No manual edits yet — use the Events tab&apos;s edit mode to fix missing values.
+          No manual edits yet - use the Events tab&apos;s edit mode to fix missing values.
         </p>
       ) : (
         <div className="overflow-hidden rounded-md border">

@@ -33,7 +33,9 @@ import {
   useCreateFolder,
   useImportEventLog,
   useImportEventLogFromUrl,
+  useProbeJson,
   useProbeXml,
+  type JsonProbeResponse,
   type XmlProbeResponse,
 } from "@/lib/queries";
 import { useAiConfig } from "@/lib/ai-queries";
@@ -43,14 +45,19 @@ import { useTrack } from "@/lib/analytics/hooks";
 import { EV } from "@/lib/analytics/events";
 import { cn } from "@/lib/cn";
 
-type DetectedFormat = "xes" | "xes.gz" | "csv" | "xml" | "unsupported";
+type DetectedFormat = "xes" | "xes.gz" | "csv" | "xml" | "json" | "ocel" | "unsupported";
 
 function detect(file: File): DetectedFormat {
   const n = file.name.toLowerCase();
   if (n.endsWith(".xes.gz")) return "xes.gz";
   if (n.endsWith(".xes")) return "xes";
   if (n.endsWith(".csv")) return "csv";
+  if (n.endsWith(".jsonocel") || n.endsWith(".xmlocel") || n.endsWith(".sqlite")) return "ocel";
+  // Plain .xml / .json are ambiguous (case-centric vs OCEL); the server sniffs
+  // the content and auto-routes. We probe them client-side only to decide
+  // whether to show the mapping wizard.
   if (n.endsWith(".xml")) return "xml";
+  if (n.endsWith(".json")) return "json";
   return "unsupported";
 }
 
@@ -104,6 +111,19 @@ type XmlMappingFieldKey =
   | "end_timestamp"
   | "resource"
   | "cost";
+
+interface JsonMapping {
+  event_path?: string;
+  case_id: string;
+  activity: string;
+  timestamp: string;
+  end_timestamp?: string;
+  resource?: string;
+  cost?: string;
+  timestamp_format?: string;
+}
+
+type JsonMappingFieldKey = XmlMappingFieldKey;
 
 // Each canonical field has an ordered list of candidate names. The first
 // candidate is also the canonical key itself, so a header literally named
@@ -231,6 +251,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
   const router = useRouter();
   const importer = useImportEventLog();
   const probeXml = useProbeXml();
+  const probeJson = useProbeJson();
   const { data: aiConfig } = useAiConfig();
   const aiMapping = useImportColumnMapping();
   const track = useTrack();
@@ -252,6 +273,12 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
   const [xmlMapping, setXmlMapping] = useState<Partial<XmlMapping>>({});
   const [xmlError, setXmlError] = useState<string | null>(null);
 
+  // JSON wizard state — same shape as XML. `jsonProbe.format_hint === "ocel"`
+  // means the server will auto-route it object-centric, so no mapping is shown.
+  const [jsonProbe, setJsonProbe] = useState<JsonProbeResponse | null>(null);
+  const [jsonMapping, setJsonMapping] = useState<Partial<JsonMapping>>({});
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
   const fmt = file ? detect(file) : null;
   const aiConfigured = Boolean(aiConfig?.selected_provider && aiConfig?.selected_model);
 
@@ -259,15 +286,49 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
     async (f: File) => {
       const detected = detect(f);
       if (detected === "unsupported") {
-        toastError(`Unsupported file: ${f.name}. Use .xes, .xes.gz, .csv, or .xml.`);
+        toastError(
+          `Unsupported file: ${f.name}. Use .xes, .xes.gz, .csv, .xml, .json, or OCEL ` +
+            `(.jsonocel/.xmlocel/.sqlite).`,
+        );
         return;
       }
       setFile(f);
-      setName((current) => current || f.name.replace(/\.(xes\.gz|xes|csv|xml)$/i, ""));
+      setName((current) =>
+        current || f.name.replace(/\.(xes\.gz|xes|csv|xml|json|jsonocel|xmlocel|sqlite)$/i, ""),
+      );
       setAiSuggested(new Set());
       setXmlProbe(null);
       setXmlMapping({});
       setXmlError(null);
+      setJsonProbe(null);
+      setJsonMapping({});
+      setJsonError(null);
+      if (detected === "json") {
+        try {
+          const probe = await probeJson.mutateAsync(f);
+          setJsonProbe(probe);
+          const auto = probe.auto_mapping;
+          if (auto) {
+            setJsonMapping({
+              event_path: auto.event_path ?? undefined,
+              case_id: auto.case_id,
+              activity: auto.activity,
+              timestamp: auto.timestamp,
+              end_timestamp: auto.end_timestamp ?? undefined,
+              resource: auto.resource ?? undefined,
+              cost: auto.cost ?? undefined,
+              timestamp_format: auto.timestamp_format ?? undefined,
+            });
+          } else if (probe.event_path) {
+            setJsonMapping({ event_path: probe.event_path });
+          }
+        } catch (err: unknown) {
+          setJsonError((err as Error).message || "Failed to inspect JSON");
+        }
+        setHeaders([]);
+        setMapping({});
+        return;
+      }
       if (detected === "xml") {
         try {
           const probe = await probeXml.mutateAsync(f);
@@ -339,7 +400,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
         setMapping({});
       }
     },
-    [delimiter, aiConfigured, aiMapping, probeXml],
+    [delimiter, aiConfigured, aiMapping, probeXml, probeJson],
   );
 
   const ready = useMemo(() => {
@@ -348,9 +409,9 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
       return Boolean(mapping.case_id && mapping.activity && mapping.timestamp);
     }
     if (fmt === "xml") {
-      // XES-shaped .xml is handled by the dedicated XES parser server-side —
-      // no mapping needed. For generic XML we require the four canonical fields.
-      if (xmlProbe?.format_hint === "xes") return true;
+      // XES-shaped or OCEL .xml is handled server-side — no mapping needed.
+      // For generic XML we require the four canonical fields.
+      if (xmlProbe?.format_hint === "xes" || xmlProbe?.format_hint === "ocel") return true;
       return Boolean(
         xmlMapping.event_element &&
           xmlMapping.case_id &&
@@ -358,8 +419,14 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
           xmlMapping.timestamp,
       );
     }
+    if (fmt === "json") {
+      // OCEL .json auto-routes server-side. Generic JSON needs the three
+      // mandatory roles (event_path is optional — top-level arrays have none).
+      if (jsonProbe?.format_hint === "ocel") return true;
+      return Boolean(jsonMapping.case_id && jsonMapping.activity && jsonMapping.timestamp);
+    }
     return true;
-  }, [file, fmt, mapping, xmlMapping, xmlProbe]);
+  }, [file, fmt, mapping, xmlMapping, xmlProbe, jsonMapping, jsonProbe]);
 
   const submit = async () => {
     if (!file) return;
@@ -370,6 +437,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
       const xmlMappingPayload =
         fmt === "xml" &&
         xmlProbe?.format_hint !== "xes" &&
+        xmlProbe?.format_hint !== "ocel" &&
         xmlMapping.event_element
           ? {
               event_element: xmlMapping.event_element,
@@ -382,11 +450,27 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
               timestamp_format: xmlMapping.timestamp_format || undefined,
             }
           : undefined;
+      const jsonMappingPayload =
+        fmt === "json" &&
+        jsonProbe?.format_hint !== "ocel" &&
+        jsonMapping.case_id
+          ? {
+              event_path: jsonMapping.event_path || undefined,
+              case_id: jsonMapping.case_id,
+              activity: jsonMapping.activity,
+              timestamp: jsonMapping.timestamp,
+              end_timestamp: jsonMapping.end_timestamp || undefined,
+              resource: jsonMapping.resource || undefined,
+              cost: jsonMapping.cost || undefined,
+              timestamp_format: jsonMapping.timestamp_format || undefined,
+            }
+          : undefined;
       const resp = await importer.mutateAsync({
         file,
         name: name || file.name,
         csvMapping: csvMappingPayload,
         xmlMapping: xmlMappingPayload,
+        jsonMapping: jsonMappingPayload,
       });
       track(EV.PROCESS_IMPORT_FINISHED, { source: "file", format: fmt, ok: true });
       toast.success("Import queued");
@@ -417,6 +501,8 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
                 placeholder={file.name}
               />
             </div>
+
+            {fmt && <DetectedTypeBanner fmt={fmt} />}
 
             {fmt === "csv" && (
               <>
@@ -474,6 +560,17 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
                 loading={probeXml.isPending}
                 error={xmlError}
                 autoMappingApplied={Boolean(xmlProbe?.auto_mapping)}
+              />
+            )}
+
+            {fmt === "json" && (
+              <JsonMappingSection
+                probe={jsonProbe}
+                mapping={jsonMapping}
+                setMapping={setJsonMapping}
+                loading={probeJson.isPending}
+                error={jsonError}
+                autoMappingApplied={Boolean(jsonProbe?.auto_mapping)}
               />
             )}
 
@@ -561,7 +658,8 @@ function UrlImportForm({ onSuccess }: ImportFormProps) {
             <p className="text-xs text-destructive">Enter a valid https:// or http:// URL.</p>
           ) : (
             <p className="text-xs text-muted-foreground">
-              The file must be publicly accessible and end with .xes, .xes.gz, or .csv.
+              The file must be publicly accessible and end with .xes, .xes.gz, .csv, .xml, .json,
+              or an OCEL extension.
             </p>
           )}
         </div>
@@ -653,12 +751,14 @@ function DropZone({
       )}
     >
       <FileUp className="h-8 w-8 text-muted-foreground" />
-      <div className="text-sm font-medium">Drop a XES, XES.gz, CSV, or XML here</div>
+      <div className="text-sm font-medium">
+        Drop a XES, XES.gz, CSV, XML, JSON, or OCEL file here
+      </div>
       <div className="text-xs text-muted-foreground">Or click to choose a file</div>
       <input
         type="file"
         className="sr-only"
-        accept=".xes,.xes.gz,.csv,.xml,application/xml,text/xml,text/csv"
+        accept=".xes,.xes.gz,.csv,.xml,.json,.jsonocel,.xmlocel,.sqlite,application/xml,text/xml,text/csv,application/json"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) onDrop(f);
@@ -825,6 +925,28 @@ function FieldText({
   );
 }
 
+// ── Detected-format banner ────────────────────────────────────────────────────
+
+// Shows "<Type> detected" for the formats whose mapping section doesn't already
+// self-describe (XES, CSV, explicit OCEL). XML / JSON are auto-detected by the
+// server after probing, so their banner lives inside their mapping section.
+function DetectedTypeBanner({ fmt }: { fmt: DetectedFormat }) {
+  const label: Partial<Record<DetectedFormat, string>> = {
+    xes: "XES detected",
+    "xes.gz": "XES detected",
+    csv: "CSV detected",
+    ocel: "Object-centric (OCEL) log detected",
+  };
+  const text = label[fmt];
+  if (!text) return null;
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
 // ── XML mapping wizard ────────────────────────────────────────────────────────
 
 function XmlMappingSection({
@@ -863,19 +985,24 @@ function XmlMappingSection({
     return (
       <div className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
         <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        <span>
-          Detected XES inside this .xml file. We&apos;ll parse it with the XES
-          parser — no field mapping needed.
-        </span>
+        <span>XES detected</span>
+      </div>
+    );
+  }
+
+  if (probe?.format_hint === "ocel") {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>Object-centric (OCEL) log detected</span>
       </div>
     );
   }
 
   if (!probe || !probe.event_element) {
     return (
-      <div className="rounded-md border border-dashed border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-        Couldn&apos;t identify a repeating event element in this XML. The file
-        may not be an event log we can read.
+      <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        No event records found in this XML - it can&apos;t be imported.
       </div>
     );
   }
@@ -972,6 +1099,155 @@ function XmlMappingSection({
   );
 }
 
+// ── JSON mapping wizard ───────────────────────────────────────────────────────
+
+function JsonMappingSection({
+  probe,
+  mapping,
+  setMapping,
+  loading,
+  error,
+  autoMappingApplied,
+}: {
+  probe: JsonProbeResponse | null;
+  mapping: Partial<JsonMapping>;
+  setMapping: (m: Partial<JsonMapping>) => void;
+  loading: boolean;
+  error: string | null;
+  autoMappingApplied: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Inspecting JSON structure…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        {error}
+      </div>
+    );
+  }
+
+  if (probe?.format_hint === "ocel") {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>Object-centric (OCEL) log detected</span>
+      </div>
+    );
+  }
+
+  if (!probe || probe.fields.length === 0) {
+    return (
+      <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        No event records found in this JSON - it can&apos;t be imported.
+      </div>
+    );
+  }
+
+  const fieldNames = probe.fields.map((f) => f.name);
+  const set = (k: JsonMappingFieldKey) => (v: string) =>
+    setMapping({ ...mapping, [k]: v === "__none__" ? undefined : v });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span>
+          Detected event array
+          {probe.event_path && (
+            <>
+              {" "}
+              at{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                {probe.event_path}
+              </code>
+            </>
+          )}
+          {probe.events_sampled > 0 && (
+            <span className="ml-1">({probe.events_sampled} sampled)</span>
+          )}
+        </span>
+        {autoMappingApplied && (
+          <span className="rounded-sm bg-primary/10 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-primary">
+            Auto-mapped
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <FieldText
+          label="Array key (optional)"
+          value={mapping.event_path ?? ""}
+          onChange={(v) => setMapping({ ...mapping, event_path: v })}
+          placeholder={probe.event_path ?? "(top-level array)"}
+        />
+        <FieldText
+          label="Timestamp format (optional)"
+          placeholder="e.g. %Y-%m-%d %H:%M:%S"
+          value={mapping.timestamp_format ?? ""}
+          onChange={(v) => setMapping({ ...mapping, timestamp_format: v })}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <FieldSelect
+          label="case_id"
+          value={mapping.case_id ?? ""}
+          onChange={set("case_id")}
+          options={fieldNames.map((h) => ({ value: h, label: h }))}
+          required
+        />
+        <FieldSelect
+          label="activity"
+          value={mapping.activity ?? ""}
+          onChange={set("activity")}
+          options={fieldNames.map((h) => ({ value: h, label: h }))}
+          required
+        />
+        <FieldSelect
+          label="timestamp"
+          value={mapping.timestamp ?? ""}
+          onChange={set("timestamp")}
+          options={fieldNames.map((h) => ({ value: h, label: h }))}
+          required
+        />
+        <FieldSelect
+          label="end_timestamp"
+          value={mapping.end_timestamp ?? "__none__"}
+          onChange={set("end_timestamp")}
+          options={[
+            { value: "__none__", label: "—" },
+            ...fieldNames.map((h) => ({ value: h, label: h })),
+          ]}
+        />
+        <FieldSelect
+          label="resource"
+          value={mapping.resource ?? "__none__"}
+          onChange={set("resource")}
+          options={[
+            { value: "__none__", label: "—" },
+            ...fieldNames.map((h) => ({ value: h, label: h })),
+          ]}
+        />
+        <FieldSelect
+          label="cost"
+          value={mapping.cost ?? "__none__"}
+          onChange={set("cost")}
+          options={[
+            { value: "__none__", label: "—" },
+            ...fieldNames.map((h) => ({ value: h, label: h })),
+          ]}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Folder import form ────────────────────────────────────────────────────────
 
 type ItemStatus = "pending" | "uploading" | "done" | "failed" | "skipped";
@@ -988,7 +1264,15 @@ interface FolderItem {
 // Schema-grouped folder import: scan each file's headers/probe once, cluster
 // by header signature, and ask the user to map each unique schema once.
 
-type SchemaKind = "xes" | "csv" | "xml-generic" | "xml-xes" | "error";
+type SchemaKind =
+  | "xes"
+  | "csv"
+  | "xml-generic"
+  | "xml-xes"
+  | "json-generic"
+  | "json-ocel"
+  | "ocel"
+  | "error";
 
 interface SchemaGroup {
   id: string; // signature — also the React key
@@ -1002,7 +1286,10 @@ interface SchemaGroup {
   // XML-only:
   probe?: XmlProbeResponse;
   xmlMapping?: Partial<XmlMapping>;
-  // Set on any scan error (malformed XML, etc.). Files in this group are
+  // JSON-only:
+  jsonProbe?: JsonProbeResponse;
+  jsonMapping?: Partial<JsonMapping>;
+  // Set on any scan error (malformed XML/JSON, etc.). Files in this group are
   // skipped at import time.
   error?: string;
 }
@@ -1032,12 +1319,23 @@ function csvSignature(headers: string[], delimiter: string): string {
 
 function xmlSignature(probe: XmlProbeResponse): string {
   if (probe.format_hint === "xes") return "xml-xes";
+  if (probe.format_hint === "ocel") return "ocel";
   const fields = probe.fields
     .map((f) => normaliseIdent(f.name))
     .filter(Boolean)
     .sort()
     .join("|");
   return `xml:${probe.event_element ?? "?"}:${fields}`;
+}
+
+function jsonSignature(probe: JsonProbeResponse): string {
+  if (probe.format_hint === "ocel") return "ocel";
+  const fields = probe.fields
+    .map((f) => normaliseIdent(f.name))
+    .filter(Boolean)
+    .sort()
+    .join("|");
+  return `json:${probe.event_path ?? "?"}:${fields}`;
 }
 
 // Bounded-concurrency map (lightweight — only used during folder scan).
@@ -1094,6 +1392,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
   const importer = useImportEventLog();
   const createFolder = useCreateFolder();
   const probeXml = useProbeXml();
+  const probeJson = useProbeJson();
 
   const [picked, setPicked] = useState<SelectedFolder | null>(null);
   const [folderName, setFolderName] = useState("");
@@ -1106,7 +1405,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
     if (!files) return;
     const collected = collectFolderItems(files);
     if (!collected || collected.items.length === 0) {
-      toastError("No supported files found (.xes, .xes.gz, .csv, or .xml).");
+      toastError("No supported files found (.xes, .xes.gz, .csv, .xml, .json, or OCEL).");
       return;
     }
     setPicked(collected);
@@ -1135,6 +1434,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
         headers?: string[];
         delimiter?: string;
         probe?: XmlProbeResponse;
+        jsonProbe?: JsonProbeResponse;
         error?: string;
       };
 
@@ -1161,12 +1461,28 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
             if (item.format === "xml") {
               const probe = await probeXml.mutateAsync(item.file);
               const sig = xmlSignature(probe);
+              const kind: SchemaKind =
+                probe.format_hint === "xes"
+                  ? "xml-xes"
+                  : probe.format_hint === "ocel"
+                    ? "ocel"
+                    : "xml-generic";
+              return { index, signature: sig, kind, probe };
+            }
+            if (item.format === "json") {
+              const jsonProbe = await probeJson.mutateAsync(item.file);
+              const sig = jsonSignature(jsonProbe);
               return {
                 index,
                 signature: sig,
-                kind: probe.format_hint === "xes" ? "xml-xes" : "xml-generic",
-                probe,
+                kind: jsonProbe.format_hint === "ocel" ? "ocel" : "json-generic",
+                jsonProbe,
               };
+            }
+            if (item.format === "ocel") {
+              // Explicit OCEL extension (.jsonocel / .xmlocel / .sqlite) — no
+              // mapping, server reads it directly.
+              return { index, signature: "ocel", kind: "ocel" };
             }
             return { index, signature: "unknown", kind: "error", error: "Unsupported file" };
           } catch (err) {
@@ -1191,6 +1507,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
             headers: s.headers,
             delimiter: s.delimiter,
             probe: s.probe,
+            jsonProbe: s.jsonProbe,
             error: s.error,
           };
           if (s.kind === "csv" && s.headers) {
@@ -1211,6 +1528,21 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
             };
           } else if (s.kind === "xml-generic" && s.probe?.event_element) {
             g.xmlMapping = { event_element: s.probe.event_element };
+          }
+          if (s.kind === "json-generic" && s.jsonProbe?.auto_mapping) {
+            const a = s.jsonProbe.auto_mapping;
+            g.jsonMapping = {
+              event_path: a.event_path ?? undefined,
+              case_id: a.case_id,
+              activity: a.activity,
+              timestamp: a.timestamp,
+              end_timestamp: a.end_timestamp ?? undefined,
+              resource: a.resource ?? undefined,
+              cost: a.cost ?? undefined,
+              timestamp_format: a.timestamp_format ?? undefined,
+            };
+          } else if (s.kind === "json-generic" && s.jsonProbe?.event_path) {
+            g.jsonMapping = { event_path: s.jsonProbe.event_path };
           }
           bySig.set(s.signature, g);
         }
@@ -1243,7 +1575,8 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
     setGroups((cur) => cur.map((g) => (g.id === id ? { ...g, ...patch } : g)));
 
   const groupReady = (g: SchemaGroup): boolean => {
-    if (g.kind === "xes" || g.kind === "xml-xes") return true;
+    if (g.kind === "xes" || g.kind === "xml-xes" || g.kind === "json-ocel" || g.kind === "ocel")
+      return true;
     if (g.kind === "error") return false;
     if (g.kind === "csv") {
       const m = g.csvMapping ?? {};
@@ -1253,12 +1586,16 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
       const m = g.xmlMapping ?? {};
       return Boolean(m.event_element && m.case_id && m.activity && m.timestamp);
     }
+    if (g.kind === "json-generic") {
+      const m = g.jsonMapping ?? {};
+      return Boolean(m.case_id && m.activity && m.timestamp);
+    }
     return false;
   };
 
   const allGroupsReady = groups.length > 0 && groups.every(groupReady);
   const needsMappingCount = groups.filter(
-    (g) => g.kind === "csv" || g.kind === "xml-generic",
+    (g) => g.kind === "csv" || g.kind === "xml-generic" || g.kind === "json-generic",
   ).length;
   const errorCount = groups.filter((g) => g.kind === "error").length;
   const skippedCount = groups
@@ -1278,6 +1615,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
   const buildMappingForGroup = (g: SchemaGroup): {
     csvMapping?: Record<string, unknown>;
     xmlMapping?: Record<string, unknown>;
+    jsonMapping?: Record<string, unknown>;
   } => {
     if (g.kind === "csv" && g.csvMapping) {
       return {
@@ -1299,6 +1637,20 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
           resource: g.xmlMapping.resource || undefined,
           cost: g.xmlMapping.cost || undefined,
           timestamp_format: g.xmlMapping.timestamp_format || undefined,
+        },
+      };
+    }
+    if (g.kind === "json-generic" && g.jsonMapping?.case_id) {
+      return {
+        jsonMapping: {
+          event_path: g.jsonMapping.event_path || undefined,
+          case_id: g.jsonMapping.case_id,
+          activity: g.jsonMapping.activity,
+          timestamp: g.jsonMapping.timestamp,
+          end_timestamp: g.jsonMapping.end_timestamp || undefined,
+          resource: g.jsonMapping.resource || undefined,
+          cost: g.jsonMapping.cost || undefined,
+          timestamp_format: g.jsonMapping.timestamp_format || undefined,
         },
       };
     }
@@ -1358,7 +1710,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
         );
         try {
           const cleanFileName = item.file.name.replace(
-            /\.(xes\.gz|xes|csv|xml)$/i,
+            /\.(xes\.gz|xes|csv|xml|json|jsonocel|xmlocel|sqlite)$/i,
             "",
           );
           const mapping = g ? buildMappingForGroup(g) : {};
@@ -1368,6 +1720,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
             folderId: folder.id,
             csvMapping: mapping.csvMapping,
             xmlMapping: mapping.xmlMapping,
+            jsonMapping: mapping.jsonMapping,
           });
           if (firstLogId === null) firstLogId = resp.log_id;
           ok++;
@@ -1404,7 +1757,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
         const parts = [`Imported ${ok}`];
         if (failed) parts.push(`${failed} failed`);
         if (skipped) parts.push(`${skipped} skipped`);
-        toast.warning(`${parts.join(", ")} — see status below`);
+        toast.warning(`${parts.join(", ")} - see status below`);
       } else {
         toastError(`All uploads failed or skipped`);
       }
@@ -1434,8 +1787,8 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
         <FolderOpen className="h-8 w-8 text-muted-foreground" />
         <div className="text-sm font-medium">Select a folder of event logs</div>
         <div className="text-xs text-muted-foreground">
-          All .xes, .xes.gz, and .csv files inside will be imported into a new
-          folder named after the selected directory.
+          All .xes, .xes.gz, .csv, .xml, .json, and OCEL files inside will be imported into a
+          new folder named after the selected directory.
         </div>
         <input
           ref={inputRef}
@@ -1595,8 +1948,18 @@ function SchemaGroupCard({
     "xml-xes": "XES inside XML",
     csv: "CSV",
     "xml-generic": "Generic XML",
+    "json-generic": "Generic JSON",
+    "json-ocel": "OCEL (JSON)",
+    ocel: "OCEL",
     error: "Unscannable",
   };
+
+  const noMappingNeeded =
+    group.kind === "xes" ||
+    group.kind === "xml-xes" ||
+    group.kind === "json-ocel" ||
+    group.kind === "ocel";
+  const needsMapping = group.kind === "csv" || group.kind === "xml-generic" || group.kind === "json-generic";
 
   return (
     <div
@@ -1612,7 +1975,7 @@ function SchemaGroupCard({
               {headerLabel[group.kind]} · {groupItems.length} file
               {groupItems.length === 1 ? "" : "s"}
             </span>
-            {(group.kind === "xes" || group.kind === "xml-xes") && (
+            {noMappingNeeded && (
               <span className="rounded-sm bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
                 No mapping needed
               </span>
@@ -1622,7 +1985,7 @@ function SchemaGroupCard({
                 Will be skipped
               </span>
             )}
-            {(group.kind === "csv" || group.kind === "xml-generic") && (
+            {needsMapping && (
               <span
                 className={cn(
                   "rounded-sm px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
@@ -1676,6 +2039,17 @@ function SchemaGroupCard({
           loading={false}
           error={null}
           autoMappingApplied={Boolean(group.probe.auto_mapping)}
+        />
+      )}
+
+      {group.kind === "json-generic" && group.jsonProbe && (
+        <JsonMappingSection
+          probe={group.jsonProbe}
+          mapping={group.jsonMapping ?? {}}
+          setMapping={(m) => onChange({ jsonMapping: m })}
+          loading={false}
+          error={null}
+          autoMappingApplied={Boolean(group.jsonProbe.auto_mapping)}
         />
       )}
     </div>

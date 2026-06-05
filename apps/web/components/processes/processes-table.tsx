@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -380,7 +381,7 @@ export function ProcessesTable({ rows }: ProcessesTableProps) {
           ))}
           {flat.length === 0 && (
             <div className="p-6 text-center text-sm text-muted-foreground">
-              No items yet — import an event log to get started.
+              No items yet - import an event log to get started.
             </div>
           )}
           <RootDropZone visible={Boolean(activeId)} />
@@ -841,6 +842,18 @@ function LogRow({
                     </HoverCardContent>
                   )}
                 </HoverCard>
+              )}
+              {ready && row.mapping_needs_review && (
+                <Link
+                  href={`/processes/${row.id}?tab=settings`}
+                  data-row-stop
+                  onClick={(e) => e.stopPropagation()}
+                  className="mt-1 flex w-fit items-center gap-1 text-amber-600 hover:underline dark:text-amber-500"
+                  title="The importer guessed one or more mandatory columns. Open settings to confirm the mapping."
+                >
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  <span className="truncate text-xs">Review column mapping</span>
+                </Link>
               )}
             </div>
             <div className="text-right tabular-nums">{formatNumber(row.cases_count)}</div>

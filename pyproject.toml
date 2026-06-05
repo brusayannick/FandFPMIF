@@ -1,4 +1,4 @@
-# uv virtual workspace root for Flows & Funds.
+# uv virtual workspace root for Mate.
 # The root is not itself an installable package — members live under apps/ and packages/.
 # See INSTRUCTIONS.md §4 for the layout rationale.
 

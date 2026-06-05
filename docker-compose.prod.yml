@@ -17,7 +17,7 @@
 services:
   proxy:
     image: caddy:2-alpine
-    container_name: flows-funds-proxy
+    container_name: mate-proxy
     restart: unless-stopped
     # Resolve the public hostname to this Caddy container on the internal
     # network, so the web container's server-side OIDC calls reach Keycloak
@@ -82,7 +82,7 @@ services:
     # x86-64-v2 (the official UBI9 image fatally aborts there). See
     # infra/keycloak/Dockerfile. Remove this block once the VM's CPU model
     # exposes x86-64-v2 (host-passthrough) to go back to the upstream image.
-    image: flowsfunds-keycloak:26-debian
+    image: mate-keycloak:26-debian
     build:
       context: .
       dockerfile: infra/keycloak/Dockerfile

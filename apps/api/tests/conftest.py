@@ -25,7 +25,7 @@ def event_loop() -> Iterator[asyncio.AbstractEventLoop]:
 
 
 TEST_USER_ID = "00000000-0000-7000-8000-000000000001"
-TEST_USER_EMAIL = "test@flows-funds.local"
+TEST_USER_EMAIL = "test@mate.local"
 
 
 @pytest.fixture(scope="session")
@@ -49,14 +49,14 @@ def _configure_env(session_data_dir: Path) -> Iterator[None]:
     empty_modules.mkdir(exist_ok=True)
     os.environ["MODULES_DIR"] = str(empty_modules)
     # Force the lru_cache'd settings to be re-read.
-    from flows_funds.api import config as cfg
+    from mate.api import config as cfg
 
     cfg.get_settings.cache_clear()
 
     # Build the schema by running migrations head.
     from sqlalchemy import create_engine
 
-    from flows_funds.api.db.models import Base, User
+    from mate.api.db.models import Base, User
 
     sync_url = (
         os.environ["DATABASE_URL"]
@@ -91,11 +91,11 @@ def _override_current_user_for_tests(app) -> None:
     """Bypass JWT validation by overriding ``get_current_user`` in the app.
 
     All routes that depend on ``CurrentUserDep`` route through
-    ``flows_funds.api.auth.dependencies.get_current_user``. FastAPI's
+    ``mate.api.auth.dependencies.get_current_user``. FastAPI's
     ``dependency_overrides`` swaps it out at the app level — far cleaner than
     forging a token + JWKS for every test.
     """
-    from flows_funds.api.auth.dependencies import (
+    from mate.api.auth.dependencies import (
         CurrentUser,
         get_current_user,
     )
@@ -116,7 +116,7 @@ def _override_current_user_for_tests(app) -> None:
 
 @pytest.fixture
 async def client() -> AsyncIterator[AsyncClient]:
-    from flows_funds.api.main import create_app
+    from mate.api.main import create_app
 
     app = create_app()
     _override_current_user_for_tests(app)
@@ -134,9 +134,9 @@ async def _seed_module_installs_for_test_user() -> None:
     do that in the install job — here we seed it so the sample module shows up
     in the test user's listing.
     """
-    from flows_funds.api.db.engine import get_sessionmaker
-    from flows_funds.api.modules import get_module_loader
-    from flows_funds.api.modules.installs import record_install
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.modules import get_module_loader
+    from mate.api.modules.installs import record_install
 
     loader = get_module_loader()
     sm = get_sessionmaker()
@@ -164,7 +164,7 @@ async def _sample_mod_client(
     prev_modules = os.environ.get("MODULES_DIR")
     os.environ["MODULES_DIR"] = str(tmp_path / "modules")
 
-    from flows_funds.api import config as cfg
+    from mate.api import config as cfg
 
     cfg.get_settings.cache_clear()
     # Uploads land under the shared session data_dir; clear the root so a
@@ -172,7 +172,7 @@ async def _sample_mod_client(
     shutil.rmtree(cfg.get_settings().uploaded_modules_dir, ignore_errors=True)
 
     try:
-        from flows_funds.api.main import create_app
+        from mate.api.main import create_app
 
         app = create_app()
         _override_current_user_for_tests(app)

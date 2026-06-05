@@ -39,7 +39,7 @@ def _module_zip(module_id: str) -> bytes:
         zf.writestr(
             f"{module_id}/module.py",
             (
-                "from flows_funds.sdk import Module, ModuleContext, route\n\n"
+                "from mate.sdk import Module, ModuleContext, route\n\n"
                 f"class TheModule(Module):\n"
                 f"    id = \"{module_id}\"\n\n"
                 "    @route.get(\"/ping\")\n"
@@ -52,8 +52,8 @@ def _module_zip(module_id: str) -> bytes:
 
 async def _reset_user_modules(user_id: str = TEST_USER_ID) -> None:
     """Clear a user's install rows + the seeded flag for a deterministic slate."""
-    from flows_funds.api.db.engine import get_sessionmaker
-    from flows_funds.api.db.models import ModuleInstall, UserSetting
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.db.models import ModuleInstall, UserSetting
 
     sm = get_sessionmaker()
     async with sm() as s:
@@ -67,8 +67,8 @@ async def _reset_user_modules(user_id: str = TEST_USER_ID) -> None:
 
 
 async def _install_row_source(user_id: str, module_id: str) -> str | None:
-    from flows_funds.api.db.engine import get_sessionmaker
-    from flows_funds.api.db.models import ModuleInstall
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.db.models import ModuleInstall
 
     sm = get_sessionmaker()
     async with sm() as s:
@@ -121,7 +121,7 @@ async def test_uninstall_default_keeps_repo_files(
     client_with_sample_mod: AsyncClient,
 ) -> None:
     """Uninstalling a default drops only the user's row — repo code survives."""
-    from flows_funds.api.config import get_settings
+    from mate.api.config import get_settings
 
     module_py = get_settings().modules_dir / "sample_mod" / "module.py"
     assert module_py.exists()
@@ -140,7 +140,7 @@ async def test_upload_rejects_default_id(
 ) -> None:
     """An upload whose id collides with a default must fail loudly and never
     overwrite the default's repo code."""
-    from flows_funds.api.config import get_settings
+    from mate.api.config import get_settings
 
     module_py = get_settings().modules_dir / "sample_mod" / "module.py"
     before = module_py.read_text()
@@ -164,13 +164,13 @@ async def test_upload_rejects_other_users_id(
     client_with_sample_mod: AsyncClient,
 ) -> None:
     """An upload whose id is already owned by another user must fail."""
-    from flows_funds.api.db.engine import get_sessionmaker
-    from flows_funds.api.db.models import ModuleInstall, User
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.db.models import ModuleInstall, User
 
     sm = get_sessionmaker()
     async with sm() as s:
         if await s.get(User, OTHER_USER_ID) is None:
-            s.add(User(id=OTHER_USER_ID, email="other@flows-funds.local"))
+            s.add(User(id=OTHER_USER_ID, email="other@mate.local"))
             await s.flush()
         if await s.get(ModuleInstall, (OTHER_USER_ID, "foreign_mod")) is None:
             s.add(

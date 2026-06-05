@@ -251,8 +251,8 @@ function RegistryTab({ onInstalled }: { onInstalled: (jobId: string) => void }) 
     <Card>
       <CardContent className="space-y-4">
         <p className="text-xs text-muted-foreground">
-          Resolves through the <code className="rounded bg-muted px-1">flows_funds.modules</code> entry point.
-          Currently pending — install will fail with a clear message until entry-point discovery lands.
+          Resolves through the <code className="rounded bg-muted px-1">mate.modules</code> entry point.
+          Currently pending - install will fail with a clear message until entry-point discovery lands.
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="space-y-2">
@@ -271,7 +271,7 @@ function RegistryTab({ onInstalled }: { onInstalled: (jobId: string) => void }) 
             <Label htmlFor="reg-id">Package id</Label>
             <Input
               id="reg-id"
-              placeholder="flows-funds-organizational"
+              placeholder="mate-organizational"
               value={id}
               onChange={(e) => setId(e.target.value)}
               disabled={mutation.isPending}

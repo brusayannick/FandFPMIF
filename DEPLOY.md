@@ -1,4 +1,4 @@
-# Deploying Flows & Funds to the uni VM
+# Deploying Mate to the uni VM
 
 Production deployment to `pm-mate.uni-muenster.de`, fronted by the FB4 reverse
 proxy. For the local-`localhost` setup, see [`README.md`](./README.md) — this
@@ -228,7 +228,7 @@ the password prompt.
 ### Or manually on the VM
 
 ```bash
-cd flows-funds && git pull
+cd mate && git pull
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 

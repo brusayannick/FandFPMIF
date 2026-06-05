@@ -1,4 +1,4 @@
-# Flows & Funds
+# Mate
 
 A locally-hosted, modular process mining platform. Two services (`api` + `web`)
 plus a bundled Keycloak (`keycloak` + `keycloak-db`) for OIDC login,
@@ -12,8 +12,8 @@ the module authoring contract, read [`modules/README.md`](./modules/README.md).
 ## Quick start
 
 ```bash
-git clone <repo-url> flows-funds
-cd flows-funds
+git clone <repo-url> mate
+cd mate
 cp .env.example .env   # then rotate AUTH_SECRET + KEYCLOAK_CLIENT_SECRET
 make up
 ```
@@ -38,8 +38,8 @@ To add additional users, sign in to the Keycloak admin console at
 1. **Clone the repo.**
 
    ```bash
-   git clone <repo-url> flows-funds
-   cd flows-funds
+   git clone <repo-url> mate
+   cd mate
    ```
 
 2. **Build and start the stack.** `make up` is a thin wrapper around `docker compose up -d --build` — it builds both images (`api`, `web`) and starts them detached. Either command works:
@@ -168,7 +168,7 @@ docker compose run --rm web pnpm typecheck
 ## Layout
 
 ```
-flows-funds/
+mate/
 ├── apps/
 │   ├── api/         # FastAPI backend
 │   └── web/         # Next.js 15 frontend
@@ -186,7 +186,7 @@ flows-funds/
 ```bash
 mkdir modules/my_mod
 $EDITOR modules/my_mod/manifest.yaml   # see modules/README.md §3
-$EDITOR modules/my_mod/module.py        # subclass flows_funds.sdk.Module
+$EDITOR modules/my_mod/module.py        # subclass mate.sdk.Module
 make up-dev                             # restart picks it up
 ```
 

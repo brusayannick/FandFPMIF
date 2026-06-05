@@ -1,4 +1,4 @@
-# Authoring a Flows & Funds Module
+# Authoring a Mate Module
 
 This is the practical guide for building a module. For the platform-level rationale (why Parquet, why DuckDB, why per-module venvs) read [`/INSTRUCTIONS.md` §5](../INSTRUCTIONS.md). This document is the contract: what to put on disk, what the platform calls, what your module is allowed to call back.
 
@@ -44,7 +44,7 @@ modules/<folder>/
 
 ## 3. `manifest.yaml`
 
-Every field is validated by the SDK ([`packages/module-sdk-py/src/flows_funds/sdk/manifest.py`](../packages/module-sdk-py/src/flows_funds/sdk/manifest.py)). Manifest errors fail loud at startup.
+Every field is validated by the SDK ([`packages/module-sdk-py/src/mate/sdk/manifest.py`](../packages/module-sdk-py/src/mate/sdk/manifest.py)). Manifest errors fail loud at startup.
 
 ```yaml
 id: my_module                       # lowercase snake_case, globally unique
@@ -113,7 +113,7 @@ Rules the manifest validator enforces:
 ## 4. `module.py` — the entry point
 
 ```python
-from flows_funds.sdk import Module, ModuleContext, on_event, route, job
+from mate.sdk import Module, ModuleContext, on_event, route, job
 
 
 class MyModule(Module):
@@ -152,7 +152,7 @@ Rules:
 - Decorators only attach metadata. There is no `register(...)` call — the manifest is the registration.
 - Handlers may be `async def` or plain `def`. Sync handlers are auto-wrapped so they cannot block the event loop:
   - `@route.*` rides FastAPI's built-in `run_in_threadpool`.
-  - `@on_event` and `@job` are wrapped by the SDK with `asyncio.to_thread` ([`decorators.py`](../packages/module-sdk-py/src/flows_funds/sdk/decorators.py)).
+  - `@on_event` and `@job` are wrapped by the SDK with `asyncio.to_thread` ([`decorators.py`](../packages/module-sdk-py/src/mate/sdk/decorators.py)).
 - For anything expected to run more than a few seconds, add `@job` so the user sees a toast / dock entry / progress bar instead of a hung request.
 
 ### `@route.*`
@@ -191,7 +191,7 @@ When `@job` wraps a route, the route returns `{ "job_id": "..." }` immediately a
 
 ## 5. `ModuleContext` — what every handler receives
 
-Defined in [`packages/module-sdk-py/src/flows_funds/sdk/context.py`](../packages/module-sdk-py/src/flows_funds/sdk/context.py). All fields are typed Protocols — depend on the Protocol, not the implementation.
+Defined in [`packages/module-sdk-py/src/mate/sdk/context.py`](../packages/module-sdk-py/src/mate/sdk/context.py). All fields are typed Protocols — depend on the Protocol, not the implementation.
 
 ```python
 @dataclass
@@ -305,7 +305,7 @@ The platform loads each module's frontend bundle from `modules/<folder>/.dist/` 
 
 ```tsx
 // modules/<folder>/panel/index.tsx
-import type { ModulePanelProps } from "@flows-funds/module-sdk-ts";
+import type { ModulePanelProps } from "@mate/module-sdk-ts";
 
 export default function Panel({ logId, moduleId, config }: ModulePanelProps) {
   // render whatever you want; common building blocks (process visualiser,
@@ -314,14 +314,14 @@ export default function Panel({ logId, moduleId, config }: ModulePanelProps) {
 }
 ```
 
-Use the shadcn-themed building blocks in `@flows-funds/module-sdk-ts` rather than re-implementing tables, KPI cards, charts. They consume the same CSS variables as the host app, so light/dark and density switches just work.
+Use the shadcn-themed building blocks in `@mate/module-sdk-ts` rather than re-implementing tables, KPI cards, charts. They consume the same CSS variables as the host app, so light/dark and density switches just work.
 
 ### Widgets
 
 Widgets advertised in `manifest.frontend.widgets` can be embedded by other modules:
 
 ```tsx
-import { useWidget } from "@flows-funds/module-sdk-ts";
+import { useWidget } from "@mate/module-sdk-ts";
 
 const ThroughputChart = useWidget("performance", "throughput-chart");
 return <ThroughputChart logId={logId} config={{}} />;
@@ -334,14 +334,14 @@ return <ThroughputChart logId={logId} config={{}} />;
 Use the platform fetch helper — it injects the auth/session correctly and respects the API base URL:
 
 ```tsx
-import { api } from "@flows-funds/module-sdk-ts";
+import { api } from "@mate/module-sdk-ts";
 const kpis = await api.get(`/api/v1/modules/${moduleId}/kpis?log_id=${logId}`);
 ```
 
 For real-time updates, subscribe to the `WS /events` stream filtered by your topic:
 
 ```tsx
-import { useEvents } from "@flows-funds/module-sdk-ts";
+import { useEvents } from "@mate/module-sdk-ts";
 useEvents(["my_module.kpi.computed"], (env) => { ... });
 ```
 
@@ -380,7 +380,7 @@ Commit `manifest.yaml`, `module.py`, your tests, your frontend sources, and `uv.
 
 ## 9. Lifecycle a module goes through
 
-1. **Discovery.** On boot the platform scans `modules/*/manifest.yaml` (one level deep) and any installed Python entry points exposing `flows_funds.modules`.
+1. **Discovery.** On boot the platform scans `modules/*/manifest.yaml` (one level deep) and any installed Python entry points exposing `mate.modules`.
 2. **Validation.** Manifests parsed; dep graph built; cycles or missing hard deps abort startup.
 3. **Materialise dependencies.** `uv sync` per module if its dep hash changed; same for the JS bundle.
 4. **Topological load.** Hard-dep order. Your module's `Module` subclass is instantiated once.
@@ -399,7 +399,7 @@ Put pytest tests in `modules/<folder>/tests/`. The SDK ships test helpers that b
 ```python
 # modules/my_module/tests/test_handlers.py
 import pytest
-from flows_funds.sdk.testing import build_test_context, sample_log
+from mate.sdk.testing import build_test_context, sample_log
 
 from modules.my_module.module import MyModule
 
@@ -428,7 +428,7 @@ Three channels are supported by the *Settings → Modules → Import* flow:
 
 1. **Zip / tarball** — drop `modules/<folder>/` into a `.zip` or `.tar.gz`.
 2. **Git URL** — repo root must contain the module folder layout from §2.
-3. **PyPI / npm** — publish a Python package exposing the `flows_funds.modules` entry point. The platform discovers it without copying files into `modules/`.
+3. **PyPI / npm** — publish a Python package exposing the `mate.modules` entry point. The platform discovers it without copying files into `modules/`.
 
 For the first two, the platform unpacks into `modules/<id>/`, runs `uv sync`, runs the JS bundle step, and mounts. Failures roll back cleanly — a half-installed folder is deleted.
 
@@ -438,11 +438,11 @@ For the first two, the platform unpacks into `modules/<id>/`, runs `uv sync`, ru
 
 Before submitting a module:
 
-- [ ] `manifest.yaml` validates (run `uv run python -c "from flows_funds.sdk import Manifest; Manifest.load_yaml('modules/<folder>/manifest.yaml')"`).
+- [ ] `manifest.yaml` validates (run `uv run python -c "from mate.sdk import Manifest; Manifest.load_yaml('modules/<folder>/manifest.yaml')"`).
 - [ ] `id` matches between `manifest.yaml` and `module.py`.
 - [ ] Every emitted bus topic is in `provides:`; every subscribed topic is in `consumes:`.
 - [ ] Every `ctx.registry.call(...)` target is in `consumes:` or `optional_modules:`.
-- [ ] No imports from `apps/api/*` or `apps/web/*` — only `flows_funds.sdk` and `@flows-funds/module-sdk-ts`.
+- [ ] No imports from `apps/api/*` or `apps/web/*` — only `mate.sdk` and `@mate/module-sdk-ts`.
 - [ ] Long operations use `@job(progress=True)`.
 - [ ] Sync `def` handlers are fine — don't reach for `asyncio.run` or `loop.run_until_complete`. The SDK auto-wraps.
 - [ ] Tests run green against the platform's `inherit` versions.

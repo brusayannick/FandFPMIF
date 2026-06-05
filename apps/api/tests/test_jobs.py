@@ -19,7 +19,7 @@ async def test_bus_schema_enforcement() -> None:
     """
     from pydantic import BaseModel
 
-    from flows_funds.api.events.bus import EventBus, EventSchemaError
+    from mate.api.events.bus import EventBus, EventSchemaError
 
     class KpiPayload(BaseModel):
         log_id: str
@@ -57,7 +57,7 @@ async def test_runtime_run_in_process_uses_worker_pid() -> None:
     direct evidence — `os.getpid` is picklable and returns the worker's PID
     when run inside the executor.
     """
-    from flows_funds.api.jobs.runtime import JobRuntime
+    from mate.api.jobs.runtime import JobRuntime
 
     rt = JobRuntime()
     try:
@@ -146,7 +146,7 @@ async def test_ws_events_receives_job_lifecycle(client: AsyncClient) -> None:
 
     We use the same ASGI transport so this exercises the real route — no network hop.
     """
-    from flows_funds.api.main import create_app
+    from mate.api.main import create_app
 
     app = create_app()
     received: list[dict] = []

@@ -21,7 +21,7 @@ Rewrite [README.md](README.md) in place. Single file changed.
 2. **Prerequisites** — Docker Desktop (Mac/Windows) or Docker Engine + Compose v2 (Linux). Nothing else. Note: ~2 GB free disk for the images, ports `3000` and `8000` free.
 3. **Install & start** — Docker only:
    ```bash
-   git clone <repo> && cd flows-funds
+   git clone <repo> && cd mate
    make up           # builds images, starts api + web in the background
    ```
    Open <http://localhost:3000>. First run lands on `/processes` empty state. Drop a XES / XES.gz / CSV to start mining.

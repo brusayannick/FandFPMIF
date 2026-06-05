@@ -46,6 +46,15 @@ services:
       NEXT_PUBLIC_API_URL: https://pm-mate.uni-muenster.de
       AUTH_URL: https://pm-mate.uni-muenster.de
       KEYCLOAK_ISSUER: https://pm-mate.uni-muenster.de/auth/realms/flows-funds
+      # The OIDC code→token exchange runs server-side. Left to public DNS it
+      # would hairpin out through the uni proxy and back, which times out /
+      # double-submits the auth code → "Code not valid". extra_hosts below keeps
+      # that call on-box (→ our Caddy); Caddy serves the pm-mate-vm cert (name
+      # mismatch for pm-mate), so skip verification for this internal hop.
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+    # Resolve the public hostname to the Docker host, where Caddy listens on 443.
+    extra_hosts:
+      - "pm-mate.uni-muenster.de:host-gateway"
     ports: !reset []
 
   api:

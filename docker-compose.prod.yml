@@ -60,6 +60,11 @@ services:
       # resolve to our Caddy on the internal network instead. Caddy serves the
       # pm-mate-vm cert (name mismatch for pm-mate) → skip verify on this hop.
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      # Option 3: keep the session (access+refresh tokens) server-side on disk;
+      # the cookie carries only an opaque id → tiny, no proxy header-buffer 502.
+      SESSION_STORE_DIR: /app/sessions
+    volumes:
+      - ./data/web-sessions:/app/sessions
     ports: !reset []
 
   api:

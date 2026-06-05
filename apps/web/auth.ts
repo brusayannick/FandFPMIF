@@ -1,8 +1,11 @@
 /**
  * Auth.js v5 configuration.
  *
- * - JWT-only sessions (no DB adapter) — the encrypted cookie holds Keycloak's
- *   access + refresh tokens.
+ * - Sessions use the JWT strategy. By default the encrypted cookie holds
+ *   Keycloak's access + refresh tokens. When SESSION_STORE_DIR is set
+ *   (production), a custom jwt.encode/decode keeps that payload server-side
+ *   (see lib/session-store) and the cookie carries only an opaque session id —
+ *   so the cookie stays tiny and can't overflow the upstream proxy's buffer.
  * - The `jwt` callback rotates the access token via Keycloak's `/token`
  *   endpoint when it's within 30 s of expiry. On refresh failure we set
  *   `token.error = "RefreshAccessTokenError"`; the api wrapper picks that up
@@ -14,9 +17,11 @@
  *   the IdP session times out.
  */
 
+import { randomBytes } from "node:crypto";
 import NextAuth, { type DefaultSession } from "next-auth";
 import KeycloakProvider from "next-auth/providers/keycloak";
-import type { JWT } from "next-auth/jwt";
+import type { JWT, JWTEncodeParams, JWTDecodeParams } from "next-auth/jwt";
+import * as sessionStore from "@/lib/session-store";
 
 declare module "next-auth" {
   interface Session {
@@ -36,6 +41,8 @@ declare module "next-auth/jwt" {
     expiresAt?: number;
     provider?: string;
     error?: "RefreshAccessTokenError";
+    /** Server-side store key — present only when SESSION_STORE_DIR is set. */
+    sid?: string;
   }
 }
 
@@ -102,6 +109,29 @@ async function doRefreshAccessToken(token: JWT): Promise<JWT> {
   }
 }
 
+const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days, in seconds
+
+// Option 3: when a server-side store is configured, override how the session
+// JWT is (de)serialized — persist the full token to disk under a random id and
+// hand the browser only that id. Without the store, Auth.js's default
+// cookie-based JWT encoding is used unchanged (local dev).
+const jwtOverride = sessionStore.sessionStoreEnabled
+  ? {
+      async encode(params: JWTEncodeParams<JWT>): Promise<string> {
+        const token = params.token;
+        if (!token) return "";
+        const sid = token.sid ?? randomBytes(32).toString("hex");
+        token.sid = sid;
+        await sessionStore.putSession(sid, token, params.maxAge ?? SESSION_MAX_AGE);
+        return sid;
+      },
+      async decode(params: JWTDecodeParams): Promise<JWT | null> {
+        if (!params.token) return null;
+        return sessionStore.readSession(params.token);
+      },
+    }
+  : undefined;
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
     KeycloakProvider({
@@ -110,7 +140,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       issuer: KEYCLOAK_ISSUER,
     }),
   ],
-  session: { strategy: "jwt" },
+  session: { strategy: "jwt", maxAge: SESSION_MAX_AGE },
+  ...(jwtOverride ? { jwt: jwtOverride } : {}),
   callbacks: {
     async jwt({ token, account }) {
       if (account) {

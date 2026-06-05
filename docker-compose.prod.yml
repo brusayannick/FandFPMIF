@@ -73,9 +73,12 @@ services:
       context: .
       dockerfile: infra/keycloak/Dockerfile
     environment:
-      # Full public URL → issuer becomes
-      # https://pm-mate.uni-muenster.de/auth/realms/flows-funds.
-      KC_HOSTNAME: https://pm-mate.uni-muenster.de
+      # The issuer is derived purely from KC_HOSTNAME (hostname v2 does NOT
+      # prepend the relative path), so the /auth path must live here too —
+      # issuer becomes https://pm-mate.uni-muenster.de/auth/realms/flows-funds,
+      # matching KEYCLOAK_ISSUER on web/api.
+      KC_HOSTNAME: https://pm-mate.uni-muenster.de/auth
+      # Serve the endpoints under /auth so Caddy's /auth/* route hits them.
       KC_HTTP_RELATIVE_PATH: /auth
       # Keep the management endpoints (port 9000: /health, /metrics) at root so
       # the base healthcheck's `/health/ready` keeps working — otherwise the

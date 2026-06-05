@@ -19,6 +19,13 @@ services:
     image: caddy:2-alpine
     container_name: flows-funds-proxy
     restart: unless-stopped
+    # Resolve the public hostname to this Caddy container on the internal
+    # network, so the web container's server-side OIDC calls reach Keycloak
+    # on-box (via Caddy) instead of hairpinning through the uni proxy.
+    networks:
+      default:
+        aliases:
+          - pm-mate.uni-muenster.de
     ports:
       - "443:443"
     volumes:
@@ -46,15 +53,13 @@ services:
       NEXT_PUBLIC_API_URL: https://pm-mate.uni-muenster.de
       AUTH_URL: https://pm-mate.uni-muenster.de
       KEYCLOAK_ISSUER: https://pm-mate.uni-muenster.de/auth/realms/flows-funds
-      # The OIDC code→token exchange runs server-side. Left to public DNS it
-      # would hairpin out through the uni proxy and back, which times out /
-      # double-submits the auth code → "Code not valid". extra_hosts below keeps
-      # that call on-box (→ our Caddy); Caddy serves the pm-mate-vm cert (name
-      # mismatch for pm-mate), so skip verification for this internal hop.
+      # Server-side OIDC calls (esp. the code→token POST) must NOT hairpin out
+      # through the uni proxy — that retried the POST and invalidated the
+      # single-use code ("Code not valid"). The proxy service carries a docker
+      # network alias for the public hostname (see below), so these calls
+      # resolve to our Caddy on the internal network instead. Caddy serves the
+      # pm-mate-vm cert (name mismatch for pm-mate) → skip verify on this hop.
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
-    # Resolve the public hostname to the Docker host, where Caddy listens on 443.
-    extra_hosts:
-      - "pm-mate.uni-muenster.de:host-gateway"
     ports: !reset []
 
   api:

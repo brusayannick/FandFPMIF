@@ -7,8 +7,11 @@
  *   endpoint when it's within 30 s of expiry. On refresh failure we set
  *   `token.error = "RefreshAccessTokenError"`; the api wrapper picks that up
  *   and triggers a fresh sign-in.
- * - `events.signOut` hits Keycloak's end-session endpoint so the SSO session
- *   on the IdP is killed too, not just our cookie.
+ * - Logout is local-only (clears our cookie). We deliberately do NOT store the
+ *   id_token in the session — it would bloat the cookie past the upstream
+ *   reverse proxy's header buffer (502 on the callback). The trade-off: the
+ *   Keycloak SSO session is not killed on logout, so re-login is silent until
+ *   the IdP session times out.
  */
 
 import NextAuth, { type DefaultSession } from "next-auth";
@@ -30,7 +33,6 @@ declare module "next-auth/jwt" {
   interface JWT {
     accessToken?: string;
     refreshToken?: string;
-    idToken?: string;
     expiresAt?: number;
     provider?: string;
     error?: "RefreshAccessTokenError";
@@ -41,8 +43,31 @@ const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER ?? "http://localhost:8080/re
 const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID ?? "flows-funds-web";
 const KEYCLOAK_CLIENT_SECRET = process.env.KEYCLOAK_CLIENT_SECRET ?? "";
 
+// Single-flight guard: several modules (`lib/api`, `lib/ws`, the analytics
+// client) each call `getSession()` independently, so after the access token
+// expires a burst of activity can fire multiple `jwt` callbacks at once — all
+// trying to redeem the *same* refresh token. With Keycloak rotation on, only
+// the first redemption is valid; the rest race into `invalid_grant`. We dedupe
+// concurrent refreshes per refresh token so one Keycloak call serves them all.
+// (In-process only — a multi-instance deployment still relies on Keycloak's
+// `refreshTokenMaxReuse` window to absorb cross-instance races.)
+const inflightRefreshes = new Map<string, Promise<JWT>>();
+
 async function refreshAccessToken(token: JWT): Promise<JWT> {
   if (!token.refreshToken) return { ...token, error: "RefreshAccessTokenError" };
+  const key = token.refreshToken;
+  const existing = inflightRefreshes.get(key);
+  if (existing) return existing;
+  const pending = doRefreshAccessToken(token).finally(() => {
+    inflightRefreshes.delete(key);
+  });
+  inflightRefreshes.set(key, pending);
+  return pending;
+}
+
+async function doRefreshAccessToken(token: JWT): Promise<JWT> {
+  const refreshToken = token.refreshToken;
+  if (!refreshToken) return { ...token, error: "RefreshAccessTokenError" };
   try {
     const resp = await fetch(`${KEYCLOAK_ISSUER}/protocol/openid-connect/token`, {
       method: "POST",
@@ -51,7 +76,7 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
         grant_type: "refresh_token",
         client_id: KEYCLOAK_CLIENT_ID,
         client_secret: KEYCLOAK_CLIENT_SECRET,
-        refresh_token: token.refreshToken,
+        refresh_token: refreshToken,
       }),
     });
     const data = (await resp.json()) as {
@@ -68,7 +93,6 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
       ...token,
       accessToken: data.access_token,
       refreshToken: data.refresh_token ?? token.refreshToken,
-      idToken: data.id_token ?? token.idToken,
       // Auth.js v5 expects seconds — not ms. Don't multiply by 1000.
       expiresAt: Math.floor(Date.now() / 1000) + data.expires_in,
       error: undefined,
@@ -92,7 +116,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (account) {
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
-        token.idToken = account.id_token;
         token.expiresAt = account.expires_at;
         token.provider = account.provider;
         return token;
@@ -109,22 +132,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       session.provider = token.provider;
       if (token.sub) session.user.id = token.sub;
       return session;
-    },
-  },
-  events: {
-    async signOut(message) {
-      const idToken =
-        "token" in message && message.token
-          ? (message.token as JWT).idToken
-          : undefined;
-      if (!idToken) return;
-      const url = new URL(`${KEYCLOAK_ISSUER}/protocol/openid-connect/logout`);
-      url.searchParams.set("id_token_hint", idToken);
-      try {
-        await fetch(url.toString(), { method: "GET" });
-      } catch {
-        // Best-effort; ignore.
-      }
     },
   },
 });

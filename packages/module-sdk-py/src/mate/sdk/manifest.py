@@ -94,6 +94,13 @@ class WidgetEntry(BaseModel):
     # placed card in edit mode; the chosen values land in the placement's
     # `config` and are passed to the widget as its `config` prop.
     config_schema: dict[str, Any] | None = None
+    # Which log data model(s) this card applies to. A dashboard is created for
+    # one model (case-centric vs object-centric/OCEL) and its palette only
+    # offers cards whose `log_models` include the board's model. Defaults to
+    # case-centric so every existing widget keeps working unchanged.
+    log_models: list[Literal["case_centric", "object_centric"]] = Field(
+        default_factory=lambda: ["case_centric"]
+    )
 
 
 class PageLayoutSection(BaseModel):
@@ -127,8 +134,37 @@ class AiModelsManifest(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    # When true, the module manages its **own** OpenAI API key (persisted under
+    # ``module_configs.config_json["ai"]``) and never reads the platform's
+    # global Settings → AI. The settings page renders the module's isolated
+    # OpenAI card (key + Check + model pickers) instead of the platform-keyed
+    # provider/model selectors.
+    self_hosted: bool = False
+
     llm: AiModelSlot | None = None
     embedding: AiModelSlot | None = None
+
+
+class ModelStoreManifest(BaseModel):
+    """Declares that a module accepts large pretrained-model uploads.
+
+    When present, the module's settings page renders a generic "Model files"
+    card: users upload an archive (e.g. ``.tar.zst``) that the module extracts
+    into platform-shared storage, then pick which uploaded model this account
+    uses. The chosen folder name is persisted under ``config_json[config_key]``.
+
+    The actual upload / list / delete is served by the module's own routes
+    (``GET``/``POST``/``DELETE`` ``/models``); this block only opts the card in
+    and supplies its copy.
+    """
+
+    title: str = "Model files"
+    description: str | None = None
+    # Accepted upload extension(s), passed to the file picker's `accept` attr
+    # (e.g. ".tar.zst"). Cosmetic — server-side validation is the route's job.
+    accept: str = ".tar.zst"
+    # Where the selected model's folder name is stored in the module config.
+    config_key: str = "model"
 
 
 class Manifest(BaseModel):
@@ -166,6 +202,11 @@ class Manifest(BaseModel):
     # settings page renders an "AI models" card and the chosen (provider,
     # model) pairs are persisted under ``module_configs.config_json["ai"]``.
     ai_models: AiModelsManifest | None = None
+    # Optional declaration that the module accepts large pretrained-model
+    # uploads. When present, the settings page renders a "Model files" card and
+    # the selected model's folder name is persisted under
+    # ``module_configs.config_json[model_store.config_key]``.
+    model_store: ModelStoreManifest | None = None
 
     @model_validator(mode="after")
     def _validate_id(self) -> Self:

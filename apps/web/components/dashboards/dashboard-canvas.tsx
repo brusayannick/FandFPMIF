@@ -6,7 +6,9 @@ import RGL, { WidthProvider, type Layout } from "react-grid-layout";
 import { DashboardCard } from "@/components/dashboards/dashboard-card";
 import {
   configDefaults,
+  GRANULARITY,
   useCardCatalog,
+  type CanvasSettings,
   type DashboardCard as CatalogCard,
   type DashboardItem,
   type WidgetConfigSchema,
@@ -15,27 +17,30 @@ import {
 import "react-grid-layout/css/styles.css";
 
 const GridLayout = WidthProvider(RGL);
-const COLS = 12;
-const ROW_HEIGHT = 30;
 
 /**
  * The react-grid-layout canvas. In edit mode it accepts drops from the palette
  * (`pendingCard`), and drag/resize via the card header handle. Geometry changes
  * flow back through `onItemsChange`; the parent owns the canonical item list.
+ * The `settings.granularity` chooses the row height, gutter, and compaction.
  */
 export function DashboardCanvas({
   items,
   logId,
   editing,
   pendingCard,
+  settings,
   onItemsChange,
 }: {
   items: DashboardItem[];
   logId: string | null;
   editing: boolean;
   pendingCard: CatalogCard | null;
+  settings: CanvasSettings;
   onItemsChange: (items: DashboardItem[]) => void;
 }) {
+  const grid = GRANULARITY[settings.granularity] ?? GRANULARITY.medium;
+  const cols = grid.cols;
   // The catalog carries each card's `config_schema`; a placed item only stores
   // chosen values, so we look the schema up by `(module_id, widget_id)` to
   // render its settings form. Cached by react-query (the palette fetches it).
@@ -98,9 +103,9 @@ export function DashboardCanvas({
     <GridLayout
       className="min-h-full"
       layout={layout}
-      cols={COLS}
-      rowHeight={ROW_HEIGHT}
-      margin={[12, 12]}
+      cols={cols}
+      rowHeight={grid.rowHeight}
+      margin={grid.margin}
       isDraggable={editing}
       isResizable={editing}
       isDroppable={editing}
@@ -112,7 +117,7 @@ export function DashboardCanvas({
       }}
       onDrop={handleDrop}
       onLayoutChange={handleLayoutChange}
-      compactType="vertical"
+      compactType={grid.compactType}
     >
       {items.map((it) => (
         <div key={it.i}>
@@ -121,6 +126,7 @@ export function DashboardCanvas({
             logId={logId}
             editing={editing}
             schema={schemaFor(it.module_id, it.widget_id)}
+            chrome={settings.chrome}
             onUpdate={(patch) => updateItem(it.i, patch)}
             onRemove={() => removeItem(it.i)}
           />

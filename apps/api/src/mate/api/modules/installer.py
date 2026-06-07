@@ -126,7 +126,13 @@ async def install_module(folder: Path, manifest: Manifest, *, force: bool = Fals
     log.info("modules.installer.start", module_id=manifest.id, packages=py.packages)
 
     # Step 1 — create the venv with the right Python version.
-    rc, out = await _run(["uv", "venv", str(venv_dir), "--python", requires_python])
+    # `--allow-existing` so a stray file lingering in the target (e.g. macOS
+    # Finder/Spotlight re-creating `.DS_Store` inside a bind-mounted module
+    # dir between the rmtree above and this call) doesn't make `uv venv` bail
+    # with "directory exists, but it's not a virtual environment".
+    rc, out = await _run(
+        ["uv", "venv", str(venv_dir), "--python", requires_python, "--allow-existing"]
+    )
     if rc != 0:
         log.error("modules.installer.venv_failed", module_id=manifest.id, output=out)
         return None

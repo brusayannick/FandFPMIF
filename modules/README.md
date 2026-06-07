@@ -57,6 +57,7 @@ license: MIT
 
 requirements:
   event_log:                        # checked against the log's detected schema
+    log_model: case_centric         # case_centric (default) | object_centric — see below
     required_columns: [case_id, activity, timestamp]
     optional_columns: [resource, end_timestamp]
     min_events: 100
@@ -107,6 +108,19 @@ Rules the manifest validator enforces:
 - Two modules declaring the same `id` is a startup error.
 
 `inherit` exists so process-mining modules don't reinstall pandas/numpy/pm4py per module — those weigh hundreds of MB. Anything not inherited is fully isolated to your `.venv`.
+
+### `log_model` — case-centric vs object-centric (declare it!)
+
+Every module declares which **log model** it operates on via `requirements.event_log.log_model`:
+
+| Value | Log shape | Reads from |
+|---|---|---|
+| `case_centric` (default) | Classic event log — one `case_id` per trace, flat `activity`/`timestamp` events. | `ctx.event_log` |
+| `object_centric` | OCEL — events relate to many objects of different types; no single case notion. | `ctx.object_log` |
+
+This is the **single isolation switch** between the two worlds. The platform makes a module available *only* on logs whose model matches: a `case_centric` module never appears for an OCEL log, and an `object_centric` module never appears for a case-centric log ([`availability.py`](../apps/api/src/mate/api/modules/availability.py) checks this first and short-circuits, so the column/count checks below only run when the model already matches). Because of that gate, the loader binds exactly one of `ctx.event_log` / `ctx.object_log` — reach for the one your declared model implies.
+
+The field **defaults to `case_centric`**, so a classic process-mining module works without declaring it — but declare it explicitly anyway (every bundled module does) so the model a module targets is visible on its manifest at a glance. `required_columns`, `optional_columns`, `min_events`, and `min_cases` apply to the case-centric event table; for `object_centric` modules gate on `min_events` (and the OCEL counts surfaced on the log) rather than case-centric columns.
 
 ---
 
@@ -385,7 +399,7 @@ Commit `manifest.yaml`, `module.py`, your tests, your frontend sources, and `uv.
 3. **Materialise dependencies.** `uv sync` per module if its dep hash changed; same for the JS bundle.
 4. **Topological load.** Hard-dep order. Your module's `Module` subclass is instantiated once.
 5. **Mount.** Routes registered at `/api/v1/modules/{id}/*`, `@on_event` handlers subscribed, `@job` handlers registered with the queue.
-6. **Per-log gating.** When a log is opened, the platform re-evaluates `requirements.event_log` against that log's schema. Your card renders as **available** or **unavailable** with a tooltip explaining what's missing.
+6. **Per-log gating.** When a log is opened, the platform re-evaluates `requirements.event_log` against that log's model and schema. The `log_model` gate runs first — a module whose declared model doesn't match the log is **unavailable** and hidden from the grid (case-centric and object-centric modules never cross). If the model matches, the column / `min_events` / `min_cases` checks decide **available** vs **unavailable**, with a tooltip explaining what's missing.
 7. **Hot reload (dev).** Watchdog on `modules/` re-loads changed files without a platform restart. Manifest dep changes trigger an in-place `uv sync` for that module only.
 
 If a module fails to load (manifest error, install error, import error), the failure is reported on the per-module card and in `/settings/modules/{moduleId}` — the rest of the platform stays up.
@@ -439,6 +453,7 @@ For the first two, the platform unpacks into `modules/<id>/`, runs `uv sync`, ru
 Before submitting a module:
 
 - [ ] `manifest.yaml` validates (run `uv run python -c "from mate.sdk import Manifest; Manifest.load_yaml('modules/<folder>/manifest.yaml')"`).
+- [ ] `requirements.event_log.log_model` is set to the model the module targets (`case_centric` or `object_centric`).
 - [ ] `id` matches between `manifest.yaml` and `module.py`.
 - [ ] Every emitted bus topic is in `provides:`; every subscribed topic is in `consumes:`.
 - [ ] Every `ctx.registry.call(...)` target is in `consumes:` or `optional_modules:`.

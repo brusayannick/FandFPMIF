@@ -88,6 +88,7 @@ export const queryKeys = {
   modules: (logId?: string | null) => ["modules", logId ?? null] as const,
   moduleManifest: (id: string) => ["modules", id, "manifest"] as const,
   moduleConfig: (id: string) => ["modules", id, "config"] as const,
+  moduleModels: (id: string) => ["modules", id, "models"] as const,
   jobs: (params?: Record<string, string>) => ["jobs", params ?? {}] as const,
   job: (id: string) => ["jobs", id] as const,
 };
@@ -546,14 +547,26 @@ export interface AiModelSlot {
 }
 
 export interface AiModelsManifest {
+  /** When true the module owns its own OpenAI key (isolated from Settings → AI). */
+  self_hosted?: boolean;
   llm?: AiModelSlot | null;
   embedding?: AiModelSlot | null;
-  [extra: string]: AiModelSlot | null | undefined;
+  [extra: string]: AiModelSlot | boolean | null | undefined;
+}
+
+export interface ModelStoreManifest {
+  title?: string;
+  description?: string | null;
+  /** Accepted upload extension(s) for the file picker, e.g. ".tar.zst". */
+  accept?: string;
+  /** Config key under which the selected model's folder name is persisted. */
+  config_key?: string;
 }
 
 export interface ModuleManifest {
   config_schema?: Record<string, unknown> | null;
   ai_models?: AiModelsManifest | null;
+  model_store?: ModelStoreManifest | null;
   [extra: string]: unknown;
 }
 
@@ -579,6 +592,61 @@ export function useUpdateModuleConfig() {
   });
 }
 
+export interface ModuleModel {
+  name: string;
+  size_bytes: number;
+  /** The account's explicit selection (config), may differ from `active`. */
+  selected: boolean;
+  /** What detection would actually load right now. */
+  active: boolean;
+}
+
+export interface ModuleModelsResponse {
+  models: ModuleModel[];
+  selected: string | null;
+  active: string | null;
+}
+
+/** List the platform-wide models installed for a module (e.g. cv4cdd). */
+export function useModuleModels(moduleId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.moduleModels(moduleId),
+    queryFn: () => api<ModuleModelsResponse>(`/api/v1/modules/${moduleId}/models`),
+    enabled,
+  });
+}
+
+/** Upload a model archive (multipart). Shared across the whole platform. */
+export function useUploadModuleModel(moduleId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => {
+      const body = new FormData();
+      body.append("file", file);
+      return api<ModuleModel>(`/api/v1/modules/${moduleId}/models`, {
+        method: "POST",
+        body,
+      });
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: queryKeys.moduleModels(moduleId) }),
+  });
+}
+
+/** Delete an installed model — removes it for every account on the platform. */
+export function useDeleteModuleModel(moduleId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      api<{ deleted: string }>(
+        `/api/v1/modules/${moduleId}/models/${encodeURIComponent(name)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: queryKeys.moduleModels(moduleId) }),
+  });
+}
+
 export interface RecreateIndexResponse {
   ok: boolean;
   index_name: string;
@@ -592,6 +660,24 @@ export function useRecreateModuleIndex(moduleId: string) {
         `/api/v1/modules/${moduleId}/pinecone/recreate-index`,
         { method: "POST" },
       ),
+  });
+}
+
+export interface ModuleAiCheckResponse {
+  ok: boolean;
+  models: string[];
+}
+
+/** Validate a self-hosted module's OpenAI key and list its available models.
+ *  Pass the unsaved draft key to check before saving, or `null` to use the
+ *  key already persisted in the module config. */
+export function useModuleAiCheck(moduleId: string) {
+  return useMutation({
+    mutationFn: (apiKey: string | null) =>
+      api<ModuleAiCheckResponse>(`/api/v1/modules/${moduleId}/ai/check`, {
+        method: "POST",
+        json: { api_key: apiKey },
+      }),
   });
 }
 

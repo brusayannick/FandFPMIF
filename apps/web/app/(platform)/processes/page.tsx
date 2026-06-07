@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { FolderPlus, Inbox, Plug, Plus, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
@@ -19,6 +20,7 @@ import {
   ProcessesTable,
 } from "@/components/processes/processes-table";
 import { useEventLogs } from "@/lib/queries";
+import type { LogModel } from "@/lib/api-types";
 
 export default function ProcessesPage() {
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -92,10 +94,19 @@ function ListSkeleton() {
   );
 }
 
+type ModelFilter = "all" | LogModel;
+
+const MODEL_FILTERS: { value: ModelFilter; label: string }[] = [
+  { value: "all", label: "All processes" },
+  { value: "case_centric", label: "Case-centric" },
+  { value: "object_centric", label: "Object-centric" },
+];
+
 function ProcessList() {
   const sp = useSearchParams();
   const q = sp.get("q") ?? undefined;
   const status = sp.get("status") ?? undefined;
+  const [model, setModel] = useState<ModelFilter>("all");
   const { data, isLoading, isError, error } = useEventLogs({ q, status });
 
   if (isLoading) return <ListSkeleton />;
@@ -131,9 +142,39 @@ function ProcessList() {
       />
     );
   }
+
+  const rows = model === "all" ? data : data.filter((l) => l.log_model === model);
+
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <ProcessesTable rows={data} />
+    <div className="space-y-3">
+      <ButtonGroup>
+        {MODEL_FILTERS.map(({ value, label }) => (
+          <Button
+            key={value}
+            type="button"
+            size="sm"
+            variant={model === value ? "default" : "outline"}
+            aria-pressed={model === value}
+            className="cursor-pointer"
+            onClick={() => setModel(value)}
+          >
+            {label}
+          </Button>
+        ))}
+      </ButtonGroup>
+      {rows.length === 0 ? (
+        <EmptyState
+          icon={Inbox}
+          title="No matching processes"
+          description={`No ${
+            model === "case_centric" ? "case-centric" : "object-centric"
+          } logs yet. Switch to “All processes” to see everything.`}
+        />
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
+          <ProcessesTable rows={rows} />
+        </div>
+      )}
     </div>
   );
 }

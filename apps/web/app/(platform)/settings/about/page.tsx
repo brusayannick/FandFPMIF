@@ -1,28 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, RotateCcw } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useOnboarding } from "@/lib/stores/onboarding";
-import { useUpdateOnboarding } from "@/lib/onboarding-queries";
 import { api } from "@/lib/api";
 import { toastError } from "@/lib/toast";
 
 export default function AboutPage() {
-  const clearLocalOnboarding = useOnboarding((s) => s.clear);
-  const updateOnboarding = useUpdateOnboarding();
   const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);
-
-  const onRestartOnboarding = () => {
-    clearLocalOnboarding();
-    // Flip the per-user server flag back to incomplete; the overlay (mounted
-    // in the platform layout) re-appears as soon as the query cache updates.
-    updateOnboarding.mutate({ completed: false, experience_level: null });
-  };
 
   const onCopyDiagnostics = async () => {
     setCopying(true);
@@ -47,37 +36,10 @@ export default function AboutPage() {
           <CardTitle className="text-base">About MATE Hub</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Stat label="Version" value="0.1.0" />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Stat label="Version" value="0.1.1" />
             <Stat label="License" value="MIT" />
-            <Stat label="Mode" value="Local-first" />
           </div>
-          <p className="text-muted-foreground">
-            A local-first, modular process analysis platform. Two services
-            (api + web), embedded data stores (SQLite + DuckDB + Parquet), no
-            broker, no cloud.
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Onboarding</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <p>
-            Walk through the welcome, upload, and modules steps again. Your
-            existing data is untouched.
-          </p>
-          <Button
-            variant="outline"
-            className="cursor-pointer gap-2"
-            disabled={updateOnboarding.isPending}
-            onClick={onRestartOnboarding}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Restart onboarding
-          </Button>
         </CardContent>
       </Card>
 

@@ -62,8 +62,12 @@ function deriveCrumbs(
   return out;
 }
 
+// Segments that should render as all-caps acronyms instead of title case.
+const ACRONYMS: Record<string, string> = { ai: "AI" };
+
 function prettify(seg: string): string {
   if (/^[0-9a-f-]{8,}$/i.test(seg)) return seg;
+  if (ACRONYMS[seg.toLowerCase()]) return ACRONYMS[seg.toLowerCase()];
   return seg.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 

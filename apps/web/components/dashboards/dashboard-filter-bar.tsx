@@ -6,7 +6,6 @@ import { Filter, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { ColumnFilter } from "@/components/processes/events-tab/column-filter";
 import { cn } from "@/lib/cn";
 import type { ColumnSpec, FilterEntry, FilterOp } from "@/lib/api-types";
@@ -145,7 +144,7 @@ export function DashboardFilterBar({
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <ScrollArea className="max-h-64">
+          <div className="max-h-64 overflow-y-auto">
             <div className="p-1">
               {available.length === 0 ? (
                 <div className="px-2 py-6 text-center text-xs text-muted-foreground">
@@ -171,7 +170,7 @@ export function DashboardFilterBar({
                 ))
               )}
             </div>
-          </ScrollArea>
+          </div>
         </PopoverContent>
       </Popover>
 

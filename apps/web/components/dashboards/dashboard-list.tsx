@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { LayoutDashboard, Loader2, Plus, Trash2, Upload } from "lucide-react";
+import { Boxes, LayoutDashboard, Loader2, Plus, Trash2, Upload, Workflow } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -29,14 +29,38 @@ import {
 } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/cn";
 import { formatRelative } from "@/lib/format";
 import {
+  canvasSettings,
   useCreateDashboard,
   useDashboards,
   useDeleteDashboard,
   useImportDashboard,
+  type CanvasSettings,
   type DashboardItem,
+  type LogModel,
 } from "@/lib/dashboard-queries";
+
+const MODEL_OPTIONS: {
+  value: LogModel;
+  label: string;
+  hint: string;
+  icon: typeof Workflow;
+}[] = [
+  {
+    value: "case_centric",
+    label: "Case-centric",
+    hint: "One case per process instance (XES / CSV logs).",
+    icon: Workflow,
+  },
+  {
+    value: "object_centric",
+    label: "Object-centric",
+    hint: "Multiple object types per event (OCEL logs).",
+    icon: Boxes,
+  },
+];
 
 export function DashboardList() {
   const router = useRouter();
@@ -48,15 +72,23 @@ export function DashboardList() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
+  const [model, setModel] = useState<LogModel>("case_centric");
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  const onCreateOpenChange = (open: boolean) => {
+    setCreateOpen(open);
+    if (!open) {
+      setNewName("");
+      setModel("case_centric");
+    }
+  };
 
   const onCreate = async () => {
     const name = newName.trim();
     if (!name) return;
     try {
-      const dash = await create.mutateAsync({ name });
-      setCreateOpen(false);
-      setNewName("");
+      const dash = await create.mutateAsync({ name, log_model: model });
+      onCreateOpenChange(false);
       router.push(`/dashboards/${dash.id}`);
     } catch {
       toast.error("Could not create dashboard");
@@ -69,12 +101,16 @@ export function DashboardList() {
       const doc = JSON.parse(text) as {
         name?: string;
         description?: string | null;
+        log_model?: LogModel;
         items?: DashboardItem[];
+        settings?: CanvasSettings;
       };
       const dash = await importDash.mutateAsync({
         name: doc.name,
         description: doc.description ?? null,
+        log_model: doc.log_model,
         items: Array.isArray(doc.items) ? doc.items : [],
+        settings: doc.settings ? canvasSettings(doc.settings) : undefined,
       });
       toast.success("Dashboard imported");
       router.push(`/dashboards/${dash.id}`);
@@ -188,11 +224,14 @@ export function DashboardList() {
       )}
 
       {/* Create dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={createOpen} onOpenChange={onCreateOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>New dashboard</DialogTitle>
-            <DialogDescription>Give your dashboard a name to get started.</DialogDescription>
+            <DialogDescription>
+              Name it and pick its process type. The type is fixed once created — it
+              decides which cards and event logs the board can use.
+            </DialogDescription>
           </DialogHeader>
           <Input
             autoFocus
@@ -203,8 +242,36 @@ export function DashboardList() {
               if (e.key === "Enter") void onCreate();
             }}
           />
+          <div className="grid grid-cols-2 gap-2">
+            {MODEL_OPTIONS.map((opt) => {
+              const Icon = opt.icon;
+              const selected = model === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setModel(opt.value)}
+                  aria-pressed={selected}
+                  className={cn(
+                    "flex flex-col gap-1 rounded-lg border p-3 text-left transition-colors",
+                    selected
+                      ? "border-primary bg-primary/5 ring-1 ring-primary"
+                      : "border-border hover:border-primary/40 hover:bg-muted/40",
+                  )}
+                >
+                  <span className="flex items-center gap-1.5 text-sm font-medium">
+                    <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    {opt.label}
+                  </span>
+                  <span className="text-[11px] leading-snug text-muted-foreground">
+                    {opt.hint}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+            <Button variant="ghost" onClick={() => onCreateOpenChange(false)}>
               Cancel
             </Button>
             <Button onClick={onCreate} disabled={!newName.trim() || create.isPending}>

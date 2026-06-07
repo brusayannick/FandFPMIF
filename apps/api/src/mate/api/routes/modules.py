@@ -37,6 +37,7 @@ from mate.api.modules.installs import (
     user_module_ids,
     user_owns_module,
 )
+from mate.api.schemas.event_logs import LogModel
 
 # UserSetting flag marking that a user has had the default module set seeded
 # at least once. Lets unlocked users intentionally remove a default without it
@@ -187,6 +188,9 @@ class DashboardCard(BaseModel):
     # palette renders a settings form from this for each placed card in edit
     # mode. ``None`` ⇒ the card has no options beyond its title.
     config_schema: dict[str, Any] | None = None
+    # Log data model(s) this card applies to. The Dashboards palette only shows
+    # a card whose models include the board's model (case-centric vs OCEL).
+    log_models: list[LogModel] = Field(default_factory=lambda: ["case_centric"])
 
 
 @router.get("/cards", response_model=list[DashboardCard])
@@ -221,6 +225,7 @@ async def list_cards(session: SessionDep, user: CurrentUserDep) -> list[Dashboar
                     default_w=w.default_w,
                     default_h=w.default_h,
                     config_schema=w.config_schema,
+                    log_models=w.log_models,
                 )
             )
     return cards

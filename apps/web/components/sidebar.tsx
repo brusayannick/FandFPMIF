@@ -6,6 +6,7 @@ import { useTheme } from "next-themes";
 import {
   Activity,
   Cog,
+  FileBox,
   FolderKanban,
   LayoutDashboard,
   Moon,
@@ -47,6 +48,12 @@ const NAV: NavItem[] = [
     label: "Dashboards",
     icon: LayoutDashboard,
     match: (p) => p.startsWith("/dashboards"),
+  },
+  {
+    href: "/modules",
+    label: "Modules",
+    icon: FileBox,
+    match: (p) => p.startsWith("/modules"),
   },
   {
     href: "/settings",
@@ -153,7 +160,7 @@ export function Sidebar() {
       </div>
       {!collapsed && (
         <div className="border-t border-sidebar-border px-4 py-2 text-[10px] uppercase tracking-wide text-sidebar-foreground/40">
-          v0.1.0
+          v0.1.1
         </div>
       )}
     </aside>

@@ -5,7 +5,6 @@ import { useMemo } from "react";
 import { Plus, FileBox } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { ModuleCard } from "@/components/processes/module-card";
@@ -23,8 +22,6 @@ const CATEGORIES: { id: string; label: string }[] = [
 
 export function ModuleGrid({ logId }: { logId: string }) {
   const { data: modules, isLoading, isError } = useModules(logId);
-  const showUnavailable = useUi((s) => s.showUnavailableModules);
-  const setShowUnavailable = useUi((s) => s.setShowUnavailableModules);
   const confidentialOnly = useUi((s) => s.confidentialOnly);
 
   const grouped = useMemo(() => {
@@ -32,12 +29,20 @@ export function ModuleGrid({ logId }: { logId: string }) {
     for (const c of CATEGORIES) out.set(c.id, []);
     for (const m of modules ?? []) {
       if (confidentialOnly && !m.is_confidential_safe) continue;
-      if (!showUnavailable && m.availability?.status === "unavailable") continue;
+      // Only surface modules that can actually be opened for this log — hide
+      // disabled ones and those the log is incompatible with (unavailable).
+      if (m.enabled === false) continue;
+      if ((m.availability?.status ?? "available") === "unavailable") continue;
       const bucket = out.get(m.category) ?? out.get("other")!;
       bucket.push(m);
     }
     return out;
-  }, [modules, showUnavailable, confidentialOnly]);
+  }, [modules, confidentialOnly]);
+
+  const visibleCount = useMemo(
+    () => [...grouped.values()].reduce((n, bucket) => n + bucket.length, 0),
+    [grouped],
+  );
 
   if (isLoading) {
     return (
@@ -78,7 +83,25 @@ export function ModuleGrid({ logId }: { logId: string }) {
         description="v1 ships with no modules. Install one to enable analytics on this process."
         primaryAction={
           <Button asChild className="cursor-pointer gap-2">
-            <Link href="/settings/modules/import">
+            <Link href="/modules/import">
+              <Plus className="h-4 w-4" />
+              Import module
+            </Link>
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (visibleCount === 0) {
+    return (
+      <EmptyState
+        icon={FileBox}
+        title="No available modules"
+        description="None of your installed modules are compatible with this process. Import another module or adjust your installed modules."
+        primaryAction={
+          <Button asChild className="cursor-pointer gap-2">
+            <Link href="/modules/import">
               <Plus className="h-4 w-4" />
               Import module
             </Link>
@@ -90,21 +113,6 @@ export function ModuleGrid({ logId }: { logId: string }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-2">
-        <Switch
-          id="toggle-unavailable"
-          checked={showUnavailable}
-          onCheckedChange={setShowUnavailable}
-          className="cursor-pointer"
-        />
-        <label
-          htmlFor="toggle-unavailable"
-          className="cursor-pointer select-none text-xs text-muted-foreground"
-        >
-          Show unavailable modules
-        </label>
-      </div>
-
       {CATEGORIES.map((c) => {
         const bucket = grouped.get(c.id)!;
         if (bucket.length === 0) return null;

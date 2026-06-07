@@ -178,7 +178,7 @@ export default function ProcessDetailPage() {
           <ModuleGrid logId={logId} />
           <p className="mt-6 text-xs text-muted-foreground">
             Need a module that isn&apos;t installed?{" "}
-            <Link href="/settings/modules/import" className="underline-offset-4 hover:underline">
+            <Link href="/modules/import" className="underline-offset-4 hover:underline">
               Install one →
             </Link>
           </p>

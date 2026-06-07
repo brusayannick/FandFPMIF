@@ -158,6 +158,19 @@
   * {
     @apply border-border;
   }
+  /* Tailwind v4 Preflight no longer sets cursor:pointer on buttons. Restore it
+     for all buttons and button-role/link elements; disabled stays default. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  label[for],
+  summary,
+  a[href] {
+    cursor: pointer;
+  }
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    cursor: default;
+  }
   html, body {
     @apply h-full bg-background text-foreground antialiased;
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
@@ -255,6 +268,9 @@
 .dashboard-canvas-bg {
   background-color: var(--background);
   background-image: radial-gradient(var(--border) 1px, transparent 1px);
-  background-size: 16px 16px;
+  /* A fixed, neutral dot texture — a workspace backdrop, not a snap guide. The
+     actual snap grid is driven by the board's granularity (column count + row
+     height in react-grid-layout) and intentionally isn't reflected here. */
+  background-size: 24px 24px;
   background-position: -1px -1px;
 }

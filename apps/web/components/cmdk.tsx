@@ -27,8 +27,8 @@ const STATIC_NAV = [
   { id: "nav-processes", label: "Go to Processes", icon: FolderKanban, href: "/processes" },
   { id: "nav-import", label: "Import event log", icon: Upload, href: "/processes/import" },
   { id: "nav-settings", label: "Open Settings", icon: Cog, href: "/settings" },
-  { id: "nav-modules", label: "Manage modules", icon: FileBox, href: "/settings/modules" },
-  { id: "nav-import-module", label: "Import module", icon: Plus, href: "/settings/modules/import" },
+  { id: "nav-modules", label: "Manage modules", icon: FileBox, href: "/modules" },
+  { id: "nav-import-module", label: "Import module", icon: Plus, href: "/modules/import" },
 ];
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {

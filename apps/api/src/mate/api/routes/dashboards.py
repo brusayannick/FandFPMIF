@@ -22,6 +22,7 @@ from mate.api.auth import CurrentUserDep, get_owned_event_log
 from mate.api.db.models import Dashboard
 from mate.api.db.session import SessionDep
 from mate.api.schemas.dashboards import (
+    CanvasSettings,
     DashboardCreate,
     DashboardDetail,
     DashboardExport,
@@ -53,8 +54,20 @@ def _items_of(row: Dashboard) -> list[DashboardItem]:
     return items
 
 
-def _layout_blob(items: list[DashboardItem]) -> dict[str, Any]:
-    return {"items": [it.model_dump() for it in items]}
+def _settings_of(row: Dashboard) -> CanvasSettings:
+    raw = (row.layout_json or {}).get("settings")
+    if not raw:
+        return CanvasSettings()
+    try:
+        return CanvasSettings.model_validate(raw)
+    except Exception:
+        # Fall back to defaults rather than 500 on a legacy/garbled blob.
+        log.warning("dashboard.settings_invalid", dashboard_id=row.id, raw=raw)
+        return CanvasSettings()
+
+
+def _layout_blob(items: list[DashboardItem], settings: CanvasSettings) -> dict[str, Any]:
+    return {"items": [it.model_dump() for it in items], "settings": settings.model_dump()}
 
 
 def _detail(row: Dashboard) -> DashboardDetail:
@@ -63,7 +76,9 @@ def _detail(row: Dashboard) -> DashboardDetail:
         name=row.name,
         description=row.description,
         event_log_id=row.event_log_id,
+        log_model=row.log_model,  # type: ignore[arg-type]
         items=_items_of(row),
+        settings=_settings_of(row),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -76,10 +91,19 @@ async def _get_owned(session: SessionDep, dashboard_id: str, user_id: str) -> Da
     return row
 
 
-async def _validate_log(session: SessionDep, log_id: str | None, user_id: str) -> None:
-    """A bound log must belong to the user. ``None`` (unbound) is allowed."""
-    if log_id is not None:
-        await get_owned_event_log(session, log_id, user_id)
+async def _validate_log(
+    session: SessionDep, log_id: str | None, user_id: str, log_model: str | None = None
+) -> None:
+    """A bound log must belong to the user and (when ``log_model`` is given)
+    match the board's data model. ``None`` (unbound) is always allowed."""
+    if log_id is None:
+        return
+    row = await get_owned_event_log(session, log_id, user_id)
+    if log_model is not None and row.log_model != log_model:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Log is {row.log_model}; this dashboard is {log_model}.",
+        )
 
 
 @router.get("", response_model=list[DashboardSummary])
@@ -96,6 +120,7 @@ async def list_dashboards(session: SessionDep, user: CurrentUserDep) -> list[Das
             name=r.name,
             description=r.description,
             event_log_id=r.event_log_id,
+            log_model=r.log_model,  # type: ignore[arg-type]
             card_count=len((r.layout_json or {}).get("items", [])),
             updated_at=r.updated_at,
         )
@@ -107,14 +132,15 @@ async def list_dashboards(session: SessionDep, user: CurrentUserDep) -> list[Das
 async def create_dashboard(
     payload: DashboardCreate, session: SessionDep, user: CurrentUserDep
 ) -> DashboardDetail:
-    await _validate_log(session, payload.event_log_id, user.id)
+    await _validate_log(session, payload.event_log_id, user.id, payload.log_model)
     row = Dashboard(
         id=uuid7_str(),
         user_id=user.id,
         name=payload.name,
         description=payload.description,
         event_log_id=payload.event_log_id,
-        layout_json=_layout_blob(payload.items),
+        log_model=payload.log_model,
+        layout_json=_layout_blob(payload.items, payload.settings),
         created_at=_utcnow(),
     )
     session.add(row)
@@ -146,10 +172,16 @@ async def update_dashboard(
     if "description" in fields:
         row.description = payload.description
     if "event_log_id" in fields:
-        await _validate_log(session, payload.event_log_id, user.id)
+        await _validate_log(session, payload.event_log_id, user.id, row.log_model)
         row.event_log_id = payload.event_log_id
-    if "items" in fields and payload.items is not None:
-        row.layout_json = _layout_blob(payload.items)
+    # Items and settings share one blob, so rewrite it whenever either is
+    # touched, keeping the untouched sibling as-is.
+    if ("items" in fields and payload.items is not None) or (
+        "settings" in fields and payload.settings is not None
+    ):
+        items = payload.items if payload.items is not None else _items_of(row)
+        settings = payload.settings if payload.settings is not None else _settings_of(row)
+        row.layout_json = _layout_blob(items, settings)
 
     await session.commit()
     return _detail(row)
@@ -173,21 +205,28 @@ async def export_dashboard(
     importer rebinds on the target machine.
     """
     row = await _get_owned(session, dashboard_id, user.id)
-    return DashboardExport(name=row.name, description=row.description, items=_items_of(row))
+    return DashboardExport(
+        name=row.name,
+        description=row.description,
+        log_model=row.log_model,  # type: ignore[arg-type]
+        items=_items_of(row),
+        settings=_settings_of(row),
+    )
 
 
 @router.post("/import", response_model=DashboardDetail, status_code=status.HTTP_201_CREATED)
 async def import_dashboard(
     payload: DashboardImport, session: SessionDep, user: CurrentUserDep
 ) -> DashboardDetail:
-    await _validate_log(session, payload.event_log_id, user.id)
+    await _validate_log(session, payload.event_log_id, user.id, payload.log_model)
     row = Dashboard(
         id=uuid7_str(),
         user_id=user.id,
         name=(payload.name or "Imported dashboard").strip() or "Imported dashboard",
         description=payload.description,
         event_log_id=payload.event_log_id,
-        layout_json=_layout_blob(payload.items),
+        log_model=payload.log_model,
+        layout_json=_layout_blob(payload.items, payload.settings),
         created_at=_utcnow(),
     )
     session.add(row)

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ff-mod-cv4cdd"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "tensorflow>=2.16,<2.20",
+    "Pillow>=10.0",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+]
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true

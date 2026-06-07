@@ -1,0 +1,58 @@
+id: ocel_discovery
+name: Object-Centric Discovery
+version: 1.0.0
+category: foundation
+description: Object-centric process discovery - object types, activities, and the object-centric directly-follows graph (OC-DFG) for OCEL logs.
+author: Mate
+license: MIT
+default_enabled: true
+# Runs entirely locally — safe to use against confidential event logs.
+isConfidentialSafe: true
+
+requirements:
+  event_log:
+    # THE gate: this module only runs against object-centric (OCEL) logs. It
+    # never appears for case-centric logs, and the case-centric modules never
+    # appear for OCEL logs.
+    log_model: object_centric
+    min_events: 1
+
+provides:
+  - ocel_discovery.ocdfg
+  - ocel_discovery.summary
+
+consumes:
+  - ocel.imported
+
+dependencies:
+  python:
+    requires-python: ">=3.12"
+    packages: []
+    inherit:
+      - pm4py
+      - pandas
+      - duckdb
+    isolation: in_process
+
+frontend:
+  widgets:
+    - id: object-type-summary
+      entry: ./widgets/ObjectTypeSummary.tsx
+      title: Object types
+      description: Object types and per-type counts of the OCEL log.
+      icon: Layers
+      default_w: 5
+      default_h: 5
+      log_models: [object_centric]
+    - id: ocdfg
+      entry: ./widgets/Ocdfg.tsx
+      title: Object-centric DFG
+      description: Directly-follows graph per object type (OC-DFG).
+      icon: Network
+      default_w: 6
+      default_h: 10
+      log_models: [object_centric]
+
+permissions:
+  - read:event_log
+  - write:module_results

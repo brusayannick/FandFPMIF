@@ -65,8 +65,16 @@ function encodeFilterHeader(entries: FilterEntry[]): string {
   return btoa(binary);
 }
 
-export function DashboardFilterProvider({ children }: { children: ReactNode }) {
-  const [columnFilters, setColumnFilters] = useState<FilterEntry[]>([]);
+export function DashboardFilterProvider({
+  children,
+  initialColumnFilters = [],
+}: {
+  children: ReactNode;
+  /** Column filters to load with — the board's active saved filter, if any.
+   * Read once on mount; later preset switches flow through `setColumnFilters`. */
+  initialColumnFilters?: FilterEntry[];
+}) {
+  const [columnFilters, setColumnFilters] = useState<FilterEntry[]>(initialColumnFilters);
   const [timeFilters, setTimeFilters] = useState<FilterEntry[]>([]);
   // One client per provider instance — widget queries are isolated here.
   const [widgetQueryClient] = useState(

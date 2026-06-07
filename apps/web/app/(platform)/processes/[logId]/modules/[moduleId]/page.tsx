@@ -47,7 +47,7 @@ export default function ModulePage() {
         description="It may not be installed or may have failed to load."
         primaryAction={
           <Button asChild className="cursor-pointer">
-            <Link href="/settings/modules/import">Install a module</Link>
+            <Link href="/modules/import">Install a module</Link>
           </Button>
         }
       />

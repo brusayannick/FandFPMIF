@@ -1,26 +1,26 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Boxes, ChevronDown, Plus, Search } from "lucide-react";
+import { Boxes, ChevronDown, Search } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cardIcon } from "@/components/dashboards/card-icon";
-import { useCardCatalog, type DashboardCard } from "@/lib/dashboard-queries";
+import { useCardCatalog, type DashboardCard, type LogModel } from "@/lib/dashboard-queries";
 
 /**
  * Left-rail palette of every card exposed by the user's installed modules,
  * grouped into a clearly delineated, collapsible section per module. Cards are
- * HTML5-draggable onto the grid (the canvas reads `setPendingCard` on drop) and
- * also click-to-add for keyboard/no-drag use.
+ * HTML5-draggable onto the grid (the canvas reads `setPendingCard` on drop).
  */
 export function CardPalette({
-  onPickCard,
   onDragCard,
+  logModel,
 }: {
-  onPickCard: (card: DashboardCard) => void;
   onDragCard: (card: DashboardCard | null) => void;
+  /** Only cards whose `log_models` include the board's model are shown. */
+  logModel: LogModel;
 }) {
   const { data: cards, isLoading } = useCardCatalog();
   const [query, setQuery] = useState("");
@@ -32,10 +32,11 @@ export function CardPalette({
     const q = query.trim().toLowerCase();
     const filtered = (cards ?? []).filter(
       (c) =>
-        !q ||
-        c.title.toLowerCase().includes(q) ||
-        c.module_name.toLowerCase().includes(q) ||
-        (c.description ?? "").toLowerCase().includes(q),
+        c.log_models.includes(logModel) &&
+        (!q ||
+          c.title.toLowerCase().includes(q) ||
+          c.module_name.toLowerCase().includes(q) ||
+          (c.description ?? "").toLowerCase().includes(q)),
     );
     const byModule = new Map<string, { id: string; name: string; cards: DashboardCard[] }>();
     for (const c of filtered) {
@@ -44,7 +45,7 @@ export function CardPalette({
       byModule.set(c.module_id, g);
     }
     return [...byModule.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [cards, query]);
+  }, [cards, query, logModel]);
 
   const searching = query.trim().length > 0;
   const toggle = (id: string) =>
@@ -62,7 +63,7 @@ export function CardPalette({
           Cards
         </p>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          Drag onto the board, or click to add.
+          Drag onto the board to add.
         </p>
         <div className="relative mt-2">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -75,7 +76,7 @@ export function CardPalette({
         </div>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
         <div className="space-y-3 p-3">
           {isLoading && <p className="text-xs text-muted-foreground">Loading cards…</p>}
           {!isLoading && groups.length === 0 && (
@@ -116,9 +117,8 @@ export function CardPalette({
                     {group.cards.map((card) => {
                       const Icon = cardIcon(card.icon);
                       return (
-                        <button
+                        <div
                           key={`${card.module_id}:${card.widget_id}`}
-                          type="button"
                           // RGL droppable: any element with draggable=true
                           // dropped over the grid fires its onDrop; we stash the
                           // card so the canvas knows which one landed.
@@ -132,7 +132,6 @@ export function CardPalette({
                             onDragCard(card);
                           }}
                           onDragEnd={() => onDragCard(null)}
-                          onClick={() => onPickCard(card)}
                           className={cn(
                             "group flex w-full items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-left",
                             "cursor-grab hover:border-border hover:bg-card active:cursor-grabbing",
@@ -149,8 +148,7 @@ export function CardPalette({
                               </span>
                             )}
                           </span>
-                          <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/0 group-hover:text-muted-foreground" />
-                        </button>
+                        </div>
                       );
                     })}
                   </div>

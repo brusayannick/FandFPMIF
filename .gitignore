@@ -21,11 +21,11 @@ node_modules/
 .turbo/
 out/
 
-# Modules as they are loaded from sciebo
-modules/*
-!modules/README.md
+# Exporter logs
+.cc-history/
 
-# Module per-folder install artefacts (manifest.yaml + uv.lock are committed)
+# Modules are tracked in git (source + manifest). Only the per-folder build
+# artefacts and large/vendored payloads below are ignored.
 modules/*/.venv/
 modules/*/.dist/
 modules/*/node_modules/
@@ -33,6 +33,10 @@ modules/*/.installed-hash
 
 # CV4CDD vendored source (cloned separately — not committed)
 modules/*/cv4cdd/
+
+# CV4CDD pretrained models are large (~0.5 GB each) and uploaded at runtime via
+# the module's settings page — never committed. The dir itself is kept via a
+# .gitkeep; the per-folder rules live in modules/cv4cdd/model/.gitignore.
 
 # Runtime data (the directory layout itself is kept via .gitkeep)
 data/event_logs/*

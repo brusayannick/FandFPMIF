@@ -90,16 +90,6 @@ export function OnboardingOverlay() {
     if (canGoBack) setStep((s) => s - 1);
   };
 
-  const onSkip = () => {
-    if (isLast) {
-      finish();
-    } else {
-      setStep((s) => s + 1);
-    }
-  };
-
-  const uploadInProgress = current === "upload" && !uploadedLogId;
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       <div className="flex justify-center pt-10">
@@ -131,13 +121,6 @@ export function OnboardingOverlay() {
           </div>
           <div className="flex items-center gap-2">
             <Button
-              variant="ghost"
-              onClick={onSkip}
-              className="cursor-pointer text-muted-foreground"
-            >
-              {isLast ? "Skip" : "Skip step"}
-            </Button>
-            <Button
               onClick={onNext}
               className="cursor-pointer gap-1.5"
             >
@@ -145,11 +128,6 @@ export function OnboardingOverlay() {
                 <>
                   Finish
                   <Check className="h-4 w-4" />
-                </>
-              ) : uploadInProgress ? (
-                <>
-                  Skip
-                  <ArrowRight className="h-4 w-4" />
                 </>
               ) : (
                 <>

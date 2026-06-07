@@ -397,6 +397,12 @@ class Dashboard(Base):
     event_log_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("process_logs.id", ondelete="SET NULL")
     )
+    # The board's data model, fixed at creation. Mirrors `process_logs.log_model`
+    # ("case_centric" | "object_centric"): the palette only offers cards whose
+    # widgets declare this model, and the log picker only lists matching logs.
+    log_model: Mapped[str] = mapped_column(
+        String(16), default="case_centric", server_default="case_centric", nullable=False
+    )
     layout_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)

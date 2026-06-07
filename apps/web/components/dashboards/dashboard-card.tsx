@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/popover";
 import { useWidget } from "@/lib/module-widgets";
 import { CardConfigForm } from "@/components/dashboards/card-config-form";
-import type { DashboardItem, WidgetConfigSchema } from "@/lib/dashboard-queries";
+import { DEFAULT_CARD_CHROME, type CardChrome, type DashboardItem, type WidgetConfigSchema } from "@/lib/dashboard-queries";
 
 /**
  * One placed card on the dashboard grid. Resolves the module's widget bundle
@@ -27,6 +27,7 @@ export function DashboardCard({
   logId,
   editing,
   schema,
+  chrome = DEFAULT_CARD_CHROME,
   onUpdate,
   onRemove,
 }: {
@@ -34,6 +35,8 @@ export function DashboardCard({
   logId: string | null;
   editing: boolean;
   schema: WidgetConfigSchema | null | undefined;
+  /** Board-wide appearance toggles (border / header / shadow). */
+  chrome?: CardChrome;
   onUpdate: (patch: { title?: string; config?: Record<string, unknown> }) => void;
   onRemove: () => void;
 }) {
@@ -43,7 +46,12 @@ export function DashboardCard({
   const stopDrag = (e: React.MouseEvent | React.PointerEvent) => e.stopPropagation();
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+    <div
+      className={cn(
+        "flex h-full flex-col overflow-hidden rounded-lg bg-card shadow-sm",
+        chrome.border && "border border-border",
+      )}
+    >
       <div
         className={cn(
           "flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-2",

@@ -14,6 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useUi } from "@/lib/stores/ui";
 import { StorageGauge } from "@/components/settings/storage-gauge";
+import { useOnboardingState, useUpdateOnboarding } from "@/lib/onboarding-queries";
+import type { ExperienceLevel } from "@/lib/stores/onboarding";
 
 export default function GeneralSettingsPage() {
   const { theme = "system", setTheme } = useTheme();
@@ -29,6 +31,19 @@ export default function GeneralSettingsPage() {
   const setCsvDelimiter = useUi((s) => s.setCsvDelimiter);
   const csvTimestampFormat = useUi((s) => s.csvTimestampFormat);
   const setCsvTimestampFormat = useUi((s) => s.setCsvTimestampFormat);
+
+  const onboardingQuery = useOnboardingState();
+  const updateOnboarding = useUpdateOnboarding();
+  const experienceLevel = onboardingQuery.data?.experience_level ?? null;
+  const setExperienceLevel = (level: ExperienceLevel) => {
+    if (!onboardingQuery.data) return;
+    updateOnboarding.mutate({
+      // Preserve the completed flag — this only re-tunes the proficiency the
+      // welcome flow captured, it doesn't re-open onboarding.
+      completed: onboardingQuery.data.completed,
+      experience_level: level,
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -72,6 +87,35 @@ export default function GeneralSettingsPage() {
             </span>
             <Switch checked={muted} onCheckedChange={setMuted} className="cursor-pointer" />
           </Label>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Process proficiency</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="proficiency">Experience level</Label>
+            <p className="text-xs text-muted-foreground">
+              Your process-mining experience, captured during onboarding. Used
+              to tailor the experience.
+            </p>
+            <Select
+              value={experienceLevel ?? ""}
+              onValueChange={(v) => setExperienceLevel(v as ExperienceLevel)}
+              disabled={!onboardingQuery.data || updateOnboarding.isPending}
+            >
+              <SelectTrigger id="proficiency" className="w-56">
+                <SelectValue placeholder="Not set" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="beginner">Beginner</SelectItem>
+                <SelectItem value="intermediate">Intermediate</SelectItem>
+                <SelectItem value="expert">Expert</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </CardContent>
       </Card>
 

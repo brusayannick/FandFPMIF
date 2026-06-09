@@ -27,16 +27,46 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/empty-state";
 import { JobRow } from "@/components/jobs/job-row";
+import { JobGroupHeader } from "@/components/jobs/job-group-header";
+import { JobChildRow } from "@/components/jobs/job-child-row";
 import { api } from "@/lib/api";
 import {
   selectActiveJobs,
-  selectCounts,
-  selectFinishedJobs,
+  selectJobGroups,
   useJobsStore,
+  type JobGroup,
   type LiveJob,
 } from "@/lib/stores/jobs";
 
 type Filter = "all" | "running" | "queued" | "finished";
+
+const ACTIVE_STATUS = new Set(["queued", "running", "paused"]);
+
+/** A drawer unit is either a parent/child group or a standalone job. */
+type Unit =
+  | { kind: "group"; group: JobGroup }
+  | { kind: "standalone"; job: LiveJob };
+
+/** A flattened, virtualizable row. */
+type DisplayRow =
+  | { kind: "group-header"; key: string; group: JobGroup; expanded: boolean }
+  | { kind: "child"; key: string; job: LiveJob }
+  | { kind: "standalone"; key: string; job: LiveJob };
+
+function unitJobs(u: Unit): LiveJob[] {
+  return u.kind === "group" ? [u.group.parent, ...u.group.children] : [u.job];
+}
+
+function unitActive(u: Unit): boolean {
+  return u.kind === "group"
+    ? u.group.active
+    : ACTIVE_STATUS.has(u.job.status);
+}
+
+function unitMatches(u: Unit, needle: string): boolean {
+  const job = u.kind === "group" ? u.group.parent : u.job;
+  return job.title.toLowerCase().includes(needle) || job.id.includes(needle);
+}
 
 export function JobsDrawer() {
   const open = useJobsStore((s) => s.drawerOpen);
@@ -44,12 +74,25 @@ export function JobsDrawer() {
   const paused = useJobsStore((s) => s.paused);
   const finishedHidden = useJobsStore((s) => s.finishedHidden);
   const active = useJobsStore(useShallow(selectActiveJobs));
-  const finished = useJobsStore(useShallow(selectFinishedJobs));
+  // Subscribe to the stable `byId` map ref (changes only on a real store
+  // update) and derive groups via useMemo. selectJobGroups allocates fresh
+  // wrapper objects, so using it as a useShallow selector would loop renders.
+  const byId = useJobsStore((s) => s.byId);
+  const { groups, standalone } = useMemo(() => selectJobGroups(byId), [byId]);
   const setFinishedHidden = useJobsStore((s) => s.setFinishedHidden);
   const cancelAll = useCancelAllJobs();
   const [filter, setFilter] = useState<Filter>("running");
   const [q, setQ] = useState("");
+  // Group ids the user has collapsed; groups are expanded by default.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const hasActive = active.length > 0;
+  const toggleGroup = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   // `j j` chord opens the drawer.
   useEffect(() => {
@@ -73,25 +116,60 @@ export function JobsDrawer() {
     return () => document.removeEventListener("keydown", onKey);
   }, [setOpen]);
 
-  const ordered = useMemo(() => {
-    let rows: LiveJob[] = [];
-    if (filter === "all") {
-      rows = [...active, ...finished];
-    } else if (filter === "running") {
-      rows = active.filter((j) => j.status === "running");
+  const ordered = useMemo<DisplayRow[]>(() => {
+    const units: Unit[] = [
+      ...groups.map((group): Unit => ({ kind: "group", group })),
+      ...standalone.map((job): Unit => ({ kind: "standalone", job })),
+    ];
+
+    // Active units first (matching the old `[...active, ...finished]` order),
+    // each block already creation-sorted by the selectors.
+    const activeUnits = units.filter(unitActive);
+    const finishedUnits = units.filter((u) => !unitActive(u));
+
+    let visible: Unit[];
+    if (filter === "running") {
+      visible = activeUnits.filter((u) =>
+        unitJobs(u).some((j) => j.status === "running"),
+      );
     } else if (filter === "queued") {
-      rows = active.filter((j) => j.status === "queued" || j.status === "paused");
+      visible = activeUnits.filter((u) =>
+        unitJobs(u).some((j) => j.status === "queued" || j.status === "paused"),
+      );
+    } else if (filter === "finished") {
+      visible = finishedHidden ? [] : finishedUnits;
     } else {
-      rows = finished;
+      // "all": active always shown; finished honor the hidden toggle.
+      visible = finishedHidden ? activeUnits : [...activeUnits, ...finishedUnits];
     }
+
     if (q) {
       const needle = q.toLowerCase();
-      rows = rows.filter(
-        (r) => r.title.toLowerCase().includes(needle) || r.id.includes(needle),
-      );
+      visible = visible.filter((u) => unitMatches(u, needle));
+    }
+
+    // Flatten units → display rows.
+    const rows: DisplayRow[] = [];
+    for (const u of visible) {
+      if (u.kind === "standalone") {
+        rows.push({ kind: "standalone", key: u.job.id, job: u.job });
+        continue;
+      }
+      const expanded = !collapsed.has(u.group.parent.id);
+      rows.push({
+        kind: "group-header",
+        key: u.group.parent.id,
+        group: u.group,
+        expanded,
+      });
+      if (expanded) {
+        for (const child of u.group.children) {
+          rows.push({ kind: "child", key: child.id, job: child });
+        }
+      }
     }
     return rows;
-  }, [active, finished, filter, q]);
+  }, [groups, standalone, filter, finishedHidden, q, collapsed]);
 
 
   return (
@@ -186,7 +264,7 @@ export function JobsDrawer() {
           />
         </SheetHeader>
 
-        <DrawerBody rows={ordered} />
+        <DrawerBody rows={ordered} onToggleGroup={toggleGroup} />
       </SheetContent>
     </Sheet>
   );
@@ -194,15 +272,19 @@ export function JobsDrawer() {
 
 function DrawerBody({
   rows,
+  onToggleGroup,
 }: {
-  rows: LiveJob[];
+  rows: DisplayRow[];
+  onToggleGroup: (id: string) => void;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 200,
-    overscan: 4,
+    // Standalone rows carry a details affordance and run tall; group headers
+    // and child rows are compact. measureElement corrects the estimate.
+    estimateSize: (i) => (rows[i].kind === "standalone" ? 200 : 64),
+    overscan: 6,
   });
 
   if (rows.length === 0) {
@@ -221,10 +303,10 @@ function DrawerBody({
     <div ref={parentRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
       <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
         {items.map((v) => {
-          const job = rows[v.index];
+          const row = rows[v.index];
           return (
             <div
-              key={job.id}
+              key={row.key}
               ref={virtualizer.measureElement}
               data-index={v.index}
               style={{
@@ -233,10 +315,20 @@ function DrawerBody({
                 left: 0,
                 width: "100%",
                 transform: `translateY(${v.start}px)`,
-                paddingBottom: 8,
+                paddingBottom: row.kind === "child" ? 4 : 8,
               }}
             >
-              <JobRow job={job} />
+              {row.kind === "group-header" ? (
+                <JobGroupHeader
+                  group={row.group}
+                  expanded={row.expanded}
+                  onToggle={() => onToggleGroup(row.group.parent.id)}
+                />
+              ) : row.kind === "child" ? (
+                <JobChildRow job={row.job} />
+              ) : (
+                <JobRow job={row.job} />
+              )}
             </div>
           );
         })}

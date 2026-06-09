@@ -28,6 +28,7 @@ from mate.sdk.context import (
     ModuleConfigProtocol,
     ModuleContext,
     ModuleRegistryProtocol,
+    OpenEventLogProtocol,
     ProgressReporterProtocol,
     ResultCacheProtocol,
 )
@@ -35,12 +36,12 @@ from mate.sdk.decorators import job, on_event, route
 from mate.sdk.errors import ModuleError, ModuleManifestError
 from mate.sdk.manifest import (
     DependenciesPython,
+    EventLogRequirements,
     Manifest,
     ManifestFrontend,
     ModuleCategory,
     OptionalModuleDep,
     Requirements,
-    EventLogRequirements,
 )
 from mate.sdk.module import Module
 
@@ -54,12 +55,13 @@ __all__ = [
     "Manifest",
     "ManifestFrontend",
     "Module",
+    "ModuleCategory",
     "ModuleConfigProtocol",
     "ModuleContext",
-    "ModuleCategory",
     "ModuleError",
     "ModuleManifestError",
     "ModuleRegistryProtocol",
+    "OpenEventLogProtocol",
     "OptionalModuleDep",
     "ProgressReporterProtocol",
     "Requirements",

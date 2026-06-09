@@ -17,7 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { useCancelJob, useRetryJob } from "@/lib/queries";
-import { formatDuration, formatNumber, formatRelative } from "@/lib/format";
+import { formatDuration, formatRelative } from "@/lib/format";
+import { jobProgress } from "@/lib/job-progress";
 import { parseJobTitle, type LiveJob } from "@/lib/stores/jobs";
 import { cn } from "@/lib/cn";
 
@@ -30,13 +31,7 @@ export function JobRow({ job }: JobRowProps) {
   const retry = useRetryJob();
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const total = job.progress_total ?? null;
-  const pct =
-    total && total > 0
-      ? Math.min(100, Math.max(0, Math.floor((job.progress_current / total) * 100)))
-      : null;
-  const eta = job.eta_seconds ?? job.eta_local ?? null;
-  const rate = job.rate ?? job.rate_local ?? null;
+  const { pct, label, rate, eta } = jobProgress(job);
 
   const isActive =
     job.status === "running" || job.status === "queued" || job.status === "paused";
@@ -135,13 +130,7 @@ export function JobRow({ job }: JobRowProps) {
               className={pct === null ? "h-1 animate-pulse" : "h-1"}
             />
             <div className="flex items-center justify-between text-[11px] text-muted-foreground tabular-nums">
-              <span>
-                {pct === null
-                  ? job.progress_current
-                    ? `${formatNumber(job.progress_current)} processed`
-                    : "Estimating…"
-                  : `${formatNumber(job.progress_current)} / ${formatNumber(total)} (${pct}%)`}
-              </span>
+              <span>{label}</span>
               <span>
                 {rate && Number.isFinite(rate)
                   ? `${Math.round(rate).toLocaleString()}/s · ETA ${formatDuration(eta)}`
@@ -243,13 +232,7 @@ function JobDetailsDialog({
 }
 
 function DetailGrid({ job }: { job: LiveJob }) {
-  const total = job.progress_total ?? null;
-  const pct =
-    total && total > 0
-      ? Math.min(100, Math.max(0, Math.floor((job.progress_current / total) * 100)))
-      : null;
-  const eta = job.eta_seconds ?? job.eta_local ?? null;
-  const rate = job.rate ?? job.rate_local ?? null;
+  const { pct, label, rate, eta } = jobProgress(job);
 
   const items: Array<{ label: string; value: React.ReactNode }> = [
     {
@@ -280,11 +263,7 @@ function DetailGrid({ job }: { job: LiveJob }) {
       label: "Progress",
       value: (
         <span className="tabular-nums">
-          {pct === null
-            ? job.progress_current
-              ? `${formatNumber(job.progress_current)} processed`
-              : "—"
-            : `${formatNumber(job.progress_current)} / ${formatNumber(total)} (${pct}%)`}
+          {pct === null && !job.progress_current ? "—" : label}
         </span>
       ),
     },

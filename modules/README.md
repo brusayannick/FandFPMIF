@@ -236,6 +236,18 @@ async with ctx.event_log as log:
 
 Prefer DuckDB for aggregations (millions of rows in milliseconds). Use pandas/polars when you need DataFrame semantics. Use `pm4py` only when an algorithm needs the pm4py event log object — it's the heaviest.
 
+### `ctx.open_event_log(log_id)` — reading a *second* log
+
+`ctx.event_log` is bound to the one log the invocation is scoped to. When a module genuinely needs another log too (comparison, benchmarking), `ctx.open_event_log(other_log_id)` returns a second `EventLogAccess` with the **same** interface:
+
+```python
+async with ctx.event_log as base, await ctx.open_event_log(other_id) as other:
+    base_df = await base.pandas()
+    other_df = await other.pandas()
+```
+
+It is the only sanctioned cross-log accessor and it **enforces tenant isolation**: the target must be a case-centric log owned by the same user, else it raises (a log belonging to another user is reported as "not found" — never confirmed). The view honours the target log's own committed Events-tab filter, exactly like the primary one. Don't reach into `mate.api.*` internals to open a log yourself — that bypasses the ownership check.
+
 ### `ctx.cache`
 
 Per-`(log_id, module_id)` result cache. Use it to memoise expensive computations across requests:
@@ -254,12 +266,21 @@ User-set configuration, validated against your `config_schema`. Read with `ctx.c
 
 ### `ctx.progress`
 
-Inside a `@job(progress=True)` handler, emit progress to the dock + drawer + WebSocket stream:
+Inside a `@job(progress=True)` handler, emit progress to the dock + drawer + WebSocket stream. Pick whichever style fits — all three render a live bar, none requires you to know the total up front:
 
 ```python
+# 1. Fraction (0.0–1.0, no total) → determinate percentage bar.
 await ctx.progress.update(0.42, "Computing fitness")
+
+# 2. Absolute counts (current + total) → determinate bar *and* an ETA.
 await ctx.progress.update(current=4200, total=10000, stage="replay")
+
+# 3. Unknown scope → pass an integer running counter so the row reads
+#    "{n} processed" instead of sitting on a dead "Estimating…" pulse.
+await ctx.progress.update(current=processed_so_far)
 ```
+
+A `float` `current` in `[0, 1]` with no `total` is read as a fraction (mapped to 0–100); an `int` `current` is always a running counter (`update(current=1)` is "1 processed", not "100%"). For long jobs, **always emit *something* live** — never leave the bar silent for minutes.
 
 ### `ctx.workdir`
 

@@ -229,10 +229,12 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           {editing && (
             <DashboardSettingsDialog settings={settings} onChange={changeSettings} />
           )}
-          <Button type="button" variant="outline" size="sm" onClick={exportJson}>
-            <Download className="mr-1.5 h-3.5 w-3.5" />
-            Export
-          </Button>
+          {editing && (
+            <Button type="button" variant="outline" size="sm" onClick={exportJson}>
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              Export
+            </Button>
+          )}
           {editing ? (
             <>
               <Button

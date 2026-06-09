@@ -157,6 +157,15 @@ class _JobProgressAdapter:
         total: float | None = None,
         stage: str | None = None,
     ) -> None:
+        # Two reporting styles are supported. With an explicit `total`, `current`
+        # is an absolute count (`4200 / 10000`). Without a `total`, a *float*
+        # `current` in [0, 1] is read as a fraction and mapped onto 0-100 so the
+        # bar is determinate (and gets a real ETA, since the rate/eta math keys
+        # off `total`). An int `current` with no total stays a running counter
+        # ("{n} processed") — so `update(current=1)` is "1 processed", not "100%".
+        if total is None and isinstance(current, float) and 0.0 <= current <= 1.0:
+            await self._handle.progress(round(current * 100), 100, stage=stage, message=message)
+            return
         await self._handle.progress(
             int(current), int(total) if total else None, stage=stage, message=message
         )
@@ -971,6 +980,10 @@ class ModuleLoader:
                                     "_event_payload": env.payload,
                                 },
                                 priority=job_spec.priority,
+                                # Link import-triggered children to the import job so
+                                # the drawer can group them into a step checklist.
+                                # Absent for non-import events → standalone job.
+                                parent_job_id=env.payload.get("import_job_id"),
                             )
                         except Exception:
                             log.exception(
@@ -1072,6 +1085,26 @@ class ModuleLoader:
             ).hexdigest()
             cache_variant = digest[:16]
 
+        # The sanctioned cross-log accessor (ctx.open_event_log). Modules that
+        # compare logs need a *second* EventLogAccess; minting it here keeps the
+        # tenant-isolation invariant in one place — we refuse any log the caller
+        # doesn't own. The returned view mirrors the primary one: same user, the
+        # target log's own committed Events-tab filter.
+        async def _open_event_log(other_log_id: str) -> EventLogAccess:
+            sm_ = get_sessionmaker()
+            async with sm_() as session:
+                other = await session.get(EventLog, other_log_id)
+            if other is None or other.user_id != user_id:
+                # Same response whether missing or another tenant's — never
+                # confirm the existence of a log the caller doesn't own.
+                raise PermissionError(f"Event log {other_log_id} not found.")
+            if other.log_model == "object_centric":
+                raise ValueError(
+                    f"Event log {other_log_id} is object-centric; "
+                    "open_event_log only serves case-centric logs."
+                )
+            return EventLogAccess(other_log_id, user_id, other.active_filter or None)
+
         # Object-centric (OCEL) logs bind `object_log` and leave `event_log`
         # unbound; case-centric logs do the opposite. A module only ever runs
         # against the model it declares (availability gating), so it reaches for
@@ -1086,9 +1119,7 @@ class ModuleLoader:
                 if log_id and not object_centric
                 else _UnboundEventLog()
             ),  # type: ignore[arg-type]
-            object_log=(
-                ObjectCentricLogAccess(log_id, user_id) if object_centric else None
-            ),  # type: ignore[arg-type]
+            object_log=(ObjectCentricLogAccess(log_id, user_id) if object_centric else None),  # type: ignore[arg-type]
             bus=_SdkBusAdapter(self.bus, user_id, log_id),  # type: ignore[arg-type]
             registry=_UserScopedRegistry(self.registry, frozenset(owned_ids)),  # type: ignore[arg-type]
             cache=(  # type: ignore[arg-type]
@@ -1106,6 +1137,7 @@ class ModuleLoader:
             ),
             workdir=workdir,
             run_in_process=self.runtime.run_in_process,  # type: ignore[arg-type]
+            open_event_log=_open_event_log,  # type: ignore[arg-type]
         )
 
 

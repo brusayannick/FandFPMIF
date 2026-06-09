@@ -89,6 +89,25 @@ class EventLogAccessProtocol(Protocol):
 
 
 @runtime_checkable
+class OpenEventLogProtocol(Protocol):
+    """Open a *second* case-centric log owned by the same user (§5.5).
+
+    `ctx.event_log` is bound to the one log the invocation is scoped to. A few
+    modules — log comparison, benchmarking — need to read another log too. This
+    factory returns an `EventLogAccessProtocol` for any other case-centric log
+    **owned by `ctx.user_id`**, applying that log's committed Events-tab filter
+    just like the primary view. It is the only sanctioned cross-log accessor:
+    it enforces the tenant-isolation invariant, raising if the log is missing,
+    belongs to another user, or is object-centric. Use it as a context manager::
+
+        async with await ctx.open_event_log(other_id) as other:
+            df = await other.pandas()
+    """
+
+    async def __call__(self, log_id: str) -> EventLogAccessProtocol: ...
+
+
+@runtime_checkable
 class ObjectCentricLogAccessProtocol(Protocol):
     """Lazy view of an object-centric (OCEL) log. The object-centric
     counterpart to `EventLogAccessProtocol` — bound on `ctx.object_log` only for
@@ -134,6 +153,9 @@ class ModuleContext:
     logger: structlog.BoundLogger
     workdir: Path
     run_in_process: RunInProcessProtocol
+    # Open another case-centric log owned by the same user (ownership-checked).
+    # The sanctioned way for a module to read a *second* log — e.g. comparison.
+    open_event_log: OpenEventLogProtocol
     # Bound only for object-centric (OCEL) logs; None for case-centric logs.
     # A module only ever runs against the model it declares (availability
     # gating), so it reads exactly one of `event_log` / `object_log`.

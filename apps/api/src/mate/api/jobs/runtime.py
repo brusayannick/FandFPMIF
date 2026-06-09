@@ -333,6 +333,7 @@ class JobRuntime:
                 "subtitle": subtitle,
                 "module_id": module_id,
                 "priority": priority,
+                "parent_job_id": parent_job_id,
             },
         )
         await self._queue.put(job_id)

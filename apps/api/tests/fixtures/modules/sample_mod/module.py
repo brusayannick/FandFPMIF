@@ -45,6 +45,20 @@ class SampleModule(Module):
         await ctx.cache.set("count", result)
         return result
 
+    @route.get("/open-other")
+    async def open_other(self, ctx: ModuleContext, other_id: str) -> dict[str, object]:
+        """Open a *second* log via the ownership-checked cross-log accessor and
+        return its event count. Returns ``{"denied": True}`` when the accessor
+        refuses (missing log or another tenant's) — lets a test prove the
+        tenant-isolation invariant on ``ctx.open_event_log``."""
+        try:
+            other = await ctx.open_event_log(other_id)
+        except PermissionError:
+            return {"denied": True}
+        async with other as log:
+            rows = await log.duckdb_fetch("SELECT COUNT(*) FROM events")
+        return {"events": int(rows[0][0])}
+
     @on_event("test.shout")
     async def on_shout(self, ctx: ModuleContext, payload: dict) -> None:
         _received.append(payload)

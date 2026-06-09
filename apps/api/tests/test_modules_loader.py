@@ -88,6 +88,59 @@ async def test_module_route_applies_event_filter_header(
 
 
 @pytest.mark.asyncio
+async def test_open_event_log_enforces_ownership(
+    client_with_sample_mod: AsyncClient,
+) -> None:
+    """`ctx.open_event_log` is the only sanctioned cross-log accessor and it must
+    honour the tenant-isolation invariant: a user can open their own second log
+    but never another user's (reported the same as 'not found')."""
+    import uuid
+
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.db.models import EventLog, User
+
+    log_id = await _seed_sample_log(client_with_sample_mod)
+
+    # Opening one's own log succeeds and reads its events (9 in the fixture).
+    own = await client_with_sample_mod.get(
+        f"/api/v1/modules/sample_mod/open-other?log_id={log_id}&other_id={log_id}"
+    )
+    assert own.status_code == 200, own.text
+    assert own.json() == {"events": 9}
+
+    # A log owned by a *different* user must be refused.
+    other_user_id = "ffffffff-0000-7000-8000-000000000099"
+    other_user_log = str(uuid.uuid4())
+    sm = get_sessionmaker()
+    async with sm() as session:
+        if await session.get(User, other_user_id) is None:
+            session.add(User(id=other_user_id, email="other@mate.local"))
+            await session.commit()
+        session.add(
+            EventLog(
+                id=other_user_log,
+                user_id=other_user_id,
+                name="Someone else's log",
+                status="ready",
+                log_model="case_centric",
+            )
+        )
+        await session.commit()
+
+    denied = await client_with_sample_mod.get(
+        f"/api/v1/modules/sample_mod/open-other?log_id={log_id}&other_id={other_user_log}"
+    )
+    assert denied.status_code == 200, denied.text
+    assert denied.json() == {"denied": True}
+
+    # A non-existent log id is refused identically (never confirmed).
+    missing = await client_with_sample_mod.get(
+        f"/api/v1/modules/sample_mod/open-other?log_id={log_id}&other_id={uuid.uuid4()}"
+    )
+    assert missing.json() == {"denied": True}
+
+
+@pytest.mark.asyncio
 async def test_event_filter_header_bypasses_stale_result_cache(
     client_with_sample_mod: AsyncClient,
 ) -> None:
@@ -454,3 +507,45 @@ async def test_availability_evaluated_against_log_schema(
     assert listing.status_code == 200
     sample = next(m for m in listing.json() if m["id"] == "sample_mod")
     assert sample["availability"]["status"] == "available", sample
+
+
+@pytest.mark.asyncio
+async def test_job_progress_adapter_fraction_vs_counter() -> None:
+    """`_JobProgressAdapter` maps a 0-1 *float* fraction onto 0-100 (determinate
+    bar + ETA), but leaves explicit counts and integer running counters alone —
+    so `update(current=1)` stays "1 processed", never "100%"."""
+    from mate.api.modules.loader import _JobProgressAdapter
+
+    calls: list[tuple[int, int | None, str | None, str | None]] = []
+
+    class _FakeHandle:
+        async def progress(
+            self,
+            current: int,
+            total: int | None = None,
+            *,
+            stage: str | None = None,
+            message: str | None = None,
+            force: bool = False,
+        ) -> None:
+            calls.append((current, total, stage, message))
+
+    adapter = _JobProgressAdapter(_FakeHandle())  # type: ignore[arg-type]
+
+    # Fraction → 0-100 with a synthetic total of 100.
+    await adapter.update(0.42, "Computing fitness")
+    assert calls[-1] == (42, 100, None, "Computing fitness")
+
+    # Explicit counts pass through unchanged.
+    await adapter.update(current=4200, total=10000, stage="replay")
+    assert calls[-1] == (4200, 10000, "replay", None)
+
+    # Integer running counter stays a counter (no total), even for 0/1.
+    await adapter.update(current=1)
+    assert calls[-1] == (1, None, None, None)
+    await adapter.update(current=0)
+    assert calls[-1] == (0, None, None, None)
+
+    # Float endpoints of the fraction range still map onto the 0-100 scale.
+    await adapter.update(1.0)
+    assert calls[-1] == (100, 100, None, None)

@@ -104,7 +104,7 @@ export const useJobsStore = create<State>((set, get) => {
         rate: null,
         eta_seconds: null,
         priority: (payload.priority as number) ?? 0,
-        parent_job_id: null,
+        parent_job_id: (payload.parent_job_id as string | null) ?? null,
         created_at: new Date().toISOString(),
         started_at: null,
         finished_at: null,
@@ -279,4 +279,69 @@ export const selectCounts = (s: State) => {
     else if (FINISHED.has(j.status)) finished++;
   }
   return { running, queued, finished };
+};
+
+/**
+ * A parent job (e.g. a log import) and the children it spawned (one module job
+ * per installed module, linked via `parent_job_id`). Children can be completed
+ * while the group is still active, so this is computed over the *full* map, not
+ * the active-only selector.
+ */
+export interface JobGroup {
+  parent: LiveJob;
+  children: LiveJob[];
+  active: boolean;
+  /** Children in a terminal state. */
+  done: number;
+  /** Total children = total checklist steps. */
+  total: number;
+}
+
+const byCreatedAsc = (a: LiveJob, b: LiveJob) =>
+  a.created_at < b.created_at ? -1 : 1;
+
+/**
+ * Partition jobs into parent/child groups + standalone jobs.
+ *
+ * A job is a group parent iff ≥1 other job points at it via `parent_job_id`.
+ * An import job with no children yet (still importing) has no group and renders
+ * standalone — it becomes a header the moment its first child is queued.
+ *
+ * This allocates fresh `JobGroup` wrappers every call, so it must NOT be used
+ * as a `useShallow` selector (the new references defeat the comparison and spin
+ * `useSyncExternalStore` into an infinite render loop). Subscribe to the stable
+ * `byId` map and run this inside a `useMemo` keyed on it instead.
+ */
+export const selectJobGroups = (
+  byId: Map<string, LiveJob>,
+): { groups: JobGroup[]; standalone: LiveJob[] } => {
+  const childrenByParent = new Map<string, LiveJob[]>();
+  for (const j of byId.values()) {
+    if (!j.parent_job_id) continue;
+    const list = childrenByParent.get(j.parent_job_id);
+    if (list) list.push(j);
+    else childrenByParent.set(j.parent_job_id, [j]);
+  }
+
+  const groups: JobGroup[] = [];
+  const standalone: LiveJob[] = [];
+  for (const j of byId.values()) {
+    if (j.parent_job_id && byId.has(j.parent_job_id)) continue; // a child
+    const children = childrenByParent.get(j.id);
+    if (!children) {
+      standalone.push(j);
+      continue;
+    }
+    children.sort(byCreatedAsc);
+    const done = children.filter((c) => FINISHED.has(c.status)).length;
+    const active =
+      ACTIVE.has(j.status) || children.some((c) => ACTIVE.has(c.status));
+    groups.push({ parent: j, children, active, done, total: children.length });
+  }
+
+  groups.sort((a, b) =>
+    b.parent.created_at < a.parent.created_at ? -1 : 1,
+  );
+  standalone.sort((a, b) => (b.created_at < a.created_at ? -1 : 1));
+  return { groups, standalone };
 };

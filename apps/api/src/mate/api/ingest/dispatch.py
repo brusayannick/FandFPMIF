@@ -254,6 +254,7 @@ async def _import_handler(handle: JobHandle) -> None:
         {
             "log_id": log_id,
             "user_id": handle.user_id,
+            "import_job_id": handle.id,
             "events_count": meta["events_count"],
             "cases_count": meta["cases_count"],
             "detected_schema": detected_schema,
@@ -397,6 +398,7 @@ async def _import_ocel(
         {
             "log_id": log_id,
             "user_id": handle.user_id,
+            "import_job_id": handle.id,
             "events_count": result.stats["events_count"],
             "objects_count": result.stats["objects_count"],
             "object_types_count": result.stats["object_types_count"],

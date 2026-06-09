@@ -154,6 +154,34 @@ def _rename_pm4py(df: Any) -> Any:
     )
 
 
+def _filter_variants_coverage(renamed: Any, coverage: float) -> Any:
+    """Keep the most frequent variants that cumulatively cover ``coverage``.
+
+    ``coverage`` is a 0..1 fraction of cases. Variants are ranked by case
+    frequency (descending) and kept until their cumulative share reaches
+    ``coverage``, dropping the long tail. This mirrors the semantics of the
+    ``pm4py.filter_variants_percentage`` helper that was removed in pm4py 2.7.
+    """
+    ordered = renamed.sort_values(
+        ["case:concept:name", "time:timestamp"], kind="mergesort"
+    )
+    # One variant (ordered activity tuple) per case.
+    variant_per_case = ordered.groupby("case:concept:name", sort=False)[
+        "concept:name"
+    ].agg(tuple)
+    counts = variant_per_case.value_counts()  # variant -> n cases, descending
+    total = counts.sum()
+    if total == 0:
+        return renamed
+    # Keep variants up to and including the one that crosses the threshold.
+    prev_cumulative = counts.cumsum().shift(fill_value=0) / total
+    kept_variants = set(counts.index[prev_cumulative < coverage])
+    kept_cases = variant_per_case[
+        variant_per_case.map(lambda v: v in kept_variants)
+    ].index
+    return renamed[renamed["case:concept:name"].isin(kept_cases)]
+
+
 def _activity_mean_trace_position(renamed: Any) -> dict[str, float]:
     """Mean normalised position (0..1) of each activity within its trace.
 
@@ -237,7 +265,7 @@ class DiscoveryModule(Module):
             renamed = _rename_pm4py(df)
             filtered = renamed
             if variant_pct is not None and variant_pct < 1.0:
-                filtered = pm4py.filter_variants_percentage(renamed, percentage=variant_pct)
+                filtered = _filter_variants_coverage(renamed, variant_pct)
             dfg, start, end = pm4py.discover_dfg(filtered)
             durations = _edge_mean_durations(filtered)
             mean_positions = _activity_mean_trace_position(filtered)

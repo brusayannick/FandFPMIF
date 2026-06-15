@@ -3,6 +3,7 @@ name: CV4CDD - Concept Drift Detection
 version: 1.0.0
 category: advanced
 description: Computer-vision approach for concept drift detection. Identifies sudden, gradual, incremental, and recurring drifts via a fine-tuned object-detection model on a similarity-matrix encoding of the event log.
+keywords: ["concept drift", "drift detection", "drift", "sudden drift", "gradual drift", "recurring drift", "change point"]
 author: A. Kraus and H. van der Aa
 license: CC-BY-4.0
 default_enabled: true

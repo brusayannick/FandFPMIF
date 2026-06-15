@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
@@ -28,11 +28,19 @@ import { useModules } from "@/lib/queries";
 import { useUi } from "@/lib/stores/ui";
 import { useTrack } from "@/lib/analytics/hooks";
 import { EV } from "@/lib/analytics/events";
+import { NavWidget, type NavTarget } from "@/components/mate-ai/nav-widget";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   isError?: boolean;
+  navTargets?: NavTarget[];
+}
+
+interface RouteResponse {
+  intent: string;
+  confidence: number;
+  targets: NavTarget[];
 }
 
 interface Starter {
@@ -309,9 +317,20 @@ export function MateAiSidebar() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const track = useTrack();
+  const router = useRouter();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Nav suggestions can arrive before the assistant bubble is appended (the
+  // route call runs in parallel with the chat stream). Buffer them by the
+  // assistant message's eventual index until that message exists.
+  const pendingNavRef = useRef<Map<number, NavTarget[]>>(new Map());
+
+  const onNavigate = (target: NavTarget) => {
+    track(EV.AI_NAV_CLICKED, { target_id: target.id, kind: target.kind });
+    router.push(target.href);
+    setOpen(false);
+  };
 
   const isStreaming = streamingContent !== null;
   const hasMessages = messages.length > 0 || isStreaming;
@@ -354,12 +373,55 @@ export function MateAiSidebar() {
     let full = "";
     let finalised = false;
 
+    // The assistant reply will land at this index once finalised.
+    const assistantIndex = history.length;
+
     const finalise = (content: string, isError = false) => {
       if (finalised) return;
       finalised = true;
-      setMessages((prev) => [...prev, { role: "assistant", content, isError }]);
+      setMessages((prev) => {
+        const pending = pendingNavRef.current.get(assistantIndex);
+        pendingNavRef.current.delete(assistantIndex);
+        return [...prev, { role: "assistant", content, isError, navTargets: pending }];
+      });
       setStreamingContent(null);
     };
+
+    const attachNav = (targets: NavTarget[]) => {
+      if (targets.length === 0) return;
+      setMessages((prev) => {
+        if (prev[assistantIndex]?.role === "assistant") {
+          const copy = [...prev];
+          copy[assistantIndex] = { ...copy[assistantIndex]!, navTargets: targets };
+          return copy;
+        }
+        // Assistant bubble not appended yet — buffer for finalise().
+        pendingNavRef.current.set(assistantIndex, targets);
+        return prev;
+      });
+    };
+
+    // Fire the navigation classifier in parallel with the chat stream. It's
+    // purely additive: any failure just means no suggestions, never a broken
+    // chat, so errors are swallowed.
+    void rawFetch("/api/v1/ai/route", {
+      method: "POST",
+      json: chatContext
+        ? { message: trimmed, context: chatContext }
+        : { message: trimmed },
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<RouteResponse>) : null))
+      .then((res) => {
+        if (!res || res.targets.length === 0) return;
+        track(EV.AI_NAV_SUGGESTED, {
+          intent: res.intent,
+          confidence: res.confidence,
+          count: res.targets.length,
+          target_ids: res.targets.map((t) => t.id),
+        });
+        attachNav(res.targets);
+      })
+      .catch(() => {});
 
     try {
       const res = await rawFetch("/api/v1/ai/chat", {
@@ -540,7 +602,14 @@ export function MateAiSidebar() {
                 msg.role === "user" ? (
                   <UserBubble key={i} content={msg.content} />
                 ) : (
-                  <AssistantBubble key={i} content={msg.content} isError={msg.isError} />
+                  <div key={i}>
+                    <AssistantBubble content={msg.content} isError={msg.isError} />
+                    {msg.navTargets && msg.navTargets.length > 0 && (
+                      <div className="pl-[30px]">
+                        <NavWidget targets={msg.navTargets} onNavigate={onNavigate} />
+                      </div>
+                    )}
+                  </div>
                 ),
               )}
               {isStreaming && (

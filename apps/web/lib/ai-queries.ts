@@ -19,6 +19,9 @@ export interface AiConfig {
   custom: ProviderConfig;
   selected_provider: AiProvider | null;
   selected_model: string | null;
+  /** Optional cheaper model (same provider) used only for MATE AI's navigation
+   *  intent classifier. Falls back to `selected_model` when null. */
+  classifier_model: string | null;
 }
 
 export interface ModelInfo {
@@ -52,6 +55,7 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
   custom: { api_key: null, base_url: null },
   selected_provider: null,
   selected_model: null,
+  classifier_model: null,
 };
 
 const KEYS = {

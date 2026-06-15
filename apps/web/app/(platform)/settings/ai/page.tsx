@@ -300,6 +300,16 @@ export default function AiSettingsPage() {
               setDraft((d) => ({ ...d, selected_model: m }))
             }
           />
+
+          <ClassifierModelCard
+            provider={selected}
+            classifierModel={draft.classifier_model}
+            defaultModel={draft.selected_model}
+            models={models[selected]}
+            onChange={(m) =>
+              setDraft((d) => ({ ...d, classifier_model: m }))
+            }
+          />
         </>
       )}
 
@@ -577,6 +587,70 @@ function ModelSelectCard({
             No models fetched yet for {providerMeta(provider).label}. Use{" "}
             <em>Fetch models</em> in the configuration card above to see
             other options.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Classifier model (optional, cheaper) ───────────────────────────────────
+
+function ClassifierModelCard({
+  provider,
+  classifierModel,
+  defaultModel,
+  models,
+  onChange,
+}: {
+  provider: AiProvider;
+  classifierModel: string | null;
+  defaultModel: string | null;
+  models: ModelInfo[];
+  onChange: (modelId: string | null) => void;
+}) {
+  const savedNotInList =
+    classifierModel !== null && !models.some((m) => m.id === classifierModel);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Navigation classifier model</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          MATE AI runs a tiny intent check on each message to suggest in-app
+          navigation. Pick a cheaper/faster model here to keep that overhead low.
+          Leave on <em>Same as default</em> to reuse the default model.
+        </p>
+        <Select
+          value={classifierModel ?? "__default"}
+          onValueChange={(v) => onChange(v === "__default" ? null : v)}
+        >
+          <SelectTrigger className="text-xs">
+            <SelectValue placeholder="Same as default model" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__default">
+              Same as default
+              {defaultModel ? ` (${cleanDisplayName(defaultModel)})` : ""}
+            </SelectItem>
+            {savedNotInList && classifierModel && (
+              <SelectItem value={classifierModel}>
+                {cleanDisplayName(classifierModel)}{" "}
+                <span className="text-muted-foreground">(saved)</span>
+              </SelectItem>
+            )}
+            {models.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.display_name ?? cleanDisplayName(m.id)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {models.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            No models fetched yet for {providerMeta(provider).label}.
           </p>
         )}
       </CardContent>

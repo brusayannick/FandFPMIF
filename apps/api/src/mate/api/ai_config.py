@@ -35,6 +35,10 @@ class AiConfigPayload(BaseModel):
     custom: ProviderConfig = Field(default_factory=ProviderConfig)
     selected_provider: Provider | None = None
     selected_model: str | None = None
+    # Optional cheaper model (same provider) used only for the intent classifier
+    # behind MATE AI's navigation routing. Falls back to ``selected_model`` when
+    # unset, so existing configs keep working untouched.
+    classifier_model: str | None = None
 
 
 def _load_config(row: UserSetting | None) -> AiConfigPayload:

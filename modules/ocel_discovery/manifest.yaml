@@ -3,6 +3,7 @@ name: Object-Centric Discovery
 version: 1.0.0
 category: foundation
 description: Object-centric process discovery - object types, activities, and the object-centric directly-follows graph (OC-DFG) for OCEL logs.
+keywords: ["object-centric", "object centric", "ocel", "oc-dfg", "object types", "ocpm"]
 author: Mate
 license: MIT
 default_enabled: true

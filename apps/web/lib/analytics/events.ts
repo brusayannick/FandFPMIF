@@ -36,6 +36,8 @@ export const EV = {
   // AI
   AI_CHAT_SENT: "ai_chat_sent",
   AI_GUIDANCE_REQUESTED: "ai_guidance_requested",
+  AI_NAV_SUGGESTED: "ai_nav_suggested",
+  AI_NAV_CLICKED: "ai_nav_clicked",
 
   // UI chrome
   SIDEBAR_TOGGLED: "sidebar_toggled",

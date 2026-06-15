@@ -32,6 +32,11 @@ from mate.api.ai_config import (
     _load_config,
     _provider_creds,
 )
+from mate.api.ai_nav import (
+    RoutingResult,
+    build_user_destinations,
+    route_intent,
+)
 from mate.api.auth import CurrentUserDep
 from mate.api.db.models import UserSetting
 from mate.api.db.session import SessionDep
@@ -382,6 +387,37 @@ async def _build_context_block(context: ChatContext | None, user_id: str) -> str
     if len(parts) == 1:
         return ""
     return "\n\n".join(parts)
+
+
+class RouteRequest(BaseModel):
+    """Last user message + current page context for navigation routing."""
+
+    message: str
+    context: ChatContext | None = None
+
+
+@router.post("/route")
+async def route(
+    payload: RouteRequest, session: SessionDep, user: CurrentUserDep
+) -> RoutingResult:
+    """Classify a chat message and return navigation suggestions (if any).
+
+    Runs in parallel with ``/chat`` from the frontend: the chat answer streams
+    while this resolves, and the suggestions are rendered additively. On any
+    failure (no AI configured, provider error) we return an empty, no-op result
+    so navigation never blocks or breaks the chat.
+    """
+    row = await session.get(UserSetting, (user.id, AI_CONFIG_KEY))
+    cfg = _load_config(row)
+
+    # If the user hasn't configured a usable provider, the LLM leg can't run —
+    # but the deterministic pre-filter still can, so we proceed regardless and
+    # let route_intent degrade gracefully when it needs the model.
+    log_id = payload.context.log_id if payload.context else None
+    destinations = await build_user_destinations(session, user.id)
+    return await route_intent(
+        cfg, message=payload.message, destinations=destinations, log_id=log_id
+    )
 
 
 @router.post("/chat")

@@ -3,6 +3,7 @@ name: Process Comparison
 version: 0.1.0
 category: advanced
 description: Compare two or more event logs - DFG overlay diff, variant diff, similarity scores (EMD / footprints) and per-activity frequency deltas.
+keywords: ["compare", "comparison", "diff", "difference", "versus", "overlay", "two logs", "process comparison"]
 author: Mate
 license: MIT
 # Runs entirely locally (pm4py / duckdb) — safe against confidential logs.

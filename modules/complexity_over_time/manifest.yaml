@@ -3,6 +3,7 @@ name: Complexity over time
 version: 1.0.0
 category: advanced
 description: Tracks how EPA-based complexity KPIs (variant/sequence entropy, Pentland, structure, affinity, Lempel-Ziv, …) evolve over the lifetime of a process. Slices the log along time - whole cases grouped by start time - runs the complexity math on each slice, and plots a chosen KPI as a line over time.
+keywords: ["complexity over time", "complexity trend", "entropy over time", "complexity timeline", "kpi over time"]
 author: E. Langer
 license: MIT
 default_enabled: true

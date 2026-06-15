@@ -3,6 +3,7 @@ name: Performance
 version: 1.0.0
 category: foundation
 description: Throughput, lead / cycle / sojourn time, P90 cycle time, bottlenecks, performance DFG.
+keywords: ["performance", "bottleneck", "cycle time", "throughput", "lead time", "slow", "kpi", "sojourn", "p90", "waiting time"]
 author: FlowFactory
 license: MIT
 default_enabled: true

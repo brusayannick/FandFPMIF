@@ -6,6 +6,7 @@ description: >-
   LLM-based explanations for concept drifts. Combines CV4CDD detections with
   retrieval over user-uploaded enterprise documents to produce ranked,
   citation-backed causes.
+keywords: ["explain drift", "drift explanation", "why drift", "drift reason", "root cause drift", "drift cause"]
 author: J. Schaffner (ported by FF team)
 license: MIT
 default_enabled: true

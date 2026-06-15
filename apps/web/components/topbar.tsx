@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Search, Sparkles } from "lucide-react";
@@ -97,16 +97,20 @@ export function Topbar() {
       <Breadcrumb className="min-w-0 flex-1">
         <BreadcrumbList>
           {crumbs.map((c, i) => (
-            <BreadcrumbItem key={c.href}>
-              {c.current ? (
-                <BreadcrumbPage className="truncate">{c.label}</BreadcrumbPage>
-              ) : (
-                <BreadcrumbLink asChild>
-                  <Link href={c.href}>{c.label}</Link>
-                </BreadcrumbLink>
-              )}
+            // Item and separator must be siblings inside the list — nesting the
+            // separator <li> inside the item <li> is invalid HTML (hydration error).
+            <Fragment key={c.href}>
+              <BreadcrumbItem>
+                {c.current ? (
+                  <BreadcrumbPage className="truncate">{c.label}</BreadcrumbPage>
+                ) : (
+                  <BreadcrumbLink asChild>
+                    <Link href={c.href}>{c.label}</Link>
+                  </BreadcrumbLink>
+                )}
+              </BreadcrumbItem>
               {i < crumbs.length - 1 && <BreadcrumbSeparator />}
-            </BreadcrumbItem>
+            </Fragment>
           ))}
         </BreadcrumbList>
       </Breadcrumb>

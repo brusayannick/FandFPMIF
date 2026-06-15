@@ -142,16 +142,45 @@ def test_derive_keywords_from_name_and_provides() -> None:
 # ── full orchestration (LLM stubbed) ─────────────────────────────────────────
 
 
-def test_route_intent_skips_llm_for_pure_chat(monkeypatch) -> None:
-    def _boom(*a, **k):
-        raise AssertionError("classifier must not be called for pure chat")
+def test_route_intent_classifies_when_no_fast_path(monkeypatch) -> None:
+    # No nav verb + no keyword match no longer short-circuits to chat: we always
+    # consult the classifier so non-English / paraphrased intent isn't missed.
+    called = {"n": 0}
 
-    monkeypatch.setattr(ai_nav, "classify_intent", _boom)
+    async def _fake(cfg, *, message, destinations):
+        called["n"] += 1
+        return {"intent": "chat", "targets": [], "confidence": 0.1}
+
+    monkeypatch.setattr(ai_nav, "classify_intent", _fake)
     res = asyncio.run(
         route_intent(_cfg(), message="tell me a joke", destinations=DESTS, log_id=None)
     )
+    assert called["n"] == 1
     assert res.intent == "chat"
     assert res.targets == []
+
+
+def test_route_intent_routes_non_english_intent_via_llm(monkeypatch) -> None:
+    # The exact regression: a German message mentioning "Complexität" has no
+    # English keyword match and no nav verb, so it must reach the classifier.
+    called = {"n": 0}
+
+    async def _fake(cfg, *, message, destinations):
+        called["n"] += 1
+        return {"intent": "both", "targets": ["performance"], "confidence": 0.85}
+
+    monkeypatch.setattr(ai_nav, "classify_intent", _fake)
+    res = asyncio.run(
+        route_intent(
+            _cfg(),
+            message="Ich möchte mehr über die Complexität erfahren",
+            destinations=DESTS,
+            log_id="L1",
+        )
+    )
+    assert called["n"] == 1
+    assert res.intent == "both"
+    assert res.targets[0].id == "performance"
 
 
 def test_route_intent_skips_llm_for_unambiguous_nav(monkeypatch) -> None:

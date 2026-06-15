@@ -169,7 +169,12 @@ async function main() {
     }
   }
   if (!WATCH) return;
-  // Keep the process alive while watch contexts run.
+  // Keep the process alive while watch contexts run. A never-resolving promise
+  // alone does NOT keep Node's event loop alive — Node 22 then exits with code
+  // 13 ("unsettled top-level await") once no active handles remain, which
+  // crash-loops the dev container. Hold an explicit ref'd timer handle so the
+  // esbuild watchers keep running.
+  setInterval(() => {}, 2 ** 30);
   await new Promise(() => {});
 }
 

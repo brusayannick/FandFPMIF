@@ -129,7 +129,9 @@ function isProviderConfigured(
 ): boolean {
   if (!provider) return false;
   const p = cfg[provider];
-  if (!p.api_key) return false;
+  // Defensive: `cfg` may carry non-provider keys (e.g. classifier_model);
+  // guard so a stray/null value can't throw on `.api_key`.
+  if (!p || !p.api_key) return false;
   const meta = providerMeta(provider);
   if (meta.needsBaseUrl && !p.base_url) return false;
   return true;
@@ -273,6 +275,7 @@ export default function AiSettingsPage() {
                 k !== "system_prompt" &&
                 k !== "selected_provider" &&
                 k !== "selected_model" &&
+                k !== "classifier_model" &&
                 isProviderConfigured(k as AiProvider, stored),
             ),
           )

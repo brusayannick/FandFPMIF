@@ -8,15 +8,15 @@ Pipeline (see ``route_intent``):
 1. Build a per-user **destination registry** (``build_user_destinations``): the
    static platform pages plus every module the user has *enabled*. Tenant
    isolation is preserved — only the requesting user's installs are visible.
-2. A cheap **local keyword pre-filter** (``prefilter``) short-circuits the two
-   unambiguous cases so we never pay for an LLM call:
-   * no destination mentioned *and* no navigation verb → pure chat, no targets;
-   * an explicit navigation verb *and* exactly one matching destination →
-     navigate straight there.
-3. Everything in between goes to the **LLM classifier** (``classify_intent``),
-   reusing ``structured_completion`` so UniGPT/custom backends get the
-   prompted-JSON fallback for free. The classifier runs on ``classifier_model``
-   (a cheaper model, same provider) when configured.
+2. A cheap **local keyword pre-filter** (``prefilter``) provides a single fast
+   path: an explicit navigation verb *and* exactly one matching destination →
+   navigate straight there without an LLM call.
+3. Every other message goes to the **LLM classifier** (``classify_intent``).
+   We deliberately do *not* short-circuit "pure chat" on keyword absence —
+   that misses non-English wording and paraphrases — so recall is prioritised
+   over saving a (cheap) classifier call. It reuses ``structured_completion``
+   so UniGPT/custom backends get the prompted-JSON fallback for free, and runs
+   on ``classifier_model`` (a cheaper model, same provider) when configured.
 4. The chosen target ids are **resolved** to concrete hrefs (``resolve_targets``),
    handling the module-panel-needs-a-log case.
 
@@ -345,7 +345,14 @@ ROUTING_SCHEMA: dict[str, Any] = {
             "items": {"type": "string"},
             "description": "Destination ids from the provided list, best match first.",
         },
-        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        # No `minimum`/`maximum` here: OpenAI's strict json_schema mode rejects
+        # numeric range constraints, which would force a wasteful fallback to
+        # prompted-JSON on every call. We clamp to [0,1] in `_coerce_routing`
+        # instead. Keep the expected range in the description for the model.
+        "confidence": {
+            "type": "number",
+            "description": "Certainty that navigation is wanted, from 0.0 to 1.0.",
+        },
     },
 }
 
@@ -486,7 +493,7 @@ async def route_intent(
     destinations: list[NavDestination],
     log_id: str | None,
 ) -> RoutingResult:
-    """Full pipeline: pre-filter → (maybe) LLM → resolve.
+    """Full pipeline: navigate fast-path → otherwise LLM → resolve.
 
     Never raises on provider failure — navigation is additive, so on any error
     we degrade to a plain chat result with no suggestions.
@@ -497,12 +504,8 @@ async def route_intent(
 
     pf = prefilter(message, destinations)
 
-    # (a) No destination mentioned and no navigation verb → certainly chat.
-    if not pf.matches and not pf.has_cue:
-        return RoutingResult(intent="chat", confidence=1.0, targets=[])
-
-    # (b) Explicit navigation verb + exactly one matching destination →
-    #     unambiguous; skip the LLM entirely.
+    # Fast path: an explicit navigation verb + exactly one matching destination
+    # is unambiguous, so we navigate without paying for the LLM.
     if pf.has_cue and len(pf.matches) == 1:
         targets = resolve_targets(
             "navigate", pf.matches, PREFILTER_CONFIDENCE, destinations, log_id
@@ -512,7 +515,10 @@ async def route_intent(
                 intent="navigate", confidence=PREFILTER_CONFIDENCE, targets=targets
             )
 
-    # (c) Ambiguous → ask the model.
+    # Otherwise always ask the classifier. Keyword absence is an unreliable
+    # signal of "pure chat" — non-English wording (e.g. "Complexität") or
+    # paraphrases would be missed — so we accept one (cheap) classifier call
+    # rather than risk a false negative. Provider failure degrades to chat.
     try:
         raw = await classify_intent(cfg, message=message, destinations=destinations)
     except Exception as exc:

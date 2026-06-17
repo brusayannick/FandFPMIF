@@ -12,6 +12,7 @@ import logging
 import shutil
 import sys
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 
 # Process trees discovered from real-world logs can nest deep enough to
 # exceed CPython's default 1000-frame recursion limit when FastAPI's
@@ -23,14 +24,16 @@ sys.setrecursionlimit(10_000)
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 from mate.api import __version__
 from mate.api.config import get_settings
 from mate.api.db.engine import dispose_engine, get_sessionmaker
-from mate.api.db.models import Job
+from mate.api.db.models import Job, WatchedFolder
 from mate.api.duckdb.pool import get_duckdb_pool
 from mate.api.events import EventBus, set_event_bus
 from mate.api.ingest.dispatch import register_import_handler
+from mate.api.ingest.watch import scan_watch
 from mate.api.jobs.runtime import JobRuntime, set_job_runtime
 from mate.api.middleware import UsageTrackingMiddleware
 from mate.api.modules import CapabilityRegistry, ModuleLoader, set_module_loader
@@ -112,6 +115,72 @@ async def _job_event_recorder_loop(bus: EventBus) -> None:
                 raise
             except Exception as exc:  # noqa: BLE001
                 log.warning("usage.jobs.record_failed", error=str(exc))
+
+
+# How often the watched-folder poller wakes; per-watch cadence is enforced on
+# top of this base tick. `continuous` mode effectively scans every tick.
+_WATCH_POLL_TICK_SECONDS = 30
+_WATCH_CONTINUOUS_INTERVAL_SECONDS = 60
+
+
+def _watch_due(watch: WatchedFolder, now: datetime) -> bool:
+    if watch.last_scanned_at is None:
+        return True
+    if watch.mode == "continuous":
+        interval = _WATCH_CONTINUOUS_INTERVAL_SECONDS
+    elif watch.mode == "interval":
+        interval = watch.interval_seconds or 0
+        if interval <= 0:
+            return False
+    else:  # manual — never auto-scanned
+        return False
+    return watch.last_scanned_at + timedelta(seconds=interval) <= now
+
+
+async def _watched_folder_poll_loop(runtime: JobRuntime) -> None:
+    """Periodically scan active watched folders and import new/changed files.
+
+    Each tick selects non-deleted, active watches in interval/continuous mode
+    whose cadence is due and runs the shared `scan_watch` per watch. Failures are
+    swallowed (and recorded on the watch row by `scan_watch`) so the loop never
+    dies on a transient source error.
+    """
+    poll_log = structlog.get_logger("ingest.watch")
+    sm = get_sessionmaker()
+    while True:
+        try:
+            await asyncio.sleep(_WATCH_POLL_TICK_SECONDS)
+            now = datetime.now(UTC).replace(tzinfo=None)
+            async with sm() as session:
+                candidates = (
+                    (
+                        await session.execute(
+                            select(WatchedFolder).where(
+                                WatchedFolder.deleted_at.is_(None),
+                                WatchedFolder.status == "active",
+                                WatchedFolder.mode.in_(("interval", "continuous")),
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                due = [w for w in candidates if _watch_due(w, now)]
+            for watch in due:
+                try:
+                    async with sm() as session:
+                        fresh = await session.get(WatchedFolder, watch.id)
+                        if fresh is None or fresh.deleted_at is not None:
+                            continue
+                        await scan_watch(fresh, session=session, runtime=runtime)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    poll_log.warning("watch.poll_scan_failed", watch_id=watch.id, error=str(exc))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            poll_log.warning("watch.poll_failed", error=str(exc))
 
 
 def _configure_logging(level: str) -> None:
@@ -199,11 +268,12 @@ async def lifespan(app: FastAPI):
 
     retention_task = asyncio.create_task(_analytics_retention_loop())
     job_event_task = asyncio.create_task(_job_event_recorder_loop(bus))
+    watch_poll_task = asyncio.create_task(_watched_folder_poll_loop(runtime))
 
     try:
         yield
     finally:
-        for task in (retention_task, job_event_task):
+        for task in (retention_task, job_event_task, watch_poll_task):
             task.cancel()
             try:
                 await task

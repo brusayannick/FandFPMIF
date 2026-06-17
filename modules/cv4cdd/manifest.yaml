@@ -29,7 +29,9 @@ consumes:
 
 dependencies:
   python:
-    requires-python: ">=3.12"
+    # Pin to 3.12: tensorflow ships no cp313 wheels, so an open-ended ">=3.12"
+    # makes uv pick the newest installed Python (3.13) and the dep install fails.
+    requires-python: ">=3.12,<3.13"
     packages:
       # Keep this list minimal — every extra package risks dragging a numpy
       # build that doesn't match the platform's. scipy + matplotlib were

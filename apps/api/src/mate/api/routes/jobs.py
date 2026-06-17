@@ -6,28 +6,27 @@ POST /jobs/{id}/cancel           — cooperative cancel
 POST /jobs/{id}/retry            — re-enqueue a failed job; returns new id
 POST /jobs/queue/pause           — stop pulling new jobs
 POST /jobs/queue/resume          — resume
-WS   /events                     — topic-filtered stream (`?topic=job.*`)
-WS   /jobs/{id}/stream           — high-frequency progress for a single job
+GET  /events                     — topic-filtered SSE stream (`?topic=job.*`)
+GET  /jobs/{id}/stream           — high-frequency SSE progress for a single job
 """
 
 from __future__ import annotations
 
-import contextlib
+import asyncio
 import json
-import logging
+from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
 from mate.api.auth import (
     CurrentUserDep,
-    get_current_user_from_token,
     get_owned_job,
 )
-from mate.api.db.engine import get_sessionmaker
 from mate.api.db.models import Job
 from mate.api.db.session import SessionDep
 from mate.api.events import get_event_bus
@@ -132,15 +131,15 @@ async def resume_queue(user: CurrentUserDep) -> None:
     await get_job_runtime().resume_queue(user.id)
 
 
-# -- WebSockets --------------------------------------------------------------
+# -- Streaming (SSE) ---------------------------------------------------------
+#
+# Server-Sent Events, not WebSocket — see ``events_sse.py`` for why the prod
+# proxy chain forces this. Auth is the standard ``Authorization: Bearer``
+# header via ``CurrentUserDep``.
 
-
-async def _ws_send(ws: WebSocket, payload: dict[str, Any]) -> None:
-    try:
-        await ws.send_text(json.dumps(payload, default=_json_default))
-    except RuntimeError:
-        # Socket closed underneath us — let the surrounding loop bail out.
-        raise WebSocketDisconnect() from None
+# Idle keep-alive cadence; matches ``events_sse._HEARTBEAT_S``.
+_HEARTBEAT_S = 15.0
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
 def _json_default(value: Any) -> Any:
@@ -149,57 +148,50 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
-@router.websocket("/{job_id}/stream")
-async def stream_job(ws: WebSocket, job_id: str) -> None:
+def _sse(envelope: dict[str, Any]) -> str:
+    return f"data: {json.dumps(envelope, default=_json_default)}\n\n"
+
+
+@router.get("/{job_id}/stream")
+async def stream_job(
+    job_id: str, session: SessionDep, user: CurrentUserDep
+) -> StreamingResponse:
     """High-frequency per-job progress (toast inline bar + drawer focused row).
 
     Subscribes to `job.progress` / `job.started` / `job.completed` / etc. and
-    filters by id. Spec §7.9.5: SQLite-poll fallback applies if the bus is
-    momentarily empty — we send an initial snapshot of the row so reconnects
-    catch up without missing the early lifecycle events.
-
-    Browsers can't set custom WS headers, so the access token rides in the
-    ``?token=...`` query param. Code ``4401`` signals "auth failed, do not
-    reconnect — sign in again".
+    filters by id. Spec §7.9.5: we send an initial `job.snapshot` of the row so
+    a late subscriber (or a reconnect) paints immediately without missing the
+    early lifecycle events.
     """
-    await ws.accept()
     bus = get_event_bus()
 
-    token = ws.query_params.get("token", "")
-    if not token:
-        await ws.close(code=4401, reason="missing token")
-        return
+    row = await session.get(Job, job_id)
+    if row is None or row.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Job not found")
+    snapshot = {
+        "topic": "job.snapshot",
+        "payload": JobDetail.model_validate(row).model_dump(mode="json"),
+    }
 
-    # Initial snapshot — lets a late subscriber paint immediately.
-    sm = get_sessionmaker()
-    async with sm() as session:
-        try:
-            user = await get_current_user_from_token(token, session)
-            await session.commit()
-        except HTTPException:
-            await ws.close(code=4401, reason="invalid token")
-            return
-        row = await session.get(Job, job_id)
-        if row is None or row.user_id != user.id:
-            await ws.close(code=4404, reason="job not found")
-            return
-        await _ws_send(ws, {"topic": "job.snapshot", "payload": JobDetail.model_validate(row).model_dump(mode="json")})
-
-    try:
+    async def _gen() -> AsyncIterator[str]:
+        yield _sse(snapshot)
         async with bus.subscribe(["job.*"]) as stream:
-            async for env in stream:
+            while True:
+                try:
+                    env = await asyncio.wait_for(anext(stream), _HEARTBEAT_S)
+                except TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                except StopAsyncIteration:
+                    return
                 payload = env.payload
                 if payload.get("id") != job_id:
                     continue
                 if payload.get("user_id") not in (None, user.id):
                     continue
-                await _ws_send(ws, env.to_json())
+                yield _sse(env.to_json())
                 if env.topic in {"job.completed", "job.failed", "job.cancelled"}:
-                    # Final event — close cleanly.
+                    # Terminal event — end the stream cleanly.
                     return
-    except WebSocketDisconnect:
-        return
-    except Exception:  # noqa: BLE001
-        logging.exception("ws_jobs_stream.unhandled")
-        with contextlib.suppress(Exception):
-            await ws.close(code=1011)
+
+    return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)

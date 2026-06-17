@@ -12,13 +12,13 @@ install: ## Resolve all deps (uv + pnpm)
 
 dev: ## Run the API and the web dev server together (no docker)
 	@trap 'kill 0' INT; \
-	(uv run uvicorn mate.api.main:app --reload --app-dir apps/api/src --host 127.0.0.1 --port 8000) & \
+	(uv run uvicorn mate.api.main:app --reload --reload-dir apps/api/src --reload-dir packages/module-sdk-py/src --app-dir apps/api/src --host 127.0.0.1 --port 8000) & \
 	(cd apps/web && pnpm dev) & \
 	wait
 
 dev-api: ## Run only the API (with --reload)
 	uv run alembic -c apps/api/alembic.ini upgrade head
-	uv run uvicorn mate.api.main:app --reload --app-dir apps/api/src --host 127.0.0.1 --port 8000
+	uv run uvicorn mate.api.main:app --reload --reload-dir apps/api/src --reload-dir packages/module-sdk-py/src --app-dir apps/api/src --host 127.0.0.1 --port 8000
 
 dev-web: ## Run only the web dev server
 	cd apps/web && pnpm dev

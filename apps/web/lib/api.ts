@@ -151,12 +151,6 @@ export async function rawFetch(
   return fetch(`${apiBase()}${path}`, { ...init, headers });
 }
 
-/** Build a WS URL pointing at the backend for both dev and prod. */
-export function wsUrl(path: string): string {
-  const base = typeof window === "undefined" ? SERVER_BASE : PUBLIC_BASE;
-  return `${base.replace(/^http/, "ws")}${path}`;
-}
-
 /** Build an absolute URL pointing at the backend. Use for `<img src>`, `<a href>`,
  * and any other browser-side reference that bypasses the `api()` helper.
  *

@@ -14,6 +14,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -148,6 +149,95 @@ class EventLog(Base):
         Index("ix_process_logs_user_status", "user_id", "status"),
         Index("ix_process_logs_user_created_at", "user_id", "created_at"),
         Index("ix_process_logs_user_folder_id", "user_id", "folder_id"),
+    )
+
+
+class WatchedFolder(Base):
+    """A persistent import *source* — a storage location scanned over time.
+
+    Unlike the one-shot upload paths, a watched folder points at a location in
+    the active storage backend (an S3 key prefix in S3 mode, a filesystem path in
+    local mode) that an external pipeline fills. Mate lists it on a cadence and
+    imports any new/changed file through the normal `event_log.import` job,
+    landing the result in `dest_folder_id`. Source files are never moved or
+    deleted; the `watched_folder_files` ledger records what has been imported so
+    a file isn't re-imported unless its fingerprint changes.
+    """
+
+    __tablename__ = "watched_folders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # `/processes` folder imported logs land in (created at watch creation).
+    dest_folder_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("process_folders.id", ondelete="SET NULL")
+    )
+
+    # Location to scan, interpreted against the active backend. Empty/managed
+    # defaults to `users/{user_id}/watched/{id}`; an S3 prefix or filesystem path
+    # otherwise. Used literally (no admin-prefix prepended) so a watch can point
+    # at an existing location an upstream pipeline already writes to.
+    source_path: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+
+    # Scan cadence: "manual" (only via /scan), "interval" (every
+    # interval_seconds), "continuous" (a fixed fast cadence). Only the latter two
+    # are picked up by the background poller.
+    mode: Mapped[str] = mapped_column(
+        String(16), default="manual", server_default="manual", nullable=False
+    )
+    interval_seconds: Mapped[int | None] = mapped_column(Integer)
+
+    # "active" | "paused" | "error". Paused watches are skipped by the poller but
+    # can still be scanned manually.
+    status: Mapped[str] = mapped_column(
+        String(16), default="active", server_default="active", nullable=False
+    )
+    last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+    # Optional column mapping forced on every imported file (unattended imports
+    # can't show the wizard). NULL ⇒ rely on the importer's autodetect.
+    default_mapping: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (Index("ix_watched_folders_user_status", "user_id", "status"),)
+
+
+class WatchedFolderFile(Base):
+    """Dedup ledger: one row per source file a watched folder has seen.
+
+    The fingerprint (size + etag for S3 / mtime for local) lets a scan skip files
+    already imported and re-import only when a file changes. Never deleted.
+    """
+
+    __tablename__ = "watched_folder_files"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    watch_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("watched_folders.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_name: Mapped[str] = mapped_column(String(1024), nullable=False)
+    size: Mapped[int | None] = mapped_column(Integer)
+    etag: Mapped[str | None] = mapped_column(String(255))
+    mtime: Mapped[float | None] = mapped_column(Float)
+
+    log_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("process_logs.id", ondelete="SET NULL")
+    )
+    status: Mapped[str] = mapped_column(String(16), default="imported", nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    imported_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_watched_folder_files_watch_name", "watch_id", "source_name", unique=True),
     )
 
 
@@ -305,12 +395,8 @@ class StorageConfig(Base):
     path_style: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="1", nullable=False
     )
-    use_ssl: Mapped[bool] = mapped_column(
-        Boolean, default=True, server_default="1", nullable=False
-    )
-    prefix: Mapped[str] = mapped_column(
-        String(255), default="", server_default="", nullable=False
-    )
+    use_ssl: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    prefix: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
     # Admin-entered total quota (bytes) for the storage-overview bar. Optional —
     # S3 itself doesn't report it back without admin caps the RGW user lacks.
     quota_bytes: Mapped[int | None] = mapped_column(Integer)

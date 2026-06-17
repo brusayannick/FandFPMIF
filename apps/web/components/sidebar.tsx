@@ -68,7 +68,7 @@ const NAV: NavItem[] = [
 // realm role. The page + API independently enforce the role server-side.
 const ADMIN_NAV: NavItem[] = [
   {
-    href: "/admin/storage",
+    href: "/admin/overview",
     label: "Admin",
     icon: ShieldCheck,
     match: (p) => p.startsWith("/admin"),

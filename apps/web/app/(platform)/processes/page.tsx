@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { FolderPlus, Inbox, Plug, Plus, Upload } from "lucide-react";
+import { FolderPlus, Inbox, Plug, Plus, RefreshCw, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
@@ -67,6 +67,13 @@ function Header({ onNewFolder }: { onNewFolder: () => void }) {
             to stream events without manual export.
           </TooltipContent>
         </Tooltip>
+
+        <Button variant="outline" asChild className="gap-2 cursor-pointer">
+          <Link href="/processes/watched">
+            <RefreshCw className="h-4 w-4" />
+            Watched folders
+          </Link>
+        </Button>
 
         <Button variant="outline" onClick={onNewFolder} className="gap-2 cursor-pointer">
           <FolderPlus className="h-4 w-4" />

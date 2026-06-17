@@ -122,6 +122,63 @@ def delete_prefix(key_prefix: str, s: StorageSettings | None = None) -> int:
 
 
 @dataclass(frozen=True)
+class S3Object:
+    """A single object under a prefix (used by the watched-folder scanner)."""
+
+    key: str
+    size: int
+    etag: str | None
+    last_modified: float | None  # epoch seconds
+
+
+def list_objects(prefix: str, s: StorageSettings | None = None) -> list[S3Object]:
+    """List every object directly relevant under ``prefix`` (recursive).
+
+    ``prefix`` is used literally against the configured bucket — it is NOT
+    combined with the admin ``prefix`` setting, so a watch can point at any
+    location an upstream pipeline writes to. Directory markers (keys ending in
+    ``/``) are skipped.
+    """
+    s = s or get_storage_settings()
+    client = make_client(s)
+    bucket = _bucket(s)
+    base = prefix.strip("/")
+    base = f"{base}/" if base else ""
+    out: list[S3Object] = []
+    try:
+        paginator = client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=base):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if key.endswith("/"):
+                    continue
+                lm = obj.get("LastModified")
+                out.append(
+                    S3Object(
+                        key=key,
+                        size=int(obj.get("Size", 0)),
+                        etag=(obj.get("ETag") or "").strip('"') or None,
+                        last_modified=lm.timestamp() if lm is not None else None,
+                    )
+                )
+    except Exception as exc:
+        raise StorageError(str(exc)) from exc
+    return out
+
+
+def download_object(key: str, dest: Path, s: StorageSettings | None = None) -> None:
+    """Download a single object to ``dest`` (parent dirs created)."""
+    s = s or get_storage_settings()
+    client = make_client(s)
+    bucket = _bucket(s)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        client.download_file(bucket, key, str(dest))
+    except Exception as exc:
+        raise StorageError(str(exc)) from exc
+
+
+@dataclass(frozen=True)
 class Usage:
     used_bytes: int
     object_count: int

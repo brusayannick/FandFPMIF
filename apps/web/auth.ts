@@ -30,6 +30,10 @@ declare module "next-auth" {
     provider?: string;
     user: {
       id: string;
+      /** Keycloak realm roles, surfaced for client-side nav gating. */
+      roles?: string[];
+      /** Convenience flag — true iff `roles` includes the `admin` realm role. */
+      isAdmin?: boolean;
     } & DefaultSession["user"];
   }
 }
@@ -41,8 +45,31 @@ declare module "next-auth/jwt" {
     expiresAt?: number;
     provider?: string;
     error?: "RefreshAccessTokenError";
+    /** Keycloak realm roles, decoded from the access token (no signature check
+     * — we trust our own freshly-minted token; the API re-validates server-side). */
+    roles?: string[];
     /** Server-side store key — present only when SESSION_STORE_DIR is set. */
     sid?: string;
+  }
+}
+
+/** Decode the `realm_access.roles` from a Keycloak access token's payload.
+ * No signature verification — this only drives UI affordances; every protected
+ * API call is independently validated against the JWKS on the backend. */
+function rolesFromAccessToken(accessToken: string | undefined): string[] {
+  if (!accessToken) return [];
+  const payload = accessToken.split(".")[1];
+  if (!payload) return [];
+  try {
+    const json = Buffer.from(
+      payload.replace(/-/g, "+").replace(/_/g, "/"),
+      "base64",
+    ).toString("utf8");
+    const claims = JSON.parse(json) as { realm_access?: { roles?: unknown } };
+    const roles = claims.realm_access?.roles;
+    return Array.isArray(roles) ? roles.filter((r): r is string => typeof r === "string") : [];
+  } catch {
+    return [];
   }
 }
 
@@ -178,6 +205,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       session.error = token.error;
       session.provider = token.provider;
       if (token.sub) session.user.id = token.sub;
+      // Decode roles from the current access token (re-decoded each read so a
+      // rotated token's roles stay correct). Drives only UI gating.
+      const roles = rolesFromAccessToken(token.accessToken);
+      session.user.roles = roles;
+      session.user.isAdmin = roles.includes("admin");
       return session;
     },
   },

@@ -36,7 +36,7 @@ export default async function LoginPage({
         }}
       >
         <Button type="submit" className="w-full" size="lg">
-          Continue with Keycloak
+          Login with university account
         </Button>
       </form>
     </div>

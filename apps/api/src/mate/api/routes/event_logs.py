@@ -34,6 +34,7 @@ from mate.api.ingest.detect import (
 from mate.api.ingest.dispatch import IMPORT_JOB_TYPE
 from mate.api.ingest.storage import log_paths
 from mate.api.jobs.runtime import JobRuntime, get_job_runtime
+from mate.api.storage import sync as storage_sync
 from mate.api.schemas.event_logs import (
     CsvColumnMapping,
     EventLogCreateResponse,
@@ -432,6 +433,8 @@ async def delete_event_log(
             shutil.rmtree(paths.root)
         except OSError as exc:
             log.warning("event_log.cleanup_failed", log_id=log_id, error=str(exc))
+    # Remove the mirrored copy from the S3 primary store too (no-op in local mode).
+    await storage_sync.delete_log(user.id, log_id)
 
 
 @router.patch("/{log_id}", response_model=EventLogDetail)
@@ -493,6 +496,9 @@ async def reimport_event_log(
         )
 
     paths = log_paths(log_id, user.id)
+    # The retained upload may live only in the S3 bucket on a cold cache — pull
+    # the log dir back before locating it (no-op in local mode).
+    await storage_sync.hydrate_log(user.id, log_id)
     # OCEL stores its upload under the real suffix (jsonocel/xmlocel/sqlite), not
     # original.ocel — locate by glob so re-import works for every format.
     original_path = paths.original_for(row.source_format)
@@ -589,6 +595,8 @@ async def remap_event_log(
         raise HTTPException(status_code=409, detail="No source format on record - cannot re-map.")
 
     paths = log_paths(log_id, user.id)
+    # Pull the retained upload back from S3 if the local cache is cold.
+    await storage_sync.hydrate_log(user.id, log_id)
     original_path = paths.original_for(row.source_format)
     if not original_path.exists():
         raise HTTPException(
@@ -662,6 +670,8 @@ async def duplicate_event_log(
         )
 
     src_paths = log_paths(log_id, user.id)
+    # On a cold S3 cache the bytes live only in the bucket — pull them first.
+    await storage_sync.hydrate_log(user.id, log_id)
     if not src_paths.exists():
         raise HTTPException(
             status_code=409,
@@ -704,5 +714,7 @@ async def duplicate_event_log(
     )
     session.add(duplicate)
     await session.commit()
+    # Mirror the cloned dir to the S3 primary store (no-op in local mode).
+    await storage_sync.persist_log(user.id, new_id)
     log.info("event_log.duplicated", source_log_id=log_id, new_log_id=new_id)
     return EventLogDetail.model_validate(duplicate)

@@ -46,6 +46,7 @@ from mate.api.schemas.event_logs import (
     JsonColumnMapping,
     XmlColumnMapping,
 )
+from mate.api.storage import sync as storage_sync
 
 log = structlog.get_logger(__name__)
 
@@ -235,6 +236,10 @@ async def _import_handler(handle: JobHandle) -> None:
         )
         await session.commit()
 
+    # Persist the freshly-written log dir to the S3 primary store (no-op in
+    # local mode). Best-effort: a failure is logged, the local copy still serves.
+    await storage_sync.persist_log(handle.user_id, log_id)
+
     await handle.progress(
         total_events,
         total=total_events,
@@ -375,6 +380,10 @@ async def _import_ocel(
             )
         )
         await session.commit()
+
+    # Persist the freshly-written OCEL log dir to the S3 primary store (no-op in
+    # local mode). Best-effort: a failure is logged, the local copy still serves.
+    await storage_sync.persist_log(handle.user_id, log_id)
 
     await handle.progress(
         result.stats["events_count"],

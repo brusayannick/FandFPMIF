@@ -37,11 +37,15 @@ REALM="${REALM:-flows-funds}"
 # the redirect URI with the university IT centre.
 IDP_ALIAS="${IDP_ALIAS:-keycloak-oidc}"
 IDP_DISPLAY="${IDP_DISPLAY:-University Login}"
-# Provider type. "keycloak-oidc" = the "Keycloak OpenID Connect" type you
-# registered; "oidc" = generic "OpenID Connect v1.0". The type is fixed at
-# creation — Keycloak ignores it on update, so don't switch it on an existing
-# IdP (delete + recreate with the same alias instead).
-IDP_PROVIDER_ID="${IDP_PROVIDER_ID:-keycloak-oidc}"
+# Provider type. Use the GENERIC "oidc" ("OpenID Connect v1.0"), NOT
+# "keycloak-oidc": KeycloakOIDCIdentityProvider's constructor hardcodes
+# config.setAccessTokenJwt(true), so it parses the IdP's access token as a JWT
+# regardless of the isAccessTokenJWT config below — fatal for WWU, which issues
+# OPAQUE access tokens ("Failed to parse JWT header"). The generic oidc type
+# honours isAccessTokenJWT=false and reads identity from the userinfo endpoint.
+# The type is fixed at creation — Keycloak ignores it on update, so to switch an
+# existing IdP you must delete + recreate with the same alias.
+IDP_PROVIDER_ID="${IDP_PROVIDER_ID:-oidc}"
 # Internal admin endpoint. In prod Keycloak serves under /auth — set
 # KC_SERVER=http://localhost:8080/auth then (KC_HTTP_RELATIVE_PATH=/auth).
 KC_SERVER="${KC_SERVER:-http://localhost:8080}"
@@ -111,6 +115,15 @@ cfg = {
     "syncMode": "IMPORT",
     "pkceEnabled": "true",
     "pkceMethod": "S256",
+    # WWU's token endpoint requires HTTP Basic client auth and rejects the
+    # keycloak-oidc default (client_secret_post) with 401 invalid_client.
+    "clientAuthMethod": "client_secret_basic",
+    # WWU issues OPAQUE access tokens. Left on (the keycloak-oidc default),
+    # Keycloak tries to parse the access token as a JWT and dies with
+    # "Failed to parse JWT header" -> "Could not fetch attributes from userinfo
+    # endpoint". Off => Keycloak treats it as opaque and reads identity from the
+    # userinfo endpoint instead.
+    "isAccessTokenJWT": "false",
 }
 for k, env in (("jwksUrl", "UNIV_JWKS_URL"), ("userInfoUrl", "UNIV_USERINFO_URL"),
                ("issuer", "UNIV_ISSUER")):
@@ -179,4 +192,4 @@ else
   echo "  ! 'Review Profile' execution not found — skipping." >&2
 fi
 
-echo "✓ Done. Set KEYCLOAK_IDP_HINT=university on the web service and restart it."
+echo "✓ Done. Set KEYCLOAK_IDP_HINT=$IDP_ALIAS on the web service and restart it."

@@ -17,6 +17,7 @@ import duckdb
 from mate.api.ingest.storage import log_paths
 from mate.api.modules.event_filters import quote_ident as _quote_ident
 from mate.api.modules.event_filters import render_filter_sql
+from mate.api.storage import sync as storage_sync
 from mate.api.schemas.event_log_data import (
     ColumnQuality,
     ColumnRole,
@@ -67,6 +68,9 @@ class EventLogAccess:
         self._conn: duckdb.DuckDBPyConnection | None = None
 
     async def __aenter__(self) -> "EventLogAccess":
+        # In S3 mode, pull the log dir from the bucket if the local cache is cold
+        # (fresh VM / wiped data dir). No-op in local mode and on a warm cache.
+        await storage_sync.hydrate_log(self.user_id, self.log_id)
         if not self._paths.events.exists():
             raise FileNotFoundError(
                 f"Event log {self.log_id} has no events.parquet — import not finished?"

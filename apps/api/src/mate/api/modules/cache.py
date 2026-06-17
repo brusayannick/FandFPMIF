@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from mate.api.config import get_settings
+from mate.api.storage import sync as storage_sync
 
 
 class ResultCache:
@@ -47,6 +48,9 @@ class ResultCache:
         return await asyncio.to_thread(self._get_sync, key)
 
     def _get_sync(self, key: str) -> Any:
+        # In S3 mode, pull this module's cached outputs down if the local cache
+        # is cold (once per dir per process). No-op in local mode / warm cache.
+        storage_sync.hydrate_dir_sync(self.dir)
         for ext in ("json", "parquet", "bin"):
             path = self._candidate(f"{key}.{ext}")
             if not path.exists():
@@ -63,6 +67,8 @@ class ResultCache:
 
     async def set(self, key: str, value: Any) -> None:
         await asyncio.to_thread(self._set_sync, key, value)
+        # Persist the (now-updated) outputs dir to the S3 primary store.
+        await asyncio.to_thread(storage_sync.persist_dir_sync, self.dir)
 
     def _set_sync(self, key: str, value: Any) -> None:
         # Pick the encoding by type.
@@ -95,3 +101,6 @@ class ResultCache:
         if self.dir.exists():
             shutil.rmtree(self.dir)
             self.dir.mkdir(parents=True, exist_ok=True)
+        # Drop the mirrored outputs from S3 too, so a cold cache doesn't
+        # re-hydrate stale results (no-op in local mode).
+        storage_sync.delete_dir_remote_sync(self.dir)

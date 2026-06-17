@@ -12,6 +12,7 @@ import {
   Moon,
   PanelLeftClose,
   Pickaxe,
+  ShieldCheck,
   Sun,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
@@ -63,7 +64,18 @@ const NAV: NavItem[] = [
   },
 ];
 
-export function Sidebar() {
+// Admin-only entries, appended to NAV when the session user has the `admin`
+// realm role. The page + API independently enforce the role server-side.
+const ADMIN_NAV: NavItem[] = [
+  {
+    href: "/admin/storage",
+    label: "Admin",
+    icon: ShieldCheck,
+    match: (p) => p.startsWith("/admin"),
+  },
+];
+
+export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
   const collapsed = useUi((s) => s.sidebarCollapsed);
   const toggle = useUi((s) => s.toggleSidebar);
   const pathname = usePathname();
@@ -115,7 +127,7 @@ export function Sidebar() {
 
       <nav className="flex-1 px-2 pt-1">
         <ul className="space-y-0.5">
-          {NAV.map((item) => {
+          {(isAdmin ? [...NAV, ...ADMIN_NAV] : NAV).map((item) => {
             const Icon = item.icon;
             const active = item.match(pathname);
             const link = (

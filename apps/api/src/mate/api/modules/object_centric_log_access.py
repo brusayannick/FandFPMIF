@@ -17,6 +17,7 @@ import duckdb
 
 from mate.api.ingest.storage import log_paths
 from mate.api.modules.event_filters import quote_ident as _quote_ident
+from mate.api.storage import sync as storage_sync
 
 # DuckDB view name → the LogPaths attribute holding its parquet.
 _VIEWS = {
@@ -42,6 +43,8 @@ class ObjectCentricLogAccess:
         self._conn: duckdb.DuckDBPyConnection | None = None
 
     async def __aenter__(self) -> ObjectCentricLogAccess:
+        # In S3 mode, pull the log dir from the bucket if the local cache is cold.
+        await storage_sync.hydrate_log(self.user_id, self.log_id)
         if not self._paths.ocel_events.exists():
             raise FileNotFoundError(
                 f"OCEL log {self.log_id} has no ocel/events.parquet — import not finished?"

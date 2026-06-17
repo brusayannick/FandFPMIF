@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AdminTabs } from "@/components/admin/admin-tabs";
 import { rawFetch } from "@/lib/api";
 
 interface ExportInfo {
@@ -108,6 +109,8 @@ export default function AdminExportPage() {
           XES event log.
         </p>
       </div>
+
+      <AdminTabs />
 
       {loading ? (
         <p className="text-xs text-muted-foreground">Checking access…</p>

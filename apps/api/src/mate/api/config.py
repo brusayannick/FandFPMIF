@@ -77,6 +77,16 @@ class Settings(BaseSettings):
     )
     keycloak_jwks_ttl_seconds: int = Field(default=3600, ge=60)
 
+    # Secret used to derive the Fernet key that encrypts the S3 secret-access-key
+    # stored in the metadata DB (Admin → Storage). Must be set and STABLE in
+    # production — rotating it makes the stored S3 secret undecryptable and the
+    # admin has to re-enter it. Falls back to ``database_url`` when unset so dev
+    # works out of the box (acceptable: the DB is local-only there).
+    storage_encryption_key: str | None = Field(
+        default=None,
+        description="STORAGE_ENCRYPTION_KEY — encrypts the stored S3 secret key.",
+    )
+
     @property
     def users_dir(self) -> Path:
         return self.data_dir / "users"

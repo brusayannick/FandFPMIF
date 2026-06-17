@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from mate.api.routes.admin import router as admin_router
+from mate.api.routes.admin_storage import router as admin_storage_router
 from mate.api.routes.ai import router as ai_router
 from mate.api.routes.ai_guidance import router as ai_guidance_router
 from mate.api.routes.analytics import router as analytics_router
@@ -18,6 +19,7 @@ from mate.api.routes.system import router as system_router
 
 v1 = APIRouter(prefix="/api/v1")
 v1.include_router(admin_router)
+v1.include_router(admin_storage_router)
 v1.include_router(event_logs_router)
 v1.include_router(event_log_data_router)
 v1.include_router(ocel_data_router)

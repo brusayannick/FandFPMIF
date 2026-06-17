@@ -38,6 +38,7 @@ from mate.api.modules.hot_reload import HotReload, sweep_stale_workdirs
 from mate.api.modules.install_jobs import register_module_install_handlers
 from mate.api.routes import v1
 from mate.api.routes.analytics import prune_expired, record_server_event
+from mate.api.storage import get_storage_settings
 from mate.api.schemas.common import HealthResponse
 
 # Daily — re-evaluated every loop iteration against the current
@@ -191,6 +192,10 @@ async def lifespan(app: FastAPI):
 
     # Touch the DuckDB pool so the first request doesn't pay the init cost.
     get_duckdb_pool()
+
+    # Warm the storage-backend config so the sync hooks (and a possible S3
+    # primary store) are live from the first request after a restart.
+    get_storage_settings()
 
     retention_task = asyncio.create_task(_analytics_retention_loop())
     job_event_task = asyncio.create_task(_job_event_recorder_loop(bus))

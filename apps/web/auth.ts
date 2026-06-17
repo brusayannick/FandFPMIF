@@ -49,6 +49,11 @@ declare module "next-auth/jwt" {
 const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER ?? "http://localhost:8080/realms/flows-funds";
 const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID ?? "flows-funds-web";
 const KEYCLOAK_CLIENT_SECRET = process.env.KEYCLOAK_CLIENT_SECRET ?? "";
+// When set to a brokered IdP alias (e.g. "keycloak-oidc"), we pass kc_idp_hint on
+// the authorize request so Keycloak skips its own login form and redirects
+// straight to that IdP. Leave empty to show Keycloak's local login form (also
+// the break-glass path for the admin@flows-funds.local account).
+const KEYCLOAK_IDP_HINT = process.env.KEYCLOAK_IDP_HINT ?? "";
 
 // Single-flight guard: several modules (`lib/api`, `lib/ws`, the analytics
 // client) each call `getSession()` independently, so after the access token
@@ -138,6 +143,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       clientId: KEYCLOAK_CLIENT_ID,
       clientSecret: KEYCLOAK_CLIENT_SECRET,
       issuer: KEYCLOAK_ISSUER,
+      // Forward kc_idp_hint so Keycloak redirects straight to the brokered IdP
+      // (no Keycloak login page). Only added when KEYCLOAK_IDP_HINT is set; we
+      // re-declare the default OIDC scope here so adding `params` doesn't drop
+      // it.
+      ...(KEYCLOAK_IDP_HINT
+        ? {
+            authorization: {
+              params: { scope: "openid email profile", kc_idp_hint: KEYCLOAK_IDP_HINT },
+            },
+          }
+        : {}),
     }),
   ],
   session: { strategy: "jwt", maxAge: SESSION_MAX_AGE },

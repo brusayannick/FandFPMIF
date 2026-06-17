@@ -131,6 +131,9 @@ services:
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/flows-funds}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-flows-funds-web}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-flows-funds-web-dev-secret}
+      # Set to a brokered IdP alias (e.g. "keycloak-oidc") to skip Keycloak's
+      # login page and redirect straight to that IdP. Empty = show the local form.
+      KEYCLOAK_IDP_HINT: ${KEYCLOAK_IDP_HINT:-}
     ports:
       - "3000:3000"
     depends_on:

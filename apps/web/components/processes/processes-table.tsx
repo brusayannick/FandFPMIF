@@ -194,19 +194,30 @@ interface ProcessesTableProps {
 
 export function ProcessesTable({ rows }: ProcessesTableProps) {
   const foldersQ = useFolders();
-  const folders = foldersQ.data ?? [];
+  // Keep a stable reference: `?? []` would allocate a fresh array every render
+  // while the query is loading, which churns every downstream memo/effect that
+  // depends on `folders` (notably the auto-expand effect below → render loop).
+  const folders = useMemo(() => foldersQ.data ?? [], [foldersQ.data]);
   const tree = useMemo(() => buildTree(folders, rows), [folders, rows]);
 
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     // Start with everything expanded — folders are usually shallow.
     return new Set(folders.map((f) => f.id));
   });
-  // Auto-expand newly created folders.
+  // Auto-expand newly created folders. Return the *same* Set when nothing was
+  // added so this never schedules a no-op re-render (which would re-run the
+  // effect and spin into React's "max update depth" loop).
   useEffect(() => {
     setExpanded((prev) => {
+      let changed = false;
       const next = new Set(prev);
-      for (const f of folders) if (!next.has(f.id)) next.add(f.id);
-      return next;
+      for (const f of folders) {
+        if (!next.has(f.id)) {
+          next.add(f.id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
     });
   }, [folders]);
 

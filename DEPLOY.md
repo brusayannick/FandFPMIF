@@ -135,6 +135,31 @@ In the `flows-funds-web` client of the realm JSON, before first boot:
 - `secret`: replace with a fresh value and use the **same** one for `KEYCLOAK_CLIENT_SECRET` in `.env` (§4).
 </details>
 
+### University login (skip the Keycloak form)
+
+To send every login straight to the university's OIDC IdP and never render
+Keycloak's own login page:
+
+1. Register an OIDC client with the university. The redirect URI is Keycloak's
+   broker callback, whose last path segment is the IdP **alias** (not the
+   protocol):
+   `https://pm-mate.uni-muenster.de/auth/realms/flows-funds/broker/keycloak-oidc/endpoint`
+   Keep the Keycloak IdP alias equal to that segment (`keycloak-oidc`) so this
+   URI never has to be re-registered.
+2. Configure the realm (IdP + redirect + silent first login) on the **running**
+   Keycloak — the realm JSON only imports into an empty DB:
+   ```bash
+   UNIV_CLIENT_ID=... UNIV_CLIENT_SECRET=... \
+   UNIV_DISCOVERY_URL=https://idp.uni-muenster.de/.../.well-known/openid-configuration \
+   KC_SERVER=http://localhost:8080/auth \
+     ./infra/keycloak/configure-university-idp.sh   # IDP_ALIAS defaults to keycloak-oidc
+   ```
+3. Set `KEYCLOAK_IDP_HINT=keycloak-oidc` in `.env` (already defaulted in
+   `docker-compose.prod.yml`) and restart the `web` service.
+
+Break-glass: the local `admin@flows-funds.local` user still works via the
+Keycloak admin console (`master` realm), which the redirect does not touch.
+
 ## 3. cv4cdd model (optional)
 
 The base compose mounts a macOS-only path for the cv4cdd model; the prod

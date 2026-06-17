@@ -53,6 +53,11 @@ services:
       NEXT_PUBLIC_API_URL: https://pm-mate.uni-muenster.de
       AUTH_URL: https://pm-mate.uni-muenster.de
       KEYCLOAK_ISSUER: https://pm-mate.uni-muenster.de/auth/realms/flows-funds
+      # Redirect every login straight to the university IdP (no Keycloak form).
+      # Value is the IdP *alias* — must equal the segment in the registered
+      # broker redirect URI (.../broker/keycloak-oidc/endpoint). See
+      # infra/keycloak/configure-university-idp.sh.
+      KEYCLOAK_IDP_HINT: ${KEYCLOAK_IDP_HINT:-keycloak-oidc}
       # Server-side OIDC calls (esp. the code→token POST) must NOT hairpin out
       # through the uni proxy — that retried the POST and invalidated the
       # single-use code ("Code not valid"). The proxy service carries a docker

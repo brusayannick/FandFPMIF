@@ -310,9 +310,18 @@ class ChatContext(BaseModel):
     current_path: str | None = None
 
 
+class NavHint(BaseModel):
+    """Sent by the frontend when /route already produced a chip for this turn, so
+    the chat answer stays concise and doesn't re-explain navigation."""
+
+    label: str
+    intent: Literal["navigate", "both"]
+
+
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     context: ChatContext | None = None
+    nav_hint: NavHint | None = None
 
 
 def _sse(data: dict[str, Any]) -> str:
@@ -516,6 +525,15 @@ async def chat(
     # then the user's own saved system prompt.
     parts = [BASE_CHAT_SYSTEM_PROMPT]
 
+    # The frontend only calls /chat for "both"/"chat" turns (pure navigation is
+    # answered client-side without an LLM). When a chip was produced, keep the
+    # reply tight and don't re-explain the navigation the chip already handles.
+    if payload.nav_hint is not None:
+        parts.append(
+            f"A clickable shortcut to \"{payload.nav_hint.label}\" is already shown to the "
+            "user. Do not describe how to navigate and do not mention the shortcut; answer "
+            "the substance of the question in 1-2 short sentences."
+        )
     # Sensitive: only share process data with the provider when the user opted in.
     if cfg.allow_process_data:
         processes = await list_user_processes(session, user.id)

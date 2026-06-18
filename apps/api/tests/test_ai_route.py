@@ -11,6 +11,7 @@ import asyncio
 from mate.api import ai_nav
 from mate.api.ai_config import AiConfigPayload
 from mate.api.ai_nav import (
+    ROUTING_SCHEMA,
     NavDestination,
     ProcessInfo,
     _coerce_routing,
@@ -18,6 +19,7 @@ from mate.api.ai_nav import (
     current_destination,
     match_process,
     prefilter,
+    resolve_action,
     resolve_targets,
     route_intent,
 )
@@ -133,13 +135,20 @@ def test_coerce_filters_to_valid_ids_and_clamps_confidence() -> None:
         "intent": "navigate",
         "targets": ["performance"],
         "process": None,
+        "action": None,
         "confidence": 1.0,
     }
 
 
 def test_coerce_defaults_garbage_to_chat() -> None:
     out = _coerce_routing({"intent": "weird", "confidence": "n/a"}, {"performance"})
-    assert out == {"intent": "chat", "targets": [], "process": None, "confidence": 0.0}
+    assert out == {
+        "intent": "chat",
+        "targets": [],
+        "process": None,
+        "action": None,
+        "confidence": 0.0,
+    }
 
 
 def test_coerce_extracts_process_hint() -> None:
@@ -281,6 +290,84 @@ def test_route_intent_drops_target_for_current_page(monkeypatch) -> None:
         )
     )
     assert [t.id for t in res2.targets] == ["settings.ai"]
+
+
+# ── settings actions ─────────────────────────────────────────────────────────
+
+
+def test_resolve_action_enum_bool_tz_delimiter() -> None:
+    a = resolve_action({"setting": "theme", "value": "dark"})
+    assert a is not None and a.setting == "theme" and a.value == "dark" and a.target == "theme"
+    assert "dark" in a.label.lower()
+
+    b = resolve_action({"setting": "notifications_muted", "value": "off"})
+    assert b is not None and b.value is False and b.target == "ui"
+
+    c = resolve_action({"setting": "timezone", "value": "Europe/Berlin"})
+    assert c is not None and c.value == "Europe/Berlin"
+
+    d = resolve_action({"setting": "csv_delimiter", "value": "semicolon"})
+    assert d is not None and d.value == ";"
+
+    e = resolve_action({"setting": "experience_level", "value": "expert"})
+    assert e is not None and e.target == "onboarding" and e.value == "expert"
+
+
+def test_resolve_action_rejects_invalid_values() -> None:
+    assert resolve_action({"setting": "theme", "value": "blue"}) is None
+    assert resolve_action({"setting": "timezone", "value": "Not/AZone"}) is None
+    assert resolve_action({"setting": "csv_delimiter", "value": "weird"}) is None
+    assert resolve_action({"setting": "notifications_muted", "value": "maybe"}) is None
+    assert resolve_action({"setting": "csv_timestamp_format", "value": "x" * 200}) is None
+
+
+def test_resolve_action_rejects_blocked_and_malformed_settings() -> None:
+    # Sensitive / non-whitelisted settings must never resolve, even if the model emits them.
+    for blocked in ("allow_process_data", "api_key", "system_prompt", "analytics_enabled",
+                    "selected_model", "password", "email", "completed"):
+        assert resolve_action({"setting": blocked, "value": "true"}) is None
+    assert resolve_action(None) is None
+    assert resolve_action("nope") is None
+    assert resolve_action({"setting": "theme"}) is None  # missing value
+    assert resolve_action({"setting": None, "value": "x"}) is None
+
+
+def test_routing_schema_stays_openai_strict_safe() -> None:
+    # OpenAI strict json_schema rejects numeric range/array-length constraints and
+    # requires every property to be in `required`. Guard against regressions.
+    forbidden = {"minimum", "maximum", "minItems", "exclusiveMinimum", "exclusiveMaximum"}
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            assert forbidden.isdisjoint(node.keys()), f"forbidden key in schema: {node.keys()}"
+            if node.get("type") == "object" and "properties" in node:
+                assert set(node["properties"]) == set(node.get("required", []))
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(ROUTING_SCHEMA)
+    assert "action" in ROUTING_SCHEMA["required"]
+
+
+def test_route_intent_surfaces_resolved_action(monkeypatch) -> None:
+    async def _fake(cfg, *, message, destinations, processes=None):
+        return {
+            "intent": "chat",
+            "targets": [],
+            "process": None,
+            "action": {"setting": "theme", "value": "light"},
+            "confidence": 0.2,
+        }
+
+    monkeypatch.setattr(ai_nav, "classify_intent", _fake)
+    res = asyncio.run(
+        route_intent(_cfg(), message="switch to light mode", destinations=DESTS, log_id=None)
+    )
+    assert [a.setting for a in res.actions] == ["theme"]
+    assert res.actions[0].value == "light"
 
 
 # ── cross-process navigation ─────────────────────────────────────────────────

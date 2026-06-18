@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 import structlog
 from pydantic import BaseModel
@@ -76,10 +77,20 @@ class NavTarget(BaseModel):
     available: bool
 
 
+class ActionTarget(BaseModel):
+    """A resolved, whitelisted settings change the user can apply with one click."""
+
+    setting: str  # canonical id from SETTING_WHITELIST
+    value: str | bool  # validated/coerced value
+    label: str  # human chip label, e.g. "Switch to Light mode"
+    target: str  # which client subsystem applies it: "theme" | "ui" | "onboarding"
+
+
 class RoutingResult(BaseModel):
     intent: Literal["chat", "navigate", "both"]
     confidence: float
     targets: list[NavTarget]
+    actions: list[ActionTarget] = []
 
 
 # ── Static platform pages ───────────────────────────────────────────────────
@@ -362,6 +373,157 @@ def match_process(hint: str | None, processes: list[ProcessInfo]) -> ProcessInfo
     return None
 
 
+# ── Settings actions (whitelisted, applied client-side on click) ─────────────
+
+# Canonical setting id -> spec. ONLY settings listed here can ever be produced;
+# the frontend has a matching explicit setter map. Anything sensitive — API keys,
+# system prompt, provider/model, allow_process_data, analytics/privacy consent,
+# onboarding completion, account/email/password, data wipe/export, module
+# install/uninstall — is deliberately ABSENT here and rejected, so the AI can
+# never change it.
+_BOOL_TRUE = {"true", "on", "yes", "enable", "enabled", "1", "mute", "muted",
+              "collapse", "collapsed", "show", "shown"}
+_BOOL_FALSE = {"false", "off", "no", "disable", "disabled", "0", "unmute",
+               "expand", "expanded", "hide", "hidden"}
+_DELIMITER_SYNONYMS = {"comma": ",", ",": ",", "semicolon": ";", ";": ";",
+                       "tab": "\t", "\\t": "\t", "\t": "\t", "pipe": "|", "|": "|"}
+
+SETTING_WHITELIST: dict[str, dict[str, Any]] = {
+    "theme": {"target": "theme", "kind": "enum", "values": ("light", "dark", "system")},
+    "notifications_muted": {"target": "ui", "kind": "bool"},
+    "confidential_only": {"target": "ui", "kind": "bool"},
+    "sidebar_collapsed": {"target": "ui", "kind": "bool"},
+    "show_unavailable_modules": {"target": "ui", "kind": "bool"},
+    "show_disabled_modules": {"target": "ui", "kind": "bool"},
+    "date_format": {"target": "ui", "kind": "enum", "values": ("iso", "us", "eu")},
+    "timezone": {"target": "ui", "kind": "tz"},
+    "csv_delimiter": {"target": "ui", "kind": "delimiter"},
+    "csv_timestamp_format": {"target": "ui", "kind": "str", "maxlen": 64},
+    "experience_level": {
+        "target": "onboarding",
+        "kind": "enum",
+        "values": ("beginner", "intermediate", "expert"),
+    },
+}
+
+
+def build_settings_catalog() -> str:
+    """Allowed settings + value domains for the classifier prompt."""
+    lines: list[str] = []
+    for sid, spec in SETTING_WHITELIST.items():
+        kind = spec["kind"]
+        if kind == "enum":
+            dom = "|".join(spec["values"])
+        elif kind == "bool":
+            dom = "true|false"
+        elif kind == "tz":
+            dom = "an IANA timezone e.g. Europe/Berlin"
+        elif kind == "delimiter":
+            dom = "comma|semicolon|tab|pipe"
+        else:
+            dom = "free text"
+        lines.append(f"- {sid}: {dom}")
+    return "\n".join(lines)
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    v = str(value).strip().lower()
+    if v in _BOOL_TRUE:
+        return True
+    if v in _BOOL_FALSE:
+        return False
+    return None
+
+
+def _action_label(setting: str, value: str | bool) -> str:
+    match setting:
+        case "theme":
+            return "Use system theme" if value == "system" else f"Switch to {value} mode"
+        case "notifications_muted":
+            return "Mute notifications" if value else "Unmute notifications"
+        case "confidential_only":
+            return "Show only confidential-safe modules" if value else "Show all modules"
+        case "sidebar_collapsed":
+            return "Collapse the sidebar" if value else "Expand the sidebar"
+        case "show_unavailable_modules":
+            return "Show unavailable modules" if value else "Hide unavailable modules"
+        case "show_disabled_modules":
+            return "Show disabled modules" if value else "Hide disabled modules"
+        case "date_format":
+            return f"Use {str(value).upper()} date format"
+        case "timezone":
+            return f"Set timezone to {value}"
+        case "csv_delimiter":
+            names = {",": "comma", ";": "semicolon", "\t": "tab", "|": "pipe"}
+            return f"Set CSV delimiter to {names.get(str(value), str(value))}"
+        case "csv_timestamp_format":
+            return f"Set CSV timestamp format to {value}"
+        case "experience_level":
+            return f"Set experience level to {str(value).capitalize()}"
+        case _:
+            return f"Change {setting}"
+
+
+def resolve_action(raw: Any) -> ActionTarget | None:
+    """Validate a classifier 'action' against the whitelist; None on any failure.
+
+    This is the security boundary: a setting not in SETTING_WHITELIST (blocked or
+    hallucinated) or a value outside its domain yields no action — so the AI can
+    only ever offer safe, well-formed changes.
+    """
+    if not isinstance(raw, dict):
+        return None
+    setting = raw.get("setting")
+    if not isinstance(setting, str):
+        return None
+    setting = setting.strip().lower()
+    spec = SETTING_WHITELIST.get(setting)
+    if spec is None:
+        return None
+    raw_value = raw.get("value")
+    if raw_value is None:
+        return None
+
+    kind = spec["kind"]
+    value: str | bool
+    if kind == "bool":
+        b = _coerce_bool(raw_value)
+        if b is None:
+            return None
+        value = b
+    elif kind == "enum":
+        v = str(raw_value).strip().lower()
+        if v not in spec["values"]:
+            return None
+        value = v
+    elif kind == "tz":
+        v = str(raw_value).strip()
+        try:
+            ZoneInfo(v)
+        except Exception:
+            return None
+        value = v
+    elif kind == "delimiter":
+        mapped = _DELIMITER_SYNONYMS.get(str(raw_value).strip().lower())
+        if mapped is None:
+            return None
+        value = mapped
+    else:  # free-text str
+        v = str(raw_value).strip()
+        if not v or len(v) > int(spec.get("maxlen", 200)):
+            return None
+        value = v
+
+    return ActionTarget(
+        setting=setting,
+        value=value,
+        label=_action_label(setting, value),
+        target=str(spec["target"]),
+    )
+
+
 # ── Local keyword pre-filter ────────────────────────────────────────────────
 
 # Explicit navigation verbs/phrases (EN + DE). Their presence is a strong signal
@@ -430,7 +592,7 @@ ROUTING_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
     # All properties listed in `required` (OpenAI strict json_schema needs this);
     # optionality is expressed via nullable types instead.
-    "required": ["intent", "targets", "process", "confidence"],
+    "required": ["intent", "targets", "process", "action", "confidence"],
     "properties": {
         "intent": {"enum": ["chat", "navigate", "both"]},
         "targets": {
@@ -445,6 +607,19 @@ ROUTING_SCHEMA: dict[str, Any] = {
                 "If the user names a specific process/event log (and one is listed "
                 "under 'Available processes'), put its exact id or name here; "
                 "otherwise null."
+            ),
+        },
+        "action": {
+            "type": ["object", "null"],
+            "additionalProperties": False,
+            "required": ["setting", "value"],
+            "properties": {
+                "setting": {"type": ["string", "null"]},
+                "value": {"type": ["string", "null"]},
+            },
+            "description": (
+                "A settings change the user EXPLICITLY asked for, using only the "
+                "allowed settings listed below. Otherwise null."
             ),
         },
         # No `minimum`/`maximum` here: OpenAI's strict json_schema mode rejects
@@ -477,6 +652,13 @@ Rules:
       -> targets=["complexity"], process="Order log"
 - If the user names a specific process that appears under 'Available processes',
   set "process" to that process's NAME (not the id). Otherwise set "process" to null.
+- If (and only if) the user EXPLICITLY asks to change one of the settings under
+  'Allowed settings' below, set "action" to {"setting": <id>, "value": <string>}
+  using a setting id and value-domain from that list. For anything not listed
+  (API keys, system prompt, provider/model, process-data access, privacy/analytics,
+  password/email, deleting data) set "action" to null and do not act on it.
+    Example: "switch to dark mode" -> action={"setting":"theme","value":"dark"}
+    Example: "mute notifications"  -> action={"setting":"notifications_muted","value":"true"}
 - If nothing fits, return intent="chat", targets=[], confidence below 0.5.
 - "targets" lists at most 3 ids, the best match first.
 - "confidence" is your certainty (0-1) that navigation is genuinely wanted.
@@ -508,7 +690,13 @@ def _coerce_routing(obj: Any, valid_ids: set[str]) -> dict[str, Any]:
     except (TypeError, ValueError):
         confidence = 0.0
     confidence = max(0.0, min(1.0, confidence))
-    return {"intent": intent, "targets": targets, "process": process, "confidence": confidence}
+    return {
+        "intent": intent,
+        "targets": targets,
+        "process": process,
+        "action": obj.get("action"),  # validated later by resolve_action
+        "confidence": confidence,
+    }
 
 
 async def classify_intent(
@@ -528,6 +716,7 @@ async def classify_intent(
         }
     )
     system_prompt = _ROUTING_SYSTEM_PROMPT + build_destination_catalog(destinations)
+    system_prompt += "\n\nAllowed settings (for 'action'):\n" + build_settings_catalog()
     # The process list is sensitive, so it's only present when the user enabled
     # process-data access (the caller passes an empty list otherwise).
     if processes:
@@ -710,6 +899,10 @@ async def route_intent(
             process_hint=raw.get("process"),
         )
     )
+    # A settings change the user explicitly asked for, validated against the
+    # whitelist (None → no action chip). Independent of navigation intent.
+    action = resolve_action(raw.get("action"))
+    actions = [action] if action is not None else []
     # Diagnostic: shows exactly what the classifier returned vs what resolved,
     # so a "no chip appeared" report can be traced to intent/target/process.
     log.info(
@@ -717,9 +910,13 @@ async def route_intent(
         intent=raw["intent"],
         targets=raw["targets"],
         process_hint=raw.get("process"),
+        action=raw.get("action"),
         confidence=raw["confidence"],
         resolved=[t.href for t in targets],
+        resolved_actions=[a.setting for a in actions],
         n_processes=len(processes or []),
         dest_ids=[d.id for d in destinations],
     )
-    return RoutingResult(intent=raw["intent"], confidence=raw["confidence"], targets=targets)
+    return RoutingResult(
+        intent=raw["intent"], confidence=raw["confidence"], targets=targets, actions=actions
+    )

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
 import {
   Activity,
   AlertTriangle,
@@ -28,19 +29,26 @@ import { useModules } from "@/lib/queries";
 import { useUi } from "@/lib/stores/ui";
 import { useTrack } from "@/lib/analytics/hooks";
 import { EV } from "@/lib/analytics/events";
-import { NavWidget, type NavTarget } from "@/components/mate-ai/nav-widget";
+import { useOnboardingState, useUpdateOnboarding } from "@/lib/onboarding-queries";
+import {
+  NavWidget,
+  type ActionTarget,
+  type NavTarget,
+} from "@/components/mate-ai/nav-widget";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   isError?: boolean;
   navTargets?: NavTarget[];
+  actionTargets?: ActionTarget[];
 }
 
 interface RouteResponse {
   intent: string;
   confidence: number;
   targets: NavTarget[];
+  actions: ActionTarget[];
 }
 
 interface Starter {
@@ -296,6 +304,14 @@ function deriveChatContext(pathname: string | null):
   return ctx;
 }
 
+// Short, client-side line shown above a chip when we skip the chat LLM (no
+// tokens). References the real destination/action so it reads naturally.
+function confirmationText(targets: NavTarget[], actions: ActionTarget[]): string {
+  if (targets.length) return `Here you go — use the shortcut below to open ${targets[0]!.label}.`;
+  if (actions.length) return `Sure — use the button below to ${actions[0]!.label.toLowerCase()}.`;
+  return "Done.";
+}
+
 export function MateAiSidebar() {
   const open = useUi((s) => s.mateOpen);
   const setOpen = useUi((s) => s.setMateOpen);
@@ -326,19 +342,62 @@ export function MateAiSidebar() {
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const track = useTrack();
   const router = useRouter();
+  const { setTheme } = useTheme();
+  const updateOnboarding = useUpdateOnboarding();
+  const { data: onboarding } = useOnboardingState();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Nav suggestions can arrive before the assistant bubble is appended (the
-  // route call runs in parallel with the chat stream). Buffer them by the
-  // assistant message's eventual index until that message exists.
-  const pendingNavRef = useRef<Map<number, NavTarget[]>>(new Map());
 
   const onNavigate = (target: NavTarget) => {
     track(EV.AI_NAV_CLICKED, { target_id: target.id, kind: target.kind });
     // Keep the sidebar open across navigation (the platform layout persists, so
     // the conversation stays put) — the user can keep chatting after the jump.
     router.push(target.href);
+  };
+
+  // Apply a whitelisted settings change on click. An EXPLICIT switch (no dynamic
+  // store access) is the client-side half of the safety boundary: only the
+  // settings enumerated here can ever be touched. useUi changes auto-persist.
+  const applyUiSetting = (setting: string, value: string | boolean) => {
+    const s = useUi.getState();
+    switch (setting) {
+      case "notifications_muted":
+        return s.setNotificationsMuted(value as boolean);
+      case "confidential_only":
+        return s.setConfidentialOnly(value as boolean);
+      case "sidebar_collapsed":
+        return s.setSidebarCollapsed(value as boolean);
+      case "show_unavailable_modules":
+        return s.setShowUnavailableModules(value as boolean);
+      case "show_disabled_modules":
+        return s.setShowDisabledModules(value as boolean);
+      case "date_format":
+        return s.setDateFormat(value as "iso" | "us" | "eu");
+      case "timezone":
+        return s.setTimezone(value as string);
+      case "csv_delimiter":
+        return s.setCsvDelimiter(value as "," | ";" | "\t" | "|");
+      case "csv_timestamp_format":
+        return s.setCsvTimestampFormat(value as string);
+    }
+  };
+
+  const onAction = (action: ActionTarget) => {
+    track(EV.AI_ACTION_APPLIED, { setting: action.setting, target: action.target });
+    if (action.target === "theme") {
+      setTheme(String(action.value));
+    } else if (action.target === "onboarding") {
+      if (action.setting === "experience_level" && onboarding) {
+        // Preserve the completed flag — only re-tune the proficiency level.
+        updateOnboarding.mutate({
+          completed: onboarding.completed,
+          experience_level: action.value as "beginner" | "intermediate" | "expert",
+        });
+      }
+    } else {
+      applyUiSetting(action.setting, action.value);
+    }
   };
 
   const isStreaming = streamingContent !== null;
@@ -371,7 +430,6 @@ export function MateAiSidebar() {
     const userMsg: Message = { role: "user", content: trimmed };
     const history: Message[] = [...messages, userMsg];
     setMessages(history);
-    setStreamingContent("");
     setDraft("");
 
     // Only send non-error messages to the API
@@ -379,66 +437,84 @@ export function MateAiSidebar() {
       .filter((m) => !m.isError)
       .map((m) => ({ role: m.role, content: m.content }));
 
+    // 1) Classify first (cheap nano). This decides whether the chat LLM is even
+    //    needed and lets the chat reply stay concise when a chip is shown.
+    let route: RouteResponse | null = null;
+    try {
+      const r = await rawFetch("/api/v1/ai/route", {
+        method: "POST",
+        json: chatContext ? { message: trimmed, context: chatContext } : { message: trimmed },
+      });
+      route = r.ok ? ((await r.json()) as RouteResponse) : null;
+    } catch {
+      route = null;
+    }
+
+    const targets = route?.targets ?? [];
+    const actions = route?.actions ?? [];
+    if (targets.length) {
+      track(EV.AI_NAV_SUGGESTED, {
+        intent: route?.intent,
+        confidence: route?.confidence,
+        count: targets.length,
+        target_ids: targets.map((t) => t.id),
+      });
+    }
+    if (actions.length) {
+      track(EV.AI_ACTION_SUGGESTED, { settings: actions.map((a) => a.setting) });
+    }
+
+    // 2) Command-style turns skip the chat LLM entirely and show a templated line
+    //    + chip(s): an available navigation target, or ANY settings action (a
+    //    setting chip never needs an LLM answer — just like a nav chip).
+    const navChip = targets[0];
+    const pureNavigate = route?.intent === "navigate" && navChip?.available === true;
+    if (pureNavigate || actions.length > 0) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: confirmationText(targets, actions),
+          navTargets: targets.length ? targets : undefined,
+          actionTargets: actions.length ? actions : undefined,
+        },
+      ]);
+      return;
+    }
+
+    // 3) Run the chat LLM. Targets/actions are already known (route awaited), so
+    //    attach them on finalise; pass a nav_hint so the answer stays concise.
+    setStreamingContent("");
     let full = "";
     let finalised = false;
-
-    // The assistant reply will land at this index once finalised.
-    const assistantIndex = history.length;
 
     const finalise = (content: string, isError = false) => {
       if (finalised) return;
       finalised = true;
-      setMessages((prev) => {
-        const pending = pendingNavRef.current.get(assistantIndex);
-        pendingNavRef.current.delete(assistantIndex);
-        return [...prev, { role: "assistant", content, isError, navTargets: pending }];
-      });
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content,
+          isError,
+          navTargets: !isError && targets.length ? targets : undefined,
+          actionTargets: !isError && actions.length ? actions : undefined,
+        },
+      ]);
       setStreamingContent(null);
     };
 
-    const attachNav = (targets: NavTarget[]) => {
-      if (targets.length === 0) return;
-      setMessages((prev) => {
-        if (prev[assistantIndex]?.role === "assistant") {
-          const copy = [...prev];
-          copy[assistantIndex] = { ...copy[assistantIndex]!, navTargets: targets };
-          return copy;
-        }
-        // Assistant bubble not appended yet — buffer for finalise().
-        pendingNavRef.current.set(assistantIndex, targets);
-        return prev;
-      });
-    };
-
-    // Fire the navigation classifier in parallel with the chat stream. It's
-    // purely additive: any failure just means no suggestions, never a broken
-    // chat, so errors are swallowed.
-    void rawFetch("/api/v1/ai/route", {
-      method: "POST",
-      json: chatContext
-        ? { message: trimmed, context: chatContext }
-        : { message: trimmed },
-    })
-      .then((r) => (r.ok ? (r.json() as Promise<RouteResponse>) : null))
-      .then((res) => {
-        if (!res || res.targets.length === 0) return;
-        track(EV.AI_NAV_SUGGESTED, {
-          intent: res.intent,
-          confidence: res.confidence,
-          count: res.targets.length,
-          target_ids: res.targets.map((t) => t.id),
-        });
-        attachNav(res.targets);
-      })
-      .catch(() => {});
+    const chatBody: Record<string, unknown> = { messages: apiMessages };
+    if (chatContext) chatBody.context = chatContext;
+    if (navChip) {
+      chatBody.nav_hint = {
+        label: navChip.label,
+        intent: route?.intent === "both" ? "both" : "navigate",
+      };
+    }
 
     try {
-      const res = await rawFetch("/api/v1/ai/chat", {
-        method: "POST",
-        json: chatContext
-          ? { messages: apiMessages, context: chatContext }
-          : { messages: apiMessages },
-      });
+      const res = await rawFetch("/api/v1/ai/chat", { method: "POST", json: chatBody });
 
       if (!res.ok) {
         let detail: string;
@@ -613,9 +689,15 @@ export function MateAiSidebar() {
                 ) : (
                   <div key={i}>
                     <AssistantBubble content={msg.content} isError={msg.isError} />
-                    {msg.navTargets && msg.navTargets.length > 0 && (
+                    {((msg.navTargets?.length ?? 0) > 0 ||
+                      (msg.actionTargets?.length ?? 0) > 0) && (
                       <div className="pl-[30px]">
-                        <NavWidget targets={msg.navTargets} onNavigate={onNavigate} />
+                        <NavWidget
+                          targets={msg.navTargets}
+                          actions={msg.actionTargets}
+                          onNavigate={onNavigate}
+                          onAction={onAction}
+                        />
                       </div>
                     )}
                   </div>

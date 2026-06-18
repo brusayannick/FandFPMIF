@@ -38,6 +38,8 @@ export const EV = {
   AI_GUIDANCE_REQUESTED: "ai_guidance_requested",
   AI_NAV_SUGGESTED: "ai_nav_suggested",
   AI_NAV_CLICKED: "ai_nav_clicked",
+  AI_ACTION_SUGGESTED: "ai_action_suggested",
+  AI_ACTION_APPLIED: "ai_action_applied",
 
   // UI chrome
   SIDEBAR_TOGGLED: "sidebar_toggled",

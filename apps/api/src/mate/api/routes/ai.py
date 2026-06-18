@@ -35,6 +35,7 @@ from mate.api.ai_config import (
 from mate.api.ai_nav import (
     RoutingResult,
     build_user_destinations,
+    list_user_processes,
     route_intent,
 )
 from mate.api.auth import CurrentUserDep
@@ -302,6 +303,11 @@ class ChatContext(BaseModel):
 
     log_id: str | None = None
     module_ids: list[str] = []
+    # The route the user is currently viewing (e.g. "/dashboards",
+    # "/processes/<id>/modules/performance"). Lets the assistant answer
+    # location-aware ("you're already here") and lets the router drop a shortcut
+    # to the page the user is already on.
+    current_path: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -314,6 +320,57 @@ def _sse(data: dict[str, Any]) -> str:
 
 
 _CONTEXT_CHAR_BUDGET = 12_000
+
+# Always prepended to the chat system prompt so the model behaves as MATE's
+# in-app assistant. The platform separately renders clickable navigation
+# shortcuts beneath replies, so the model must NOT disclaim ("I can't open the
+# settings") — but it also must NOT mention those shortcuts in its text (it would
+# echo "Jump to" even when no shortcut is shown). The reply must read naturally
+# on its own; the UI handles navigation.
+BASE_CHAT_SYSTEM_PROMPT = (
+    "You are MATE AI, the built-in assistant for MATE, a local process-mining "
+    "platform. You are inside the app and the user can reach any module, dashboard, "
+    "process, or settings page from here.\n\n"
+    "Guidelines:\n"
+    "- Do NOT state or guess which page the user is currently on, and NEVER tell them "
+    "they are 'already' on or at a page/module — you cannot reliably know their current "
+    "location. Just help with what they asked.\n"
+    "- Never claim you are unable to navigate, open settings/modules, or act inside "
+    "the app, and never ask which app or platform the user means — you are already "
+    "inside MATE.\n"
+    "- Answer concisely and helpfully. When the user wants to go somewhere they are "
+    "not, briefly describe the destination and give one useful tip about what they can "
+    "do there; do not write step-by-step 'how to find it' instructions.\n"
+    "- Do NOT mention navigation buttons, shortcuts, links, or 'Jump to', and do not "
+    "tell the user to click anything below. The interface adds clickable shortcuts "
+    "automatically — your text must read naturally on its own and never reference them.\n"
+    "- For analytical questions, answer concisely and use any process data or "
+    "context provided below. If a 'Your processes' list is given, use it to answer "
+    "questions like how many variants/cases/events a named process has. If it is not "
+    "given, you do not have access to process data — say so briefly instead of guessing."
+)
+
+
+def _process_summary_block(processes: list[Any]) -> str:
+    """A compact, sensitive process list for the chat prompt (opt-in only)."""
+    if not processes:
+        return ""
+    lines = ["Your processes (event logs) and key stats:"]
+    for p in processes:
+        stats: list[str] = []
+        if p.cases_count is not None:
+            stats.append(f"{p.cases_count} cases")
+        if p.variants_count is not None:
+            stats.append(f"{p.variants_count} variants")
+        if p.events_count is not None:
+            stats.append(f"{p.events_count} events")
+        if p.object_types_count is not None:
+            stats.append(f"{p.object_types_count} object types")
+        if p.date_min and p.date_max:
+            stats.append(f"{p.date_min[:10]} → {p.date_max[:10]}")
+        suffix = f" — {', '.join(stats)}" if stats else ""
+        lines.append(f'- "{p.name}" (id {p.id}, {p.log_model}){suffix}')
+    return "\n".join(lines)
 
 
 async def _build_context_block(context: ChatContext | None, user_id: str) -> str:
@@ -414,9 +471,19 @@ async def route(
     # but the deterministic pre-filter still can, so we proceed regardless and
     # let route_intent degrade gracefully when it needs the model.
     log_id = payload.context.log_id if payload.context else None
+    current_path = payload.context.current_path if payload.context else None
     destinations = await build_user_destinations(session, user.id)
+    # Navigation to a named process is always allowed — the classifier only sees
+    # process names+ids (build_process_catalog strips stats). The sensitive
+    # analytical data (variant/case counts) is gated separately, in /chat.
+    processes = await list_user_processes(session, user.id)
     return await route_intent(
-        cfg, message=payload.message, destinations=destinations, log_id=log_id
+        cfg,
+        message=payload.message,
+        destinations=destinations,
+        log_id=log_id,
+        current_path=current_path,
+        processes=processes,
     )
 
 
@@ -444,17 +511,24 @@ async def chat(
             detail=f"{cfg.selected_provider!r} requires a base URL. Go to Settings → AI.",
         )
 
+    # Assemble the system prompt for this call only (never persisted): the base
+    # platform prompt, the user's current location, any cached process context,
+    # then the user's own saved system prompt.
+    parts = [BASE_CHAT_SYSTEM_PROMPT]
+
+    # Sensitive: only share process data with the provider when the user opted in.
+    if cfg.allow_process_data:
+        processes = await list_user_processes(session, user.id)
+        summary = _process_summary_block(processes)
+        if summary:
+            parts.append(summary)
+
     context_block = await _build_context_block(payload.context, user.id)
     if context_block:
-        # Prepend the context to the user's saved system prompt for this call
-        # only — we do NOT persist the augmented prompt.
-        cfg = cfg.model_copy(
-            update={
-                "system_prompt": (
-                    context_block + ("\n\n" + cfg.system_prompt if cfg.system_prompt else "")
-                ),
-            }
-        )
+        parts.append(context_block)
+    if cfg.system_prompt:
+        parts.append(cfg.system_prompt)
+    cfg = cfg.model_copy(update={"system_prompt": "\n\n".join(parts)})
 
     return StreamingResponse(
         _stream_chat(cfg, payload.messages),

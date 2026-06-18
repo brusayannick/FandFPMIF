@@ -270,6 +270,98 @@ def build_destination_catalog(destinations: list[NavDestination]) -> str:
     return "\n".join(lines)
 
 
+# ── Processes (sensitive — only used when the user enables process-data access) ─
+
+# Cap how many processes we send to the LLM, newest first, to bound prompt size.
+_MAX_PROCESSES = 50
+
+
+class ProcessInfo(BaseModel):
+    """A user's event log / process and its cheap row-level stats."""
+
+    id: str
+    name: str
+    log_model: str = "case_centric"
+    cases_count: int | None = None
+    events_count: int | None = None
+    variants_count: int | None = None
+    objects_count: int | None = None
+    object_types_count: int | None = None
+    date_min: str | None = None
+    date_max: str | None = None
+
+
+async def list_user_processes(session: AsyncSession, user_id: str) -> list[ProcessInfo]:
+    """The user's ready event logs with row-level stats (no expensive queries)."""
+    from sqlalchemy import desc
+
+    from mate.api.db.models import EventLog
+
+    rows = await session.execute(
+        select(EventLog)
+        .where(
+            EventLog.user_id == user_id,
+            EventLog.deleted_at.is_(None),
+            EventLog.status == "ready",
+        )
+        .order_by(desc(EventLog.created_at))
+        .limit(_MAX_PROCESSES)
+    )
+    out: list[ProcessInfo] = []
+    for r in rows.scalars().all():
+        out.append(
+            ProcessInfo(
+                id=r.id,
+                name=r.name,
+                log_model=r.log_model,
+                cases_count=r.cases_count,
+                events_count=r.events_count,
+                variants_count=r.variants_count,
+                objects_count=r.objects_count,
+                object_types_count=r.object_types_count,
+                date_min=r.date_min.isoformat() if r.date_min else None,
+                date_max=r.date_max.isoformat() if r.date_max else None,
+            )
+        )
+    return out
+
+
+def build_process_catalog(processes: list[ProcessInfo]) -> str:
+    """Compact process list for the classifier so it can fill the 'process' field.
+
+    Only id + name — never stats. Navigation by process name is always allowed,
+    so this is sent regardless of the process-data toggle; the sensitive stats
+    (variants/cases/…) are gated separately and never appear here.
+    """
+    # Lead with the human name so the model copies that into "process" (it tends
+    # to echo whatever it sees first); the id is secondary context.
+    return "\n".join(f'- "{p.name}" (internal id: {p.id})' for p in processes)
+
+
+def match_process(hint: str | None, processes: list[ProcessInfo]) -> ProcessInfo | None:
+    """Resolve a process the user named (by id or fuzzy name) to a ProcessInfo."""
+    if not hint:
+        return None
+    h = hint.strip().strip('"').lower()
+    # The model sometimes echoes the catalog's framing — strip leading labels.
+    for prefix in ("internal id:", "id=", "id:", "name=", "name:"):
+        if h.startswith(prefix):
+            h = h[len(prefix):].strip().strip('"')
+    if not h:
+        return None
+    for p in processes:  # exact id
+        if p.id.lower() == h:
+            return p
+    for p in processes:  # exact name
+        if p.name.lower() == h:
+            return p
+    for p in processes:  # substring either way
+        n = p.name.lower()
+        if h in n or n in h:
+            return p
+    return None
+
+
 # ── Local keyword pre-filter ────────────────────────────────────────────────
 
 # Explicit navigation verbs/phrases (EN + DE). Their presence is a strong signal
@@ -336,7 +428,9 @@ def prefilter(message: str, destinations: list[NavDestination]) -> PrefilterResu
 ROUTING_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["intent", "targets", "confidence"],
+    # All properties listed in `required` (OpenAI strict json_schema needs this);
+    # optionality is expressed via nullable types instead.
+    "required": ["intent", "targets", "process", "confidence"],
     "properties": {
         "intent": {"enum": ["chat", "navigate", "both"]},
         "targets": {
@@ -344,6 +438,14 @@ ROUTING_SCHEMA: dict[str, Any] = {
             "maxItems": 3,
             "items": {"type": "string"},
             "description": "Destination ids from the provided list, best match first.",
+        },
+        "process": {
+            "type": ["string", "null"],
+            "description": (
+                "If the user names a specific process/event log (and one is listed "
+                "under 'Available processes'), put its exact id or name here; "
+                "otherwise null."
+            ),
         },
         # No `minimum`/`maximum` here: OpenAI's strict json_schema mode rejects
         # numeric range constraints, which would force a wasteful fallback to
@@ -366,6 +468,15 @@ Rules:
 - "navigate": the user clearly wants to open/go to a specific module or page.
 - "both": the message is a question AND implies a place to work on it.
 - Only use destination ids from the list below. Never invent ids.
+- "targets" MUST contain the module/page the user wants to open. Always fill it
+  when navigating — even if the user also names a process. The process belongs in
+  "process", NEVER in "targets".
+    Example: "open the process discovery module of the helpdesk process"
+      -> targets=["discovery"], process="helpdesk"
+    Example: "show me the complexity of the Order log"
+      -> targets=["complexity"], process="Order log"
+- If the user names a specific process that appears under 'Available processes',
+  set "process" to that process's NAME (not the id). Otherwise set "process" to null.
 - If nothing fits, return intent="chat", targets=[], confidence below 0.5.
 - "targets" lists at most 3 ids, the best match first.
 - "confidence" is your certainty (0-1) that navigation is genuinely wanted.
@@ -390,16 +501,22 @@ def _coerce_routing(obj: Any, valid_ids: set[str]) -> dict[str, Any]:
                 targets.append(tid)
             if len(targets) >= 3:
                 break
+    raw_process = obj.get("process")
+    process = str(raw_process).strip() if isinstance(raw_process, str) and raw_process.strip() else None
     try:
         confidence = float(obj.get("confidence", 0.0))
     except (TypeError, ValueError):
         confidence = 0.0
     confidence = max(0.0, min(1.0, confidence))
-    return {"intent": intent, "targets": targets, "confidence": confidence}
+    return {"intent": intent, "targets": targets, "process": process, "confidence": confidence}
 
 
 async def classify_intent(
-    cfg: AiConfigPayload, *, message: str, destinations: list[NavDestination]
+    cfg: AiConfigPayload,
+    *,
+    message: str,
+    destinations: list[NavDestination],
+    processes: list[ProcessInfo] | None = None,
 ) -> dict[str, Any]:
     """Run the LLM classifier on the (cheaper) classifier model."""
     # Use the classifier model when set; keep the user's saved system prompt out
@@ -411,6 +528,10 @@ async def classify_intent(
         }
     )
     system_prompt = _ROUTING_SYSTEM_PROMPT + build_destination_catalog(destinations)
+    # The process list is sensitive, so it's only present when the user enabled
+    # process-data access (the caller passes an empty list otherwise).
+    if processes:
+        system_prompt += "\n\nAvailable processes:\n" + build_process_catalog(processes)
     raw = await structured_completion(
         classifier_cfg,
         system_prompt=system_prompt,
@@ -432,11 +553,20 @@ def resolve_targets(
     destinations: list[NavDestination],
     log_id: str | None,
     *,
+    processes: list[ProcessInfo] | None = None,
+    process_hint: str | None = None,
     threshold: float = NAV_CONFIDENCE_THRESHOLD,
 ) -> list[NavTarget]:
-    """Turn classifier output into concrete clickable targets."""
+    """Turn classifier output into concrete clickable targets.
+
+    For module panels the target log is, in order of preference: a process the
+    user explicitly named (``process_hint`` → matched against ``processes``),
+    otherwise the process the user is currently in (``log_id``), otherwise a
+    fallback to the module's config page.
+    """
     if intent == "chat" or confidence < threshold:
         return []
+    matched = match_process(process_hint, processes or [])
     by_id = {d.id: d for d in destinations}
     out: list[NavTarget] = []
     for tid in target_ids:
@@ -444,21 +574,23 @@ def resolve_targets(
         if d is None:
             continue
         if d.requires_log:
-            if log_id:
-                href = d.href_template.format(log_id=log_id)
+            target_log = matched.id if matched else log_id
+            # Name the process in the chip label when it isn't the current one.
+            label = f"{d.label} — {matched.name}" if matched else d.label
+            if target_log:
                 out.append(
                     NavTarget(
                         id=d.id,
-                        label=d.label,
+                        label=label,
                         kind=d.kind,
-                        href=href,
+                        href=d.href_template.format(log_id=target_log),
                         requires_log=False,
                         available=True,
                     )
                 )
             else:
-                # No process in context — fall back to the module's config page
-                # and flag that a log is needed to reach the actual panel.
+                # No process named or in context — fall back to the module's
+                # config page and flag that a process is needed for the panel.
                 out.append(
                     NavTarget(
                         id=d.id,
@@ -483,6 +615,31 @@ def resolve_targets(
     return out
 
 
+def current_destination(
+    path: str | None, destinations: list[NavDestination]
+) -> NavDestination | None:
+    """The destination the user is currently viewing, matched from the URL path."""
+    if not path:
+        return None
+    p = path.rstrip("/") or "/"
+    # Module panel: /processes/<log>/modules/<id>
+    if "/modules/" in p:
+        mod_id = p.rsplit("/modules/", 1)[1].split("/")[0]
+        for d in destinations:
+            if d.kind == "module" and d.id == mod_id:
+                return d
+    # Pages: exact or prefix match; prefer the longest (most specific) href.
+    best: NavDestination | None = None
+    for d in destinations:
+        if d.requires_log:
+            continue
+        href = d.href_template.rstrip("/")
+        if p == href or p.startswith(href + "/"):
+            if best is None or len(href) > len(best.href_template.rstrip("/")):
+                best = d
+    return best
+
+
 # ── Orchestration ───────────────────────────────────────────────────────────
 
 
@@ -492,23 +649,37 @@ async def route_intent(
     message: str,
     destinations: list[NavDestination],
     log_id: str | None,
+    current_path: str | None = None,
+    processes: list[ProcessInfo] | None = None,
 ) -> RoutingResult:
     """Full pipeline: navigate fast-path → otherwise LLM → resolve.
 
-    Never raises on provider failure — navigation is additive, so on any error
-    we degrade to a plain chat result with no suggestions.
+    ``processes`` is only passed when the user has enabled process-data access;
+    it lets the classifier resolve a named process and the resolver build a
+    cross-process module link. Never raises on provider failure — navigation is
+    additive, so on any error we degrade to a plain chat result.
     """
     message = message.strip()
     if not message:
         return RoutingResult(intent="chat", confidence=1.0, targets=[])
 
+    # Don't suggest jumping to the page the user is already on. Compare the
+    # resolved href against the current path so a cross-process target (same
+    # module, different process) is kept.
+    cur_path = (current_path or "").rstrip("/")
+
+    def _strip_current(targets: list[NavTarget]) -> list[NavTarget]:
+        return [t for t in targets if not cur_path or t.href.rstrip("/") != cur_path]
+
     pf = prefilter(message, destinations)
 
     # Fast path: an explicit navigation verb + exactly one matching destination
-    # is unambiguous, so we navigate without paying for the LLM.
+    # is unambiguous, so we navigate without paying for the LLM. (No named-process
+    # resolution here — that needs the classifier; the fast path uses the current
+    # process context only.)
     if pf.has_cue and len(pf.matches) == 1:
-        targets = resolve_targets(
-            "navigate", pf.matches, PREFILTER_CONFIDENCE, destinations, log_id
+        targets = _strip_current(
+            resolve_targets("navigate", pf.matches, PREFILTER_CONFIDENCE, destinations, log_id)
         )
         if targets:
             return RoutingResult(
@@ -520,13 +691,35 @@ async def route_intent(
     # paraphrases would be missed — so we accept one (cheap) classifier call
     # rather than risk a false negative. Provider failure degrades to chat.
     try:
-        raw = await classify_intent(cfg, message=message, destinations=destinations)
+        raw = await classify_intent(
+            cfg, message=message, destinations=destinations, processes=processes
+        )
     except Exception as exc:
         # Navigation is additive — a failed classifier must never break chat.
         log.info("ai.route.classify_failed", error=str(exc))
         return RoutingResult(intent="chat", confidence=0.0, targets=[])
 
-    targets = resolve_targets(
-        raw["intent"], raw["targets"], raw["confidence"], destinations, log_id
+    targets = _strip_current(
+        resolve_targets(
+            raw["intent"],
+            raw["targets"],
+            raw["confidence"],
+            destinations,
+            log_id,
+            processes=processes,
+            process_hint=raw.get("process"),
+        )
+    )
+    # Diagnostic: shows exactly what the classifier returned vs what resolved,
+    # so a "no chip appeared" report can be traced to intent/target/process.
+    log.info(
+        "ai.route.classified",
+        intent=raw["intent"],
+        targets=raw["targets"],
+        process_hint=raw.get("process"),
+        confidence=raw["confidence"],
+        resolved=[t.href for t in targets],
+        n_processes=len(processes or []),
+        dest_ids=[d.id for d in destinations],
     )
     return RoutingResult(intent=raw["intent"], confidence=raw["confidence"], targets=targets)

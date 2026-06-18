@@ -39,6 +39,10 @@ class AiConfigPayload(BaseModel):
     # behind MATE AI's navigation routing. Falls back to ``selected_model`` when
     # unset, so existing configs keep working untouched.
     classifier_model: str | None = None
+    # Opt-in: when true, MATE AI may read the user's process data (names + stats
+    # like variant/case counts) to answer questions and navigate to named
+    # processes. Sends that data to the configured provider, so it defaults off.
+    allow_process_data: bool = False
 
 
 def _load_config(row: UserSetting | None) -> AiConfigPayload:

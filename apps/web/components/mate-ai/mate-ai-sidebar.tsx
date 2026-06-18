@@ -273,19 +273,27 @@ function AssistantBubble({
 // grounded in cached module outputs without the user pasting context in.
 const PROCESS_RE = /\/processes\/([^/?#]+)(?:\/modules\/([^/?#]+))?/;
 
-function deriveChatContext(pathname: string | null): {
-  log_id?: string;
-  module_ids?: string[];
-} | undefined {
+function deriveChatContext(pathname: string | null):
+  | { current_path?: string; log_id?: string; module_ids?: string[] }
+  | undefined {
   if (!pathname) return undefined;
+  // Always send the current route so the assistant is location-aware and the
+  // router can drop a shortcut to the page the user is already on.
+  const ctx: { current_path: string; log_id?: string; module_ids?: string[] } = {
+    current_path: pathname,
+  };
   const m = pathname.match(PROCESS_RE);
-  if (!m) return undefined;
-  const log_id = decodeURIComponent(m[1]!);
-  // Reserved sub-routes like /processes/import or /processes/new aren't real
-  // log ids — skip them so the chat doesn't try to load nonexistent state.
-  if (log_id === "import" || log_id === "new") return undefined;
-  const module_id = m[2] ? decodeURIComponent(m[2]) : null;
-  return { log_id, module_ids: module_id ? [module_id] : [] };
+  if (m) {
+    const log_id = decodeURIComponent(m[1]!);
+    // Reserved sub-routes like /processes/import or /processes/new aren't real
+    // log ids — skip them so the chat doesn't try to load nonexistent state.
+    if (log_id !== "import" && log_id !== "new") {
+      ctx.log_id = log_id;
+      const module_id = m[2] ? decodeURIComponent(m[2]) : null;
+      ctx.module_ids = module_id ? [module_id] : [];
+    }
+  }
+  return ctx;
 }
 
 export function MateAiSidebar() {
@@ -328,8 +336,9 @@ export function MateAiSidebar() {
 
   const onNavigate = (target: NavTarget) => {
     track(EV.AI_NAV_CLICKED, { target_id: target.id, kind: target.kind });
+    // Keep the sidebar open across navigation (the platform layout persists, so
+    // the conversation stays put) — the user can keep chatting after the jump.
     router.push(target.href);
-    setOpen(false);
   };
 
   const isStreaming = streamingContent !== null;

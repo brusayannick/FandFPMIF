@@ -12,12 +12,20 @@ from mate.api import ai_nav
 from mate.api.ai_config import AiConfigPayload
 from mate.api.ai_nav import (
     NavDestination,
+    ProcessInfo,
     _coerce_routing,
     _derive_keywords,
+    current_destination,
+    match_process,
     prefilter,
     resolve_targets,
     route_intent,
 )
+
+PROCS = [
+    ProcessInfo(id="logA", name="Order Process", cases_count=1200, variants_count=42),
+    ProcessInfo(id="logB", name="Invoice Flow", cases_count=300, variants_count=18),
+]
 
 # A compact, deterministic registry for the unit tests.
 PERF = NavDestination(
@@ -121,12 +129,25 @@ def test_coerce_filters_to_valid_ids_and_clamps_confidence() -> None:
         {"intent": "navigate", "targets": ["performance", "ghost"], "confidence": 1.7},
         {"performance", "settings.ai"},
     )
-    assert out == {"intent": "navigate", "targets": ["performance"], "confidence": 1.0}
+    assert out == {
+        "intent": "navigate",
+        "targets": ["performance"],
+        "process": None,
+        "confidence": 1.0,
+    }
 
 
 def test_coerce_defaults_garbage_to_chat() -> None:
     out = _coerce_routing({"intent": "weird", "confidence": "n/a"}, {"performance"})
-    assert out == {"intent": "chat", "targets": [], "confidence": 0.0}
+    assert out == {"intent": "chat", "targets": [], "process": None, "confidence": 0.0}
+
+
+def test_coerce_extracts_process_hint() -> None:
+    out = _coerce_routing(
+        {"intent": "navigate", "targets": ["performance"], "process": "Order Process", "confidence": 0.9},
+        {"performance"},
+    )
+    assert out["process"] == "Order Process"
 
 
 # ── keyword derivation ───────────────────────────────────────────────────────
@@ -147,7 +168,7 @@ def test_route_intent_classifies_when_no_fast_path(monkeypatch) -> None:
     # consult the classifier so non-English / paraphrased intent isn't missed.
     called = {"n": 0}
 
-    async def _fake(cfg, *, message, destinations):
+    async def _fake(cfg, *, message, destinations, processes=None):
         called["n"] += 1
         return {"intent": "chat", "targets": [], "confidence": 0.1}
 
@@ -165,7 +186,7 @@ def test_route_intent_routes_non_english_intent_via_llm(monkeypatch) -> None:
     # English keyword match and no nav verb, so it must reach the classifier.
     called = {"n": 0}
 
-    async def _fake(cfg, *, message, destinations):
+    async def _fake(cfg, *, message, destinations, processes=None):
         called["n"] += 1
         return {"intent": "both", "targets": ["performance"], "confidence": 0.85}
 
@@ -201,7 +222,7 @@ def test_route_intent_skips_llm_for_unambiguous_nav(monkeypatch) -> None:
 def test_route_intent_calls_llm_for_ambiguous_message(monkeypatch) -> None:
     called = {"n": 0}
 
-    async def _fake(cfg, *, message, destinations):
+    async def _fake(cfg, *, message, destinations, processes=None):
         called["n"] += 1
         return {"intent": "both", "targets": ["performance"], "confidence": 0.9}
 
@@ -216,8 +237,112 @@ def test_route_intent_calls_llm_for_ambiguous_message(monkeypatch) -> None:
     assert res.targets[0].href == "/processes/L1/modules/performance"
 
 
+# ── current location ─────────────────────────────────────────────────────────
+
+
+def test_current_destination_matches_page() -> None:
+    assert current_destination("/settings/ai", DESTS) is SETTINGS_AI
+    assert current_destination("/settings/ai/", DESTS) is SETTINGS_AI
+
+
+def test_current_destination_matches_module_panel() -> None:
+    assert current_destination("/processes/L1/modules/performance", DESTS) is PERF
+
+
+def test_current_destination_none_for_unrelated_path() -> None:
+    assert current_destination("/profile", DESTS) is None
+    assert current_destination(None, DESTS) is None
+
+
+def test_route_intent_drops_target_for_current_page(monkeypatch) -> None:
+    async def _fake(cfg, *, message, destinations, processes=None):
+        return {"intent": "navigate", "targets": ["settings.ai"], "confidence": 0.95}
+
+    monkeypatch.setattr(ai_nav, "classify_intent", _fake)
+    # Already on /settings/ai → the suggestion to go there is dropped.
+    res = asyncio.run(
+        route_intent(
+            _cfg(),
+            message="open the ai settings",
+            destinations=DESTS,
+            log_id=None,
+            current_path="/settings/ai",
+        )
+    )
+    assert res.targets == []
+    # From elsewhere the same request keeps the target.
+    res2 = asyncio.run(
+        route_intent(
+            _cfg(),
+            message="open the ai settings",
+            destinations=DESTS,
+            log_id=None,
+            current_path="/profile",
+        )
+    )
+    assert [t.id for t in res2.targets] == ["settings.ai"]
+
+
+# ── cross-process navigation ─────────────────────────────────────────────────
+
+
+def test_match_process_by_name_id_and_substring() -> None:
+    assert match_process("Order Process", PROCS) is PROCS[0]
+    assert match_process("logB", PROCS) is PROCS[1]
+    assert match_process("invoice", PROCS) is PROCS[1]  # substring, case-insensitive
+    assert match_process("nonexistent xyz", PROCS) is None
+    assert match_process(None, PROCS) is None
+
+
+def test_resolve_cross_process_module_uses_named_process_log() -> None:
+    # User is in process L1 but asks for performance of "Invoice Flow".
+    out = resolve_targets(
+        "navigate",
+        ["performance"],
+        0.9,
+        DESTS,
+        log_id="L1",
+        processes=PROCS,
+        process_hint="Invoice Flow",
+    )
+    assert out[0].href == "/processes/logB/modules/performance"
+    assert out[0].available is True
+    assert "Invoice Flow" in out[0].label
+
+
+def test_resolve_module_without_hint_uses_current_log() -> None:
+    out = resolve_targets(
+        "navigate", ["performance"], 0.9, DESTS, log_id="L1", processes=PROCS, process_hint=None
+    )
+    assert out[0].href == "/processes/L1/modules/performance"
+
+
+def test_route_intent_cross_process_navigation(monkeypatch) -> None:
+    async def _fake(cfg, *, message, destinations, processes=None):
+        # classifier identifies the module + the named process
+        return {
+            "intent": "navigate",
+            "targets": ["performance"],
+            "process": "Invoice Flow",
+            "confidence": 0.92,
+        }
+
+    monkeypatch.setattr(ai_nav, "classify_intent", _fake)
+    res = asyncio.run(
+        route_intent(
+            _cfg(),
+            message="show me the performance of the invoice flow",
+            destinations=DESTS,
+            log_id=None,
+            current_path="/dashboards",
+            processes=PROCS,
+        )
+    )
+    assert res.targets[0].href == "/processes/logB/modules/performance"
+
+
 def test_route_intent_swallows_classifier_errors(monkeypatch) -> None:
-    async def _fail(cfg, *, message, destinations):
+    async def _fail(cfg, *, message, destinations, processes=None):
         raise RuntimeError("provider down")
 
     monkeypatch.setattr(ai_nav, "classify_intent", _fail)

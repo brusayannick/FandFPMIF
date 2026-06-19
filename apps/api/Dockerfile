@@ -19,6 +19,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /usr/local/bin/uv
 WORKDIR /app
 
 # Workspace metadata first — better layer caching for dependency resolution.
+# `.python-version` pins uv to 3.12 so dev (host-mode) and the image resolve
+# the same interpreter — in_process module venvs are ABI-locked to it.
+COPY .python-version ./
 COPY pyproject.toml ./
 COPY apps/api/pyproject.toml apps/api/pyproject.toml
 COPY packages/module-sdk-py/pyproject.toml packages/module-sdk-py/pyproject.toml

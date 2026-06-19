@@ -262,6 +262,28 @@
   opacity: 0.15 !important;
 }
 
+/* Kill the one-time mount slide (WidthProvider reflows from its 1280px default
+   to the measured width). The canvas drops `.rgl-mounting` after the first two
+   frames, restoring transitions for drag/resize. */
+.rgl-mounting .react-grid-item {
+  transition: none !important;
+}
+
+/* Free-mode drag (the canvas drives it, not RGL — see dashboard-canvas.tsx): the
+   grabbed card must track the cursor with no easing, and sit above the cards
+   reflowing around it. The others keep their transition, so they spring back. */
+.react-grid-item.rgl-free-dragging {
+  transition: none !important;
+  z-index: 3;
+  cursor: grabbing;
+}
+
+/* The header doubles as the drag handle; stop touch scrolling from hijacking a
+   drag gesture on it. */
+.dashboard-drag-handle {
+  touch-action: none;
+}
+
 /* Dashboard canvas: subtle dotted grid so the board area reads as a workspace
    and card placement is easier to eyeball. Themed via --border so it adapts to
    light/dark. */

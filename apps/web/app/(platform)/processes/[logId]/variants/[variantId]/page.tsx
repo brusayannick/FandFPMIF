@@ -7,6 +7,7 @@ import { ArrowLeft, Inbox } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { PageContainer, PageTitle } from "@/components/page";
 import { useEventLog, useVariant, useVariantCases } from "@/lib/queries";
 import { displayActivities, getActivityRenameMap } from "@/lib/activity-rename";
 import { VariantHeader } from "@/components/processes/variant-detail/header";
@@ -25,11 +26,11 @@ export default function VariantDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-7xl px-6 py-8 space-y-4">
+      <PageContainer className="space-y-4">
         <Skeleton className="h-6 w-40" />
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-64 w-full" />
-      </div>
+      </PageContainer>
     );
   }
 
@@ -44,7 +45,7 @@ export default function VariantDetailPage() {
   }
 
   return (
-    <section className="mx-auto max-w-7xl px-6 py-8 space-y-8">
+    <PageContainer className="space-y-8">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Link
           href={`/processes/${logId}?tab=variants`}
@@ -65,7 +66,7 @@ export default function VariantDetailPage() {
 
       <header className="space-y-3">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Variant #{variant.rank}</h1>
+          <PageTitle>Variant #{variant.rank}</PageTitle>
           <Badge variant="outline" className="border-0 bg-muted text-[10px] font-mono uppercase tracking-wide text-muted-foreground">
             {variant.variant_id}
           </Badge>
@@ -95,6 +96,6 @@ export default function VariantDetailPage() {
         </div>
         <CaseList logId={logId} cases={cases?.rows ?? []} total={cases?.total ?? 0} />
       </div>
-    </section>
+    </PageContainer>
   );
 }

@@ -6,8 +6,8 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AdminTabs } from "@/components/admin/admin-tabs";
 import { rawFetch } from "@/lib/api";
+import { downloadBlob } from "@/lib/download";
 
 interface ExportInfo {
   is_admin: boolean;
@@ -37,28 +37,6 @@ function tsName(base: string, ext: string): string {
   return `${base}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(
     d.getHours(),
   )}${p(d.getMinutes())}${p(d.getSeconds())}.${ext}`;
-}
-
-/** Fetch an authenticated download and save it client-side as `filename`. */
-async function downloadBlob(path: string, filename: string): Promise<void> {
-  const res = await rawFetch(path);
-  if (res.status === 403) {
-    toast.error("This export requires the admin role.");
-    return;
-  }
-  if (!res.ok) {
-    toast.error(`Export failed (${res.status}).`);
-    return;
-  }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
 }
 
 export default function AdminExportPage() {
@@ -101,17 +79,7 @@ export default function AdminExportPage() {
   const isAdmin = info?.is_admin === true;
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 p-6">
-      <div className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight">Data export</h1>
-        <p className="text-sm text-muted-foreground">
-          Download the entire metadata database or every analytics event as an
-          XES event log.
-        </p>
-      </div>
-
-      <AdminTabs />
-
+    <div className="space-y-4">
       {loading ? (
         <p className="text-xs text-muted-foreground">Checking access…</p>
       ) : !isAdmin ? (

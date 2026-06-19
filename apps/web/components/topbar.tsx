@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Search, Sparkles } from "lucide-react";
@@ -93,20 +93,22 @@ export function Topbar() {
   }, []);
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-4">
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-4 sm:px-6 lg:px-8">
       <Breadcrumb className="min-w-0 flex-1">
         <BreadcrumbList>
           {crumbs.map((c, i) => (
-            <BreadcrumbItem key={c.href}>
-              {c.current ? (
-                <BreadcrumbPage className="truncate">{c.label}</BreadcrumbPage>
-              ) : (
-                <BreadcrumbLink asChild>
-                  <Link href={c.href}>{c.label}</Link>
-                </BreadcrumbLink>
-              )}
+            <Fragment key={c.href}>
+              <BreadcrumbItem>
+                {c.current ? (
+                  <BreadcrumbPage className="truncate">{c.label}</BreadcrumbPage>
+                ) : (
+                  <BreadcrumbLink asChild>
+                    <Link href={c.href}>{c.label}</Link>
+                  </BreadcrumbLink>
+                )}
+              </BreadcrumbItem>
               {i < crumbs.length - 1 && <BreadcrumbSeparator />}
-            </BreadcrumbItem>
+            </Fragment>
           ))}
         </BreadcrumbList>
       </Breadcrumb>

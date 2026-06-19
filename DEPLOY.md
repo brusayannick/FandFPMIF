@@ -2,7 +2,43 @@
 
 Production deployment to `pm-mate.uni-muenster.de`, fronted by the FB4 reverse
 proxy. For the local-`localhost` setup, see [`README.md`](./README.md) — this
-doc only covers the server.
+doc only covers the server. **All VM access needs the FB4-DEV-VPN.**
+
+## Quick reference (cheat sheet)
+
+The daily-driver commands. The numbered walkthrough below is the full,
+first-time setup. The prod overlay is always **both** compose files:
+
+```bash
+DC="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+```
+
+```bash
+# Connect (compose stack lives in ~/mate)
+ssh -p 2222 pm-admin@pm-mate-vm.uni-muenster.de
+ssh-copy-id -p 2222 pm-admin@pm-mate-vm.uni-muenster.de   # once, to skip the password
+
+# Deploy
+make deploy                      # from laptop: push branch + redeploy + health-check
+./scripts/deploy.sh --no-push    # redeploy origin's current state, no push
+cd ~/mate && git pull && $DC up -d --build   # manual, on the VM
+
+# Run / stop / status
+$DC up -d --build        # bring up (first boot ~10 min: module deps)
+$DC ps                   # status
+$DC restart api          # restart one service
+$DC restart proxy        # after a Caddyfile-only change
+$DC down                 # stop (keeps volumes/data)
+$DC down -v              # stop + WIPE Keycloak users (re-imports realm next boot)
+
+# Logs
+$DC logs -f api                 # follow API
+$DC logs --tail=80 api web      # last 80 lines
+$DC logs -f proxy keycloak
+```
+
+- `NEXT_PUBLIC_*` change → needs `--build` (inlined into the client bundle).
+- Caddyfile-only change → `$DC restart proxy`.
 
 ## How the two proxies fit together
 
@@ -266,6 +302,11 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 `./data/` (SQLite metadata + Parquet logs + module results + cached runtimes)
 is bind-mounted — back it up by copying the directory. Keycloak users live in
 the `kc-data` Docker volume; include it if you need to preserve logins.
+
+```bash
+tar czf mate-data-$(date +%F).tgz -C ~/mate data                                   # SQLite + Parquet + results
+docker run --rm -v kc-data:/v -v "$PWD":/b alpine tar czf /b/kc-data.tgz -C /v .   # Keycloak users
+```
 
 ## Troubleshooting
 

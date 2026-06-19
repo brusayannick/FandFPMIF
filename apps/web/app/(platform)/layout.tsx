@@ -9,6 +9,7 @@ import { JobsDock } from "@/components/jobs/jobs-dock";
 import { JobsDrawer } from "@/components/jobs/jobs-drawer";
 import { OnboardingOverlay } from "@/components/onboarding";
 import { MateAiSidebar } from "@/components/mate-ai/mate-ai-sidebar";
+import { RouteProgress } from "@/components/route-progress";
 
 export default async function PlatformLayout({
   children,
@@ -21,6 +22,9 @@ export default async function PlatformLayout({
   }
   return (
     <div className="flex h-screen w-screen overflow-hidden">
+      <Suspense fallback={null}>
+        <RouteProgress />
+      </Suspense>
       <Sidebar isAdmin={session.user.isAdmin === true} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Suspense>

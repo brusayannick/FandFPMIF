@@ -22,7 +22,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.engine import Row
@@ -30,6 +31,8 @@ from sqlalchemy.engine import Row
 from mate.api.auth import AdminUserDep
 from mate.api.db.models import AnalyticsEvent, AnalyticsSession, EventLog, Job, User
 from mate.api.db.session import SessionDep
+from mate.api.ingest.storage import log_paths
+from mate.api.storage import sync as storage_sync
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/admin/insights", tags=["admin"])
@@ -48,6 +51,9 @@ class Kpis(BaseModel):
     analytics_events: int
     sessions_total: int
     active_users_30d: int
+    events_per_session: int
+    bounce_rate_pct: int
+    avg_session_seconds: int
 
 
 class DayCount(BaseModel):
@@ -80,6 +86,9 @@ class AdminOverview(BaseModel):
     job_failures_by_day: list[DayCount]
     sessions_by_day: list[DayCount]
     top_event_types: list[LabelCount]
+    top_paths: list[LabelCount]
+    activity_by_hour: list[LabelCount]
+    activity_by_weekday: list[LabelCount]
 
 
 def _naive_utc_now() -> datetime:
@@ -100,6 +109,18 @@ def _labels(rows: Sequence[Row[Any]], *, unknown: str = "unknown") -> list[Label
     ]
 
 
+# strftime('%w'): 0=Sunday..6=Saturday. Render the weekday chart Monday-first.
+_WEEKDAYS: tuple[tuple[str, str], ...] = (
+    ("1", "Mon"),
+    ("2", "Tue"),
+    ("3", "Wed"),
+    ("4", "Thu"),
+    ("5", "Fri"),
+    ("6", "Sat"),
+    ("0", "Sun"),
+)
+
+
 @router.get("/overview", response_model=AdminOverview)
 async def overview(user: AdminUserDep, session: SessionDep, days: int = 90) -> AdminOverview:
     """KPIs and time series for the admin dashboard, across all users.
@@ -112,6 +133,38 @@ async def overview(user: AdminUserDep, session: SessionDep, days: int = 90) -> A
     sess_cutoff = _naive_utc_now() - timedelta(days=30)
 
     live_logs = EventLog.deleted_at.is_(None)
+
+    # Session-derived engagement metrics (all-time, like ``sessions_total``).
+    sessions_total = int(
+        await session.scalar(select(func.count()).select_from(AnalyticsSession)) or 0
+    )
+    bounce_sessions = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(AnalyticsSession)
+            .where(AnalyticsSession.event_count <= 1)
+        )
+        or 0
+    )
+    avg_events_per_session = float(
+        await session.scalar(select(func.avg(AnalyticsSession.event_count))) or 0.0
+    )
+    # SQLite stores timestamps as naive-UTC text; julianday() diff yields
+    # fractional days, times 86400 for seconds. NULL coalesces to 0.0 with no sessions.
+    avg_session_seconds = float(
+        await session.scalar(
+            select(
+                func.avg(
+                    (
+                        func.julianday(AnalyticsSession.last_seen_at)
+                        - func.julianday(AnalyticsSession.started_at)
+                    )
+                    * 86400.0
+                )
+            )
+        )
+        or 0.0
+    )
 
     kpis = Kpis(
         user_count=int(await session.scalar(select(func.count()).select_from(User)) or 0),
@@ -133,9 +186,7 @@ async def overview(user: AdminUserDep, session: SessionDep, days: int = 90) -> A
         analytics_events=int(
             await session.scalar(select(func.count()).select_from(AnalyticsEvent)) or 0
         ),
-        sessions_total=int(
-            await session.scalar(select(func.count()).select_from(AnalyticsSession)) or 0
-        ),
+        sessions_total=sessions_total,
         active_users_30d=int(
             await session.scalar(
                 select(func.count(func.distinct(AnalyticsSession.user_id))).where(
@@ -144,6 +195,9 @@ async def overview(user: AdminUserDep, session: SessionDep, days: int = 90) -> A
             )
             or 0
         ),
+        events_per_session=round(avg_events_per_session),
+        bounce_rate_pct=round(100 * bounce_sessions / sessions_total) if sessions_total else 0,
+        avg_session_seconds=round(avg_session_seconds),
     )
 
     signups = _day_series(
@@ -255,6 +309,50 @@ async def overview(user: AdminUserDep, session: SessionDep, days: int = 90) -> A
         ).all()
     )
 
+    # Behavioural breakdowns, windowed by ``cutoff`` so the range selector
+    # applies. Hours are UTC (occurred_at is stored naive-UTC).
+    top_paths = _labels(
+        (
+            await session.execute(
+                select(AnalyticsEvent.path, func.count())
+                .where(
+                    AnalyticsEvent.event_type == "page",
+                    AnalyticsEvent.path.is_not(None),
+                    AnalyticsEvent.occurred_at >= cutoff,
+                )
+                .group_by(AnalyticsEvent.path)
+                .order_by(func.count().desc())
+                .limit(10)
+            )
+        ).all()
+    )
+    activity_by_hour = [
+        LabelCount(label=str(h), count=int(c))
+        for h, c in (
+            await session.execute(
+                select(func.strftime("%H", AnalyticsEvent.occurred_at), func.count())
+                .where(AnalyticsEvent.occurred_at >= cutoff)
+                .group_by(func.strftime("%H", AnalyticsEvent.occurred_at))
+                .order_by(func.strftime("%H", AnalyticsEvent.occurred_at))
+            )
+        ).all()
+        if h is not None
+    ]
+    weekday_counts = {
+        str(w): int(c)
+        for w, c in (
+            await session.execute(
+                select(func.strftime("%w", AnalyticsEvent.occurred_at), func.count())
+                .where(AnalyticsEvent.occurred_at >= cutoff)
+                .group_by(func.strftime("%w", AnalyticsEvent.occurred_at))
+            )
+        ).all()
+        if w is not None
+    }
+    activity_by_weekday = [
+        LabelCount(label=name, count=weekday_counts.get(num, 0)) for num, name in _WEEKDAYS
+    ]
+
     return AdminOverview(
         days=days,
         kpis=kpis,
@@ -268,6 +366,9 @@ async def overview(user: AdminUserDep, session: SessionDep, days: int = 90) -> A
         job_failures_by_day=job_failures,
         sessions_by_day=sessions_by_day,
         top_event_types=top_event_types,
+        top_paths=top_paths,
+        activity_by_hour=activity_by_hour,
+        activity_by_weekday=activity_by_weekday,
     )
 
 
@@ -386,3 +487,34 @@ async def event_logs(
         for ev, owner in rows
     ]
     return AdminLogList(total=total, items=items)
+
+
+@router.get("/event-logs/{log_id}/download")
+async def download_event_log(log_id: str, user: AdminUserDep, session: SessionDep) -> FileResponse:
+    """Download the original upload of any user's event log (admin-only).
+
+    Cross-user by design — the same admin gate as the listing above. Returns the
+    retained ``original.{ext}`` (the bytes the owner uploaded), not the derived
+    Parquet. In S3 mode the log dir is hydrated first so a cold cache still works.
+    """
+    row = await session.get(EventLog, log_id)
+    if row is None or row.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event log not found")
+
+    paths = log_paths(log_id, row.user_id)
+    # The retained upload may live only in S3 on a cold cache — pull the log dir
+    # back before locating it (no-op in local mode), mirroring re-import.
+    await storage_sync.hydrate_log(row.user_id, log_id)
+    located = paths.find_original()
+    if located is None or not located.exists():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Original upload is not available for this log.",
+        )
+
+    log.info("admin_log_download", admin_id=user.id, log_id=log_id, owner_id=row.user_id)
+    return FileResponse(
+        located,
+        media_type="application/octet-stream",
+        filename=row.source_filename or located.name,
+    )

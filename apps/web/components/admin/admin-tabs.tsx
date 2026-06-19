@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 const TABS = [
   { href: "/admin/overview", label: "Overview" },
   { href: "/admin/logs", label: "Event logs" },
+  { href: "/admin/jobs", label: "Jobs" },
   { href: "/admin/storage", label: "Storage" },
   { href: "/admin/export", label: "Data export" },
 ];

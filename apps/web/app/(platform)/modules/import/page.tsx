@@ -12,6 +12,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  PageContainer,
+  PageTitle,
+  PageDescription,
+} from "@/components/page";
 import { api, ApiError, rawFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { toastError } from "@/lib/toast";
@@ -40,13 +45,13 @@ export default function ImportModulePage() {
   );
 
   return (
-    <section className="space-y-6">
+    <PageContainer className="space-y-6">
       <header className="space-y-1">
-        <h2 className="text-lg font-semibold">Install a module</h2>
-        <p className="text-sm text-muted-foreground">
+        <PageTitle>Install a module</PageTitle>
+        <PageDescription>
           Pick a source. The platform unpacks the module, resolves its
           dependencies, and registers it without a restart.
-        </p>
+        </PageDescription>
       </header>
 
       <Tabs defaultValue="upload" className="space-y-4">
@@ -75,7 +80,7 @@ export default function ImportModulePage() {
           <RegistryTab onInstalled={onInstalled} />
         </TabsContent>
       </Tabs>
-    </section>
+    </PageContainer>
   );
 }
 

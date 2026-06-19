@@ -363,6 +363,27 @@ class UserSetting(Base):
     )
 
 
+class SystemSetting(Base):
+    """Free-form *system-wide* key/value settings — the singleton analogue of
+    :class:`UserSetting`.
+
+    Unlike per-user settings these apply platform-wide and are admin-controlled
+    (e.g. job-runtime worker concurrency, surfaced at Settings → General → Jobs
+    and persisted so a live change survives a restart). Keyed by a plain string;
+    the value is whatever JSON the setting needs.
+    """
+
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value_json: Mapped[dict[str, Any] | list[Any] | str | int | float | bool | None] = (
+        mapped_column(JSON)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class StorageConfig(Base):
     """Global (VM-wide) storage backend configuration — a single row.
 
@@ -425,8 +446,8 @@ class EventEdit(Base):
     )
     row_index: Mapped[int] = mapped_column(Integer, nullable=False)
     field: Mapped[str] = mapped_column(String(128), nullable=False)
-    old_value_json: Mapped[Any] = mapped_column(JSON)
-    new_value_json: Mapped[Any] = mapped_column(JSON)
+    old_value_json: Mapped[Any | None] = mapped_column(JSON)
+    new_value_json: Mapped[Any | None] = mapped_column(JSON)
     edited_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     __table_args__ = (Index("ix_event_edits_user_log_edited_at", "user_id", "log_id", "edited_at"),)

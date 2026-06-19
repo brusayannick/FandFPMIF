@@ -34,7 +34,7 @@ from mate.api.duckdb.pool import get_duckdb_pool
 from mate.api.events import EventBus, set_event_bus
 from mate.api.ingest.dispatch import register_import_handler
 from mate.api.ingest.watch import scan_watch
-from mate.api.jobs.runtime import JobRuntime, set_job_runtime
+from mate.api.jobs.runtime import JobRuntime, load_persisted_concurrency, set_job_runtime
 from mate.api.middleware import UsageTrackingMiddleware
 from mate.api.modules import CapabilityRegistry, ModuleLoader, set_module_loader
 from mate.api.modules.hot_reload import HotReload, sweep_stale_workdirs
@@ -225,6 +225,13 @@ async def lifespan(app: FastAPI):
     bus = EventBus()
     set_event_bus(bus)
 
+    # Re-apply an admin's persisted worker concurrency over the env default so a
+    # live change at Settings → General → Jobs survives a restart. Set before
+    # start() so the worker pool spawns at the right size from the first boot.
+    persisted_concurrency = await load_persisted_concurrency()
+    if persisted_concurrency is not None:
+        settings.worker_concurrency = persisted_concurrency
+
     runtime = JobRuntime(settings, bus=bus)
     register_import_handler(runtime)
     set_job_runtime(runtime)
@@ -244,9 +251,13 @@ async def lifespan(app: FastAPI):
     try:
         await loader.load_all()
     except Exception:
-        # Discovery failures should not prevent the platform from booting.
-        # Bad manifests are logged inside the loader.
-        pass
+        # A batch-aborting failure (e.g. a bad manifest or a duplicate module
+        # id surfacing during discovery/topo-sort) must not stop the platform
+        # from booting — but it must be loud. Swallowing it silently once left
+        # the whole module system dark with no modules and no log line. Per-
+        # module install/import errors are already logged + skipped inside the
+        # loader; this catches the ones that abort the entire load.
+        structlog.get_logger("modules.loader").exception("modules.load_all_failed")
 
     # Sweep any `ff-mod-*` temp dirs older than 24h that earlier crashes left
     # behind (the per-invocation cleanup in `_invoke_handler` handles the

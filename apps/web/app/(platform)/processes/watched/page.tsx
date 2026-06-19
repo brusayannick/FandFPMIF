@@ -27,6 +27,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  PageContainer,
+  PageHeader,
+  PageTitle,
+  PageDescription,
+} from "@/components/page";
 import { toastError } from "@/lib/toast";
 import {
   useDeleteWatchedFolder,
@@ -60,8 +66,8 @@ export default function WatchedFoldersPage() {
   const { data, isLoading, isError, error } = useWatchedFolders();
 
   return (
-    <section className="mx-auto max-w-5xl px-6 py-8">
-      <header className="flex flex-wrap items-start justify-between gap-4 pb-6">
+    <PageContainer>
+      <PageHeader>
         <div className="space-y-1">
           <Link
             href="/processes"
@@ -69,11 +75,11 @@ export default function WatchedFoldersPage() {
           >
             <ArrowLeft className="h-3 w-3" /> Processes
           </Link>
-          <h1 className="text-2xl font-semibold tracking-tight">Watched folders</h1>
-          <p className="text-sm text-muted-foreground">
+          <PageTitle>Watched folders</PageTitle>
+          <PageDescription>
             Storage locations scanned for new event-log files. New files are imported
             automatically.
-          </p>
+          </PageDescription>
         </div>
         <Button asChild className="gap-2 cursor-pointer">
           <Link href="/processes/import">
@@ -81,7 +87,7 @@ export default function WatchedFoldersPage() {
             New watched folder
           </Link>
         </Button>
-      </header>
+      </PageHeader>
 
       {isLoading && (
         <div className="space-y-2">
@@ -122,7 +128,7 @@ export default function WatchedFoldersPage() {
           ))}
         </div>
       )}
-    </section>
+    </PageContainer>
   );
 }
 

@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageContainer, PageTitle } from "@/components/page";
 import { EmptyState } from "@/components/empty-state";
 import { ModuleGrid } from "@/components/processes/module-grid";
 import { EventsTab } from "@/components/processes/events-tab";
@@ -66,11 +67,11 @@ export default function ProcessDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-7xl px-6 py-8 space-y-4">
+      <PageContainer className="space-y-4">
         <Skeleton className="h-8 w-72" />
         <Skeleton className="h-4 w-96" />
         <Skeleton className="h-64 w-full" />
-      </div>
+      </PageContainer>
     );
   }
   if (isError || !log) {
@@ -92,7 +93,7 @@ export default function ProcessDetailPage() {
   const tab = readTab(searchParams.get("tab"), tabIds);
 
   return (
-    <section className="mx-auto max-w-7xl px-6 py-8">
+    <PageContainer>
       <Button
         asChild
         variant="ghost"
@@ -106,7 +107,7 @@ export default function ProcessDetailPage() {
       </Button>
       <header className="space-y-3 pb-6">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">{log.name}</h1>
+          <PageTitle>{log.name}</PageTitle>
           <FormatBadge format={log.source_format} />
           {objectCentric && (
             <Badge variant="outline" className="border-0 bg-primary/10 text-[10px] uppercase tracking-wide text-primary">
@@ -212,6 +213,6 @@ export default function ProcessDetailPage() {
           <SettingsTab logId={logId} log={log} />
         </TabsContent>
       </Tabs>
-    </section>
+    </PageContainer>
   );
 }

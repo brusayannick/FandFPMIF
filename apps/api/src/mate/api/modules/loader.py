@@ -264,6 +264,13 @@ class _UserScopedRegistry:
     def installed_modules(self) -> list[str]:
         return sorted(m for m in self._registry.installed_modules() if m in self._allowed)
 
+    def visible_capabilities(self) -> list[str]:
+        return [
+            c
+            for c in self._registry.capability_names()
+            if (owner := self._registry.owner_of(c)) is not None and owner in self._allowed
+        ]
+
     async def call(self, capability: str, **kwargs: Any) -> Any:
         owner = self._registry.owner_of(capability)
         if owner is None or owner not in self._allowed:

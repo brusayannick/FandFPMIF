@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Progress } from "@/components/ui/progress";
-import { AdminTabs } from "@/components/admin/admin-tabs";
 import { rawFetch } from "@/lib/api";
 
 type Mode = "local" | "s3";
@@ -193,17 +192,7 @@ export default function AdminStoragePage() {
   const isAdmin = config?.is_admin === true;
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 p-6">
-      <div className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight">Storage</h1>
-        <p className="text-sm text-muted-foreground">
-          Choose where event logs and module outputs are durably stored — local
-          disk (dev/test) or a connected S3 bucket (production).
-        </p>
-      </div>
-
-      <AdminTabs />
-
+    <div className="space-y-4">
       {loading ? (
         <p className="text-xs text-muted-foreground">Checking access…</p>
       ) : !isAdmin ? (

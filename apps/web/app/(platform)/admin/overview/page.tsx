@@ -14,15 +14,17 @@ import {
 import {
   Activity,
   Briefcase,
+  CalendarDays,
+  Clock,
   Database,
   FileStack,
+  Globe,
   MousePointerClick,
   ShieldAlert,
   Users,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AdminTabs } from "@/components/admin/admin-tabs";
 import { rawFetch } from "@/lib/api";
 import { formatNumber } from "@/lib/format";
 
@@ -48,6 +50,9 @@ interface Kpis {
   analytics_events: number;
   sessions_total: number;
   active_users_30d: number;
+  events_per_session: number;
+  bounce_rate_pct: number;
+  avg_session_seconds: number;
 }
 interface Overview {
   days: number;
@@ -62,6 +67,9 @@ interface Overview {
   job_failures_by_day: DayCount[];
   sessions_by_day: DayCount[];
   top_event_types: LabelCount[];
+  top_paths: LabelCount[];
+  activity_by_hour: LabelCount[];
+  activity_by_weekday: LabelCount[];
 }
 
 const RANGES = [
@@ -73,6 +81,17 @@ const RANGES = [
 /** "2026-06-17" → "06-17" for compact day-series axis ticks. */
 function shortDay(day: string): string {
   return day.length >= 10 ? day.slice(5) : day;
+}
+
+/** Seconds → compact "Xh Ym" / "Xm Ys" / "Xs" for the avg-session KPI. */
+function formatDuration(seconds: number): string {
+  if (seconds <= 0) return "—";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.round(seconds % 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
 export default function AdminOverviewPage() {
@@ -106,17 +125,7 @@ export default function AdminOverviewPage() {
   }, [days]);
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4 p-6">
-      <div className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight">Admin overview</h1>
-        <p className="text-sm text-muted-foreground">
-          Platform-wide activity across every user — accounts, imported logs, job
-          health, and usage.
-        </p>
-      </div>
-
-      <AdminTabs />
-
+    <div className="space-y-4">
       {state === "forbidden" ? (
         <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
@@ -156,6 +165,9 @@ export default function AdminOverviewPage() {
             <Kpi label="Cases" value={data.kpis.cases_total} />
             <Kpi label="Active users (30d)" value={data.kpis.active_users_30d} />
             <Kpi label="Sessions" value={data.kpis.sessions_total} />
+            <Kpi label="Events / session" value={data.kpis.events_per_session} />
+            <Kpi label="Bounce rate" value={`${data.kpis.bounce_rate_pct}%`} />
+            <Kpi label="Avg. session" value={formatDuration(data.kpis.avg_session_seconds)} />
           </div>
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -224,6 +236,24 @@ export default function AdminOverviewPage() {
             >
               <LabelBarChart data={data.top_event_types} horizontal />
             </ChartCard>
+
+            <ChartCard title="Top pages" icon={Globe} empty={data.top_paths.length === 0}>
+              <LabelBarChart data={data.top_paths} horizontal />
+            </ChartCard>
+            <ChartCard
+              title="Activity by hour (UTC)"
+              icon={Clock}
+              empty={data.activity_by_hour.length === 0}
+            >
+              <LabelBarChart data={data.activity_by_hour} />
+            </ChartCard>
+            <ChartCard
+              title="Activity by weekday"
+              icon={CalendarDays}
+              empty={data.activity_by_weekday.every((d) => d.count === 0)}
+            >
+              <LabelBarChart data={data.activity_by_weekday} />
+            </ChartCard>
           </div>
         </>
       )}
@@ -231,11 +261,13 @@ export default function AdminOverviewPage() {
   );
 }
 
-function Kpi({ label, value }: { label: string; value: number }) {
+function Kpi({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-md border border-border bg-card px-3 py-2">
       <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="text-xl font-semibold">{formatNumber(value)}</div>
+      <div className="text-xl font-semibold">
+        {typeof value === "number" ? formatNumber(value) : value}
+      </div>
     </div>
   );
 }

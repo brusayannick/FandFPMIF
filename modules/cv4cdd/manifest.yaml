@@ -29,8 +29,12 @@ consumes:
 
 dependencies:
   python:
-    # Pin to 3.12: tensorflow ships no cp313 wheels, so an open-ended ">=3.12"
-    # makes uv pick the newest installed Python (3.13) and the dep install fails.
+    # tensorflow ships no cp313 wheels, so this module genuinely cannot run on
+    # Python >= 3.13. The platform now pins in_process venvs to its own
+    # interpreter, so this is no longer needed to stop uv drift — it's a real
+    # constraint the loader validates: on a platform Python outside this range
+    # the module fails fast with a clear message (relax or go subprocess)
+    # instead of a cryptic tensorflow wheel-build error.
     requires-python: ">=3.12,<3.13"
     packages:
       # Keep this list minimal — every extra package risks dragging a numpy

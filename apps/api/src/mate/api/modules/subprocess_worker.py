@@ -23,7 +23,6 @@ import asyncio
 import importlib.util
 import inspect
 import json
-import os
 import sys
 import traceback
 from pathlib import Path
@@ -83,7 +82,18 @@ def _collect_handlers(instance) -> list[dict[str, Any]]:
         if event_sub is not None:
             entry["on_event"] = {"topic": event_sub.topic}
         if job_spec is not None:
-            entry["job"] = True
+            # Serialize the static JobSpec fields so the host can rebuild it.
+            # Callable title/subtitle can't cross the socket — leave them null
+            # so the host falls back to a static label (loader's
+            # `_resolve_dynamic`).
+            entry["job"] = {
+                "progress": job_spec.progress,
+                "priority": job_spec.priority,
+                "cancellable": job_spec.cancellable,
+                "result_url": job_spec.result_url,
+                "title": job_spec.title if isinstance(job_spec.title, str) else None,
+                "subtitle": job_spec.subtitle if isinstance(job_spec.subtitle, str) else None,
+            }
         out.append(entry)
     return out
 
@@ -91,11 +101,9 @@ def _collect_handlers(instance) -> list[dict[str, Any]]:
 class _ProxyContext:
     """ctx.* surface forwarded to the host via JSON-RPC.
 
-    Only the methods listed in the SDK's `ModuleContext` Protocols are
-    supported. DataFrame views (`pandas`, `polars`, `pm4py`) raise a clear
-    error because shipping a DataFrame over the socket would require either
-    Parquet roundtrip or Arrow IPC — a follow-up worth doing once a real
-    subprocess module needs it.
+    DataFrame views (`pandas`/`polars`/`pm4py`) are materialised by the host to
+    a Parquet file under the shared workdir and loaded here, so heavy
+    process-mining jobs work the same as in_process.
     """
 
     def __init__(self, conn: "WireConnection", token: str, ctx_meta: dict[str, Any]):
@@ -106,7 +114,7 @@ class _ProxyContext:
         self.workdir = Path(ctx_meta.get("workdir", "/tmp"))
         self.event_log = _EventLogProxy(conn, token)
         self.bus = _BusProxy(conn, token)
-        self.registry = _RegistryProxy(conn, token)
+        self.registry = _RegistryProxy(conn, token, ctx_meta.get("capabilities"))
         self.cache = _CacheProxy(conn, token)
         self.config = _ConfigProxy(ctx_meta.get("config", {}))
         self.progress = _ProgressProxy(conn, token)
@@ -131,14 +139,43 @@ class _EventLogProxy:
         )
         return [tuple(row) for row in result]
 
-    async def pandas(self):
-        raise RuntimeError(
-            "DataFrame views (pandas/polars/pm4py) over subprocess isolation are not "
-            "supported yet — use `await event_log.duckdb_fetch(sql)` instead."
+    async def _materialize(self) -> str:
+        """Ask the host to write the (filter-applied) log to a Parquet under the
+        shared workdir; returns the path. Host and worker share the filesystem."""
+        return await self._conn.send_request(
+            "ctx.event_log.materialize", {"ctx_token": self._token}
         )
 
-    polars = pandas
-    pm4py = pandas
+    async def pandas(self):
+        import pandas as pd
+
+        path = await self._materialize()
+        return await asyncio.to_thread(pd.read_parquet, path)
+
+    async def polars(self):
+        import polars as pl
+
+        path = await self._materialize()
+        return await asyncio.to_thread(pl.read_parquet, path)
+
+    async def pm4py(self):
+        import pandas as pd
+
+        path = await self._materialize()
+
+        def _convert():
+            import pm4py.utils as pmu
+
+            df = pd.read_parquet(path).rename(
+                columns={
+                    "case_id": "case:concept:name",
+                    "activity": "concept:name",
+                    "timestamp": "time:timestamp",
+                }
+            )
+            return pmu.format_dataframe(df)
+
+        return await asyncio.to_thread(_convert)
 
 
 class _BusProxy:
@@ -157,20 +194,16 @@ class _BusProxy:
 
 
 class _RegistryProxy:
-    def __init__(self, conn: "WireConnection", token: str):
+    def __init__(self, conn: "WireConnection", token: str, capabilities: list[str] | None = None):
         self._conn = conn
         self._token = token
+        # The host snapshots the available capability names into ctx_meta at
+        # call time so `has()` (sync per the SDK Protocol) answers locally
+        # without a round-trip.
+        self._caps = frozenset(capabilities or ())
 
     def has(self, cap: str) -> bool:
-        # Synchronous from the SDK's perspective. The worker can do this
-        # because there's no event loop blocking here — we synchronously
-        # await a Future tied to the connection. For simplicity in this
-        # MVP we route through the async path and document the limitation.
-        raise RuntimeError(
-            "ctx.registry.has() is sync — call asyncio.run_coroutine_threadsafe "
-            "via the host bridge instead. (Subprocess registry support is partial; "
-            "use async paths from module code.)"
-        )
+        return cap in self._caps
 
     async def call(self, capability: str, **kwargs: Any) -> Any:
         return await self._conn.send_request(
@@ -202,9 +235,7 @@ class _CacheProxy:
         )
 
     async def delete(self, key: str) -> None:
-        await self._conn.send_request(
-            "ctx.cache.delete", {"ctx_token": self._token, "key": key}
-        )
+        await self._conn.send_request("ctx.cache.delete", {"ctx_token": self._token, "key": key})
 
 
 class _ConfigProxy:
@@ -367,12 +398,13 @@ async def _amain(socket_path: str, module_folder: str) -> int:
         attr = params["handler"]
         ctx_token = params["ctx_token"]
         ctx_meta = params.get("ctx", {})
+        args = params.get("args", []) or []
         kwargs = params.get("kwargs", {}) or {}
         bound = getattr(instance, attr)
         ctx = _ProxyContext(conn, ctx_token, ctx_meta)
         if inspect.iscoroutinefunction(bound):
-            return await bound(ctx, **kwargs)
-        return await asyncio.to_thread(bound, ctx, **kwargs)
+            return await bound(ctx, *args, **kwargs)
+        return await asyncio.to_thread(bound, ctx, *args, **kwargs)
 
     conn.register("call", handle_call)
     conn.register("shutdown", lambda _params: True)

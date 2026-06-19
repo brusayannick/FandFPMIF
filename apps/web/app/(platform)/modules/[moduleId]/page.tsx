@@ -30,6 +30,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { PageContainer } from "@/components/page";
 import { ModuleLogsTail } from "@/components/settings/module-logs-tail";
 import { ModelStoreCard } from "@/components/settings/model-store-card";
 import {
@@ -227,10 +228,10 @@ export default function ModuleDetailPage() {
 
   if (manifestLoading) {
     return (
-      <div className="space-y-3">
+      <PageContainer className="space-y-3">
         <Skeleton className="h-6 w-48" />
         <Skeleton className="h-32 w-full" />
-      </div>
+      </PageContainer>
     );
   }
   if (manifestError || !m) {
@@ -246,7 +247,7 @@ export default function ModuleDetailPage() {
   const cfgLoading = cfg === undefined;
 
   return (
-    <div className="space-y-4">
+    <PageContainer className="space-y-4">
       <Button asChild variant="ghost" size="sm" className="cursor-pointer -ml-2 gap-1">
         <Link href="/modules">
           <ArrowLeft className="h-3.5 w-3.5" /> Back to modules
@@ -495,7 +496,7 @@ export default function ModuleDetailPage() {
           </AlertDialog>
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }
 

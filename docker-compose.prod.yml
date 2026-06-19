@@ -79,9 +79,10 @@ services:
       # Internal (container -> container) fetch of the signing keys. Note the
       # /auth prefix — it must match KC_HTTP_RELATIVE_PATH or every token fails.
       KEYCLOAK_JWKS_URL: http://keycloak:8080/auth/realms/flows-funds/protocol/openid-connect/certs
-    # Replace the base volume list to drop the macOS-only cv4cdd model mount.
-    # To use cv4cdd on the VM, copy the model onto the host and add a mount
-    # here, e.g. - /srv/flows-funds/cv4cdd_model:/srv/flows-funds/cv4cdd_model:ro
+    # Stated explicitly for the VM. The CV4CDD model is uploaded at runtime into
+    # modules/cv4cdd/model/ (covered by the ./modules mount). Only add a separate
+    # host mount here if you keep the model outside the repo, e.g.
+    #   - /srv/flows-funds/cv4cdd_model:/srv/flows-funds/cv4cdd_model:ro
     volumes: !override
       - ./data:/app/data
       - ./modules:/app/modules

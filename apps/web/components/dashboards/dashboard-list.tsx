@@ -29,6 +29,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  PageContainer,
+  PageHeader,
+  PageTitle,
+  PageDescription,
+  PageActions,
+} from "@/components/page";
 import { cn } from "@/lib/cn";
 import { formatRelative } from "@/lib/format";
 import {
@@ -132,15 +139,15 @@ export function DashboardList() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Dashboards</h1>
-          <p className="text-sm text-muted-foreground">
+    <PageContainer>
+      <PageHeader>
+        <div className="space-y-1">
+          <PageTitle>Dashboards</PageTitle>
+          <PageDescription>
             Compose cards from any module into a saved, reopenable board.
-          </p>
+          </PageDescription>
         </div>
-        <div className="flex items-center gap-2">
+        <PageActions>
           <input
             ref={fileRef}
             type="file"
@@ -160,8 +167,8 @@ export function DashboardList() {
             <Plus className="mr-1.5 h-4 w-4" />
             New dashboard
           </Button>
-        </div>
-      </div>
+        </PageActions>
+      </PageHeader>
 
       {isLoading ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -303,6 +310,6 @@ export function DashboardList() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageContainer>
   );
 }

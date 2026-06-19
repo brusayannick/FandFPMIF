@@ -75,14 +75,14 @@ consumes:                           # bus topics / capabilities you depend on
 
 dependencies:
   python:
-    requires-python: ">=3.12"
+    requires-python: ">=3.12"       # validation gate for in_process (see §8); selector for subprocess
     packages:                       # private to this module — installed into .venv
       - "scikit-learn>=1.5"
     inherit:                        # reuse the platform's already-installed copy
       - pm4py
       - pandas
       - duckdb
-    isolation: in_process           # in_process (default) | subprocess
+    isolation: in_process           # in_process (default, ABI-locked to platform Python) | subprocess
   npm:
     - "d3-sankey@^0.12"
 
@@ -388,9 +388,12 @@ useEvents(["my_module.kpi.computed"], (env) => { ... });
 
 The platform creates and owns `modules/<folder>/.venv`:
 
-- On every boot, the platform hashes your `dependencies` block. If unchanged, it skips `uv sync` — boots are near-instant.
+- On every boot, the platform hashes your `dependencies` block. If unchanged, it skips reinstalling — boots are near-instant. (For `in_process` modules the hash also folds in the platform's Python version, so a venv built under a different Python — e.g. a host-mode 3.13 venv bind-mounted into a 3.12 container — rebuilds automatically instead of crashing on import.)
 - Your code resolves imports against `.venv/site-packages` first, then stdlib, then the platform's `inherit` set, then the SDK. Other modules' dependencies are not visible.
-- If your manifest sets `isolation: subprocess`, the platform spawns a long-lived worker process from your venv and proxies handler calls over a Unix-socket JSON-RPC. The `ModuleContext` interface is unchanged. Use this only when you have a hard native-lib conflict (e.g. `numpy 1.x` while the platform ships `numpy 2.x`); it adds 5–50 ms per call.
+
+**Python version (important).** `in_process` modules (the default) are imported into the *platform's own interpreter*, so their venv is always built on **exactly that Python** — currently 3.12. Your manifest's `requires-python` is a **validation gate**, not an interpreter selector: if the platform's Python doesn't satisfy it, the module fails to load with a clear, actionable message. You therefore **never hand-pin `<3.13`** to dodge ABI mismatches — the platform pins the interpreter for you. Declare `requires-python` only when your dependencies genuinely can't run on a newer Python (e.g. a C-extension with no wheels for it); the gate then turns that into a fast, clear failure instead of a cryptic wheel-build error.
+
+If you genuinely need a **different Python version** than the platform, set `isolation: subprocess`. The platform spawns a long-lived worker from your venv on its own interpreter (selected by `requires-python`; uv picks or auto-downloads it) and proxies handler calls over a Unix-socket JSON-RPC. The `ModuleContext` interface is unchanged — `@route`, `@job`, and `@on_event` all work, and `event_log.pandas()/polars()/pm4py()` stream the log to your process via a Parquet handoff. Caveats: each call adds 5–50 ms; `inherit` names are installed into your own venv (no shared interpreter to inherit from across a process boundary); job cancellation is best-effort; dynamic `@job(title=...)` callables fall back to a static label. Use subprocess only when you actually need a different Python or have a hard native-lib conflict (e.g. `numpy 1.x` while the platform ships `numpy 2.x`).
 
 ### npm
 

@@ -20,6 +20,7 @@
 import { randomBytes } from "node:crypto";
 import NextAuth, { type DefaultSession } from "next-auth";
 import KeycloakProvider from "next-auth/providers/keycloak";
+import CredentialsProvider from "next-auth/providers/credentials";
 import type { JWT, JWTEncodeParams, JWTDecodeParams } from "next-auth/jwt";
 import * as sessionStore from "@/lib/session-store";
 
@@ -81,6 +82,23 @@ const KEYCLOAK_CLIENT_SECRET = process.env.KEYCLOAK_CLIENT_SECRET ?? "";
 // straight to that IdP. Leave empty to show Keycloak's local login form (also
 // the break-glass path for the admin@flows-funds.local account).
 const KEYCLOAK_IDP_HINT = process.env.KEYCLOAK_IDP_HINT ?? "";
+
+// Demo/dev login bypass. When DEMO_MODE is truthy we add a credentials provider
+// ("demo") that signs a fixed demo user in with no form and no Keycloak round
+// trip, minting DEMO_ACCESS_TOKEN as the session access token. The API accepts
+// that exact sentinel as the demo user when its own DEMO_MODE is on (see
+// auth/dependencies.DEMO_ACCESS_TOKEN). Both flags must be set, and NEITHER
+// belongs in a real production deployment.
+export const DEMO_MODE = ["1", "true", "yes", "on"].includes(
+  (process.env.DEMO_MODE ?? "").toLowerCase(),
+);
+// When DEMO_ADMIN is truthy, the demo session is flagged isAdmin so admin-only UI
+// shows. The API must also have DEMO_ADMIN on to actually authorise /admin/*.
+export const DEMO_ADMIN = ["1", "true", "yes", "on"].includes(
+  (process.env.DEMO_ADMIN ?? "").toLowerCase(),
+);
+const DEMO_ACCESS_TOKEN = "demo-access-token";
+const DEMO_USER = { id: "demo-user", name: "Demo User", email: "demo@mate.local" };
 
 // Single-flight guard: several modules (`lib/api`, `lib/ws`, the analytics
 // client) each call `getSession()` independently, so after the access token
@@ -182,18 +200,43 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           }
         : {}),
     }),
+    // Demo bypass — only registered when DEMO_MODE is on. No credentials are
+    // checked; it always returns the same fixed demo user.
+    ...(DEMO_MODE
+      ? [
+          CredentialsProvider({
+            id: "demo",
+            name: "Demo",
+            credentials: {},
+            authorize: () => DEMO_USER,
+          }),
+        ]
+      : []),
   ],
   session: { strategy: "jwt", maxAge: SESSION_MAX_AGE },
   ...(jwtOverride ? { jwt: jwtOverride } : {}),
   callbacks: {
     async jwt({ token, account }) {
       if (account) {
+        if (account.provider === "demo") {
+          // Fixed demo session — sentinel token the API maps to the demo user.
+          // No refresh token; keep it valid for the full session lifetime.
+          token.accessToken = DEMO_ACCESS_TOKEN;
+          token.provider = "demo";
+          token.expiresAt = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE;
+          token.refreshToken = undefined;
+          token.error = undefined;
+          return token;
+        }
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
         token.expiresAt = account.expires_at;
         token.provider = account.provider;
         return token;
       }
+      // The demo session is non-expiring and has no refresh token — never try
+      // to rotate it (that would fail and flag RefreshAccessTokenError).
+      if (token.provider === "demo") return token;
       const now = Math.floor(Date.now() / 1000);
       if (token.expiresAt && now < token.expiresAt - 30) {
         return token;
@@ -205,6 +248,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       session.error = token.error;
       session.provider = token.provider;
       if (token.sub) session.user.id = token.sub;
+      // The demo sentinel token isn't a JWT, so roles can't be decoded from it —
+      // derive them from DEMO_ADMIN instead (mirrors the API's demo_admin flag).
+      if (token.provider === "demo") {
+        session.user.roles = DEMO_ADMIN ? ["admin"] : [];
+        session.user.isAdmin = DEMO_ADMIN;
+        return session;
+      }
       // Decode roles from the current access token (re-decoded each read so a
       // rotated token's roles stay correct). Drives only UI gating.
       const roles = rolesFromAccessToken(token.accessToken);

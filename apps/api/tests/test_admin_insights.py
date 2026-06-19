@@ -60,6 +60,9 @@ async def test_overview_shape(admin_client: AsyncClient) -> None:
     assert body["days"] == 30
     # The seeded test user is always present.
     assert body["kpis"]["user_count"] >= 1
+    # Engagement KPIs are always present (0 when there are no sessions).
+    for k in ("events_per_session", "bounce_rate_pct", "avg_session_seconds"):
+        assert k in body["kpis"], k
     # Every series is a list, present even when empty.
     for key in (
         "signups_by_day",
@@ -72,8 +75,13 @@ async def test_overview_shape(admin_client: AsyncClient) -> None:
         "job_failures_by_day",
         "sessions_by_day",
         "top_event_types",
+        "top_paths",
+        "activity_by_hour",
+        "activity_by_weekday",
     ):
         assert isinstance(body[key], list), key
+    # The weekday series always carries the full Mon-Sun set.
+    assert len(body["activity_by_weekday"]) == 7
 
 
 @pytest.mark.asyncio
@@ -117,6 +125,92 @@ async def test_event_logs_lists_with_owner(admin_client: AsyncClient) -> None:
         by_owner = await admin_client.get(f"/api/v1/admin/insights/event-logs?q={TEST_USER_EMAIL}")
         assert any(r["id"] == log_id for r in by_owner.json()["items"])
     finally:
+        async with sm() as session:
+            await session.execute(delete(EventLog).where(EventLog.id == log_id))
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_log_download_requires_admin(client: AsyncClient) -> None:
+    # The admin gate resolves before the handler, so a plain user gets 403 even
+    # for a non-existent log id.
+    resp = await client.get(f"/api/v1/admin/insights/event-logs/{uuid.uuid4()}/download")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_log_download_unknown_id(admin_client: AsyncClient) -> None:
+    resp = await admin_client.get(f"/api/v1/admin/insights/event-logs/{uuid.uuid4()}/download")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_log_download_missing_original(admin_client: AsyncClient) -> None:
+    from sqlalchemy import delete
+
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.db.models import EventLog
+
+    log_id = str(uuid.uuid4())
+    sm = get_sessionmaker()
+    async with sm() as session:
+        session.add(
+            EventLog(
+                id=log_id,
+                user_id=TEST_USER_ID,
+                name="no-original",
+                status="ready",
+                source_format="csv",
+                created_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+        await session.commit()
+    try:
+        # Row exists but no original.{ext} on disk → 409.
+        resp = await admin_client.get(f"/api/v1/admin/insights/event-logs/{log_id}/download")
+        assert resp.status_code == 409
+    finally:
+        async with sm() as session:
+            await session.execute(delete(EventLog).where(EventLog.id == log_id))
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_log_download_returns_original(admin_client: AsyncClient) -> None:
+    from sqlalchemy import delete
+
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.db.models import EventLog
+    from mate.api.ingest.storage import log_paths
+
+    log_id = str(uuid.uuid4())
+    payload = b"case,activity,timestamp\n1,A,2026-01-01\n"
+    sm = get_sessionmaker()
+    async with sm() as session:
+        session.add(
+            EventLog(
+                id=log_id,
+                user_id=TEST_USER_ID,
+                name="with-original",
+                status="ready",
+                source_format="csv",
+                source_filename="orders.csv",
+                created_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+        await session.commit()
+
+    paths = log_paths(log_id, TEST_USER_ID)
+    paths.ensure()
+    paths.original_for("csv").write_bytes(payload)
+    try:
+        resp = await admin_client.get(f"/api/v1/admin/insights/event-logs/{log_id}/download")
+        assert resp.status_code == 200
+        assert resp.content == payload
+        # Content-Disposition carries the original upload filename.
+        assert "orders.csv" in resp.headers["content-disposition"]
+    finally:
+        paths.remove()
         async with sm() as session:
             await session.execute(delete(EventLog).where(EventLog.id == log_id))
             await session.commit()

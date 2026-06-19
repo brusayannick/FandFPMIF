@@ -1,4 +1,5 @@
 import { SettingsTabs } from "@/components/settings/settings-tabs";
+import { PageContainer, PageTitle, PageDescription } from "@/components/page";
 
 export default function SettingsLayout({
   children,
@@ -6,15 +7,15 @@ export default function SettingsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <section className="mx-auto max-w-5xl px-6 py-8">
-      <header className="space-y-2 pb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageContainer>
+      <header className="space-y-1 pb-6">
+        <PageTitle>Settings</PageTitle>
+        <PageDescription>
           Local-first preferences. Changes persist to SQLite and apply live.
-        </p>
+        </PageDescription>
       </header>
       <SettingsTabs />
       <div className="pt-6">{children}</div>
-    </section>
+    </PageContainer>
   );
 }

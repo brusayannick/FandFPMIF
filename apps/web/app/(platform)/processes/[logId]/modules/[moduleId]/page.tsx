@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
+import { PageContainer, PageTitle } from "@/components/page";
 import { useEventLog, useModules } from "@/lib/queries";
 import { getModulePanel } from "@/lib/module-panels";
 
@@ -23,11 +24,11 @@ export default function ModulePage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-7xl px-6 py-8 space-y-4">
+      <PageContainer className="space-y-4">
         <Skeleton className="h-8 w-72" />
         <Skeleton className="h-4 w-96" />
         <Skeleton className="h-96 w-full" />
-      </div>
+      </PageContainer>
     );
   }
   if (isError) {
@@ -55,7 +56,7 @@ export default function ModulePage() {
   }
 
   return (
-    <section className="mx-auto max-w-7xl px-6 py-8">
+    <PageContainer>
       <header className="flex items-start gap-3 pb-6">
         <div className="space-y-1">
           <Button asChild variant="ghost" size="sm" className="cursor-pointer -ml-2 gap-1">
@@ -65,7 +66,7 @@ export default function ModulePage() {
             </Link>
           </Button>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">{mod.name}</h1>
+            <PageTitle>{mod.name}</PageTitle>
             <Badge variant="outline" className="border-0 bg-muted text-[10px] uppercase">
               {mod.category.replace("_", " ")}
             </Badge>
@@ -77,7 +78,7 @@ export default function ModulePage() {
       </header>
 
       <ModulePanelSlot logId={logId} moduleId={mod.id} hasFrontend={mod.has_frontend} />
-    </section>
+    </PageContainer>
   );
 }
 

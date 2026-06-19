@@ -3,71 +3,49 @@
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { FolderPlus, Inbox, Plug, Plus, RefreshCw, Upload } from "lucide-react";
+import { FolderPlus, Inbox, Plus, RefreshCw, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { ButtonGroup } from "@/components/ui/button-group";
-import { Badge } from "@/components/ui/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  PageContainer,
+  PageHeader,
+  PageTitle,
+  PageDescription,
+  PageActions,
+} from "@/components/page";
 import { EmptyState } from "@/components/empty-state";
 import {
   NewFolderDialog,
   ProcessesTable,
 } from "@/components/processes/processes-table";
 import { useEventLogs } from "@/lib/queries";
+import { cn } from "@/lib/cn";
 import type { LogModel } from "@/lib/api-types";
 
 export default function ProcessesPage() {
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   return (
-    <section className="mx-auto max-w-7xl px-6 py-8">
+    <PageContainer>
       <Header onNewFolder={() => setNewFolderOpen(true)} />
       <Suspense fallback={<ListSkeleton />}>
         <ProcessList />
       </Suspense>
       <NewFolderDialog open={newFolderOpen} onOpenChange={setNewFolderOpen} />
-    </section>
+    </PageContainer>
   );
 }
 
 function Header({ onNewFolder }: { onNewFolder: () => void }) {
   return (
-    <header className="flex flex-wrap items-start justify-between gap-4 pb-6">
+    <PageHeader>
       <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Processes</h1>
-        <p className="text-sm text-muted-foreground">
+        <PageTitle>Processes</PageTitle>
+        <PageDescription>
           Imported event logs. Drop a XES, XES.gz, or CSV here to start mining.
-        </p>
+        </PageDescription>
       </div>
-      <div className="flex items-center gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span tabIndex={0}>
-              <Button
-                variant="outline"
-                className="gap-2 cursor-not-allowed"
-                disabled
-                aria-disabled
-              >
-                <Plug className="h-4 w-4" />
-                Connect to system
-                <Badge variant="secondary" className="ml-1 text-[10px]">
-                  Coming soon
-                </Badge>
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="max-w-xs">
-            Connect directly to ERP / CRM systems (SAP, Salesforce, Dynamics, …)
-            to stream events without manual export.
-          </TooltipContent>
-        </Tooltip>
-
+      <PageActions>
         <Button variant="outline" asChild className="gap-2 cursor-pointer">
           <Link href="/processes/watched">
             <RefreshCw className="h-4 w-4" />
@@ -86,8 +64,8 @@ function Header({ onNewFolder }: { onNewFolder: () => void }) {
             Import event log
           </Link>
         </Button>
-      </div>
-    </header>
+      </PageActions>
+    </PageHeader>
   );
 }
 
@@ -154,21 +132,26 @@ function ProcessList() {
 
   return (
     <div className="space-y-3">
-      <ButtonGroup>
+      <div className="inline-flex w-fit items-center gap-1 rounded-lg border border-border bg-muted/50 p-1">
         {MODEL_FILTERS.map(({ value, label }) => (
           <Button
             key={value}
             type="button"
             size="sm"
-            variant={model === value ? "default" : "outline"}
+            variant="ghost"
             aria-pressed={model === value}
-            className="cursor-pointer"
+            className={cn(
+              "cursor-pointer border-0 shadow-none",
+              model === value
+                ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground"
+                : "text-muted-foreground hover:bg-transparent hover:text-foreground",
+            )}
             onClick={() => setModel(value)}
           >
             {label}
           </Button>
         ))}
-      </ButtonGroup>
+      </div>
       {rows.length === 0 ? (
         <EmptyState
           icon={Inbox}

@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useCreateFolder,
   useImportEventLog,
@@ -204,49 +205,45 @@ function autoMap(headers: string[]): Partial<CsvMapping> {
   return out;
 }
 
-type ImportTab = "file" | "url" | "folder" | "watch";
-
 interface ImportFormProps {
   onSuccess?: (logId: string) => void;
 }
 
 export function ImportForm({ onSuccess }: ImportFormProps = {}) {
-  const [tab, setTab] = useState<ImportTab>("file");
-
-  const tabBtn = (
-    key: ImportTab,
-    label: string,
-    Icon: typeof FileUp,
-  ) => (
-    <button
-      key={key}
-      onClick={() => setTab(key)}
-      className={cn(
-        "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer",
-        tab === key
-          ? "bg-background shadow-sm text-foreground"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      <Icon className="h-3.5 w-3.5" />
-      {label}
-    </button>
-  );
-
   return (
-    <div className="space-y-6">
-      <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 w-fit">
-        {tabBtn("file", "Upload file", FileUp)}
-        {tabBtn("url", "From URL", Link2)}
-        {tabBtn("folder", "Upload folder", FolderOpen)}
-        {tabBtn("watch", "Watched folder", RefreshCw)}
-      </div>
+    <Tabs defaultValue="file" className="space-y-6">
+      <TabsList>
+        <TabsTrigger value="file" className="cursor-pointer">
+          <FileUp className="mr-1.5 h-3.5 w-3.5" />
+          Upload file
+        </TabsTrigger>
+        <TabsTrigger value="url" className="cursor-pointer">
+          <Link2 className="mr-1.5 h-3.5 w-3.5" />
+          From URL
+        </TabsTrigger>
+        <TabsTrigger value="folder" className="cursor-pointer">
+          <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+          Upload folder
+        </TabsTrigger>
+        <TabsTrigger value="watch" className="cursor-pointer">
+          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+          Watched folder
+        </TabsTrigger>
+      </TabsList>
 
-      {tab === "file" && <FileImportForm onSuccess={onSuccess} />}
-      {tab === "url" && <UrlImportForm onSuccess={onSuccess} />}
-      {tab === "folder" && <FolderImportForm onSuccess={onSuccess} />}
-      {tab === "watch" && <WatchImportForm />}
-    </div>
+      <TabsContent value="file">
+        <FileImportForm onSuccess={onSuccess} />
+      </TabsContent>
+      <TabsContent value="url">
+        <UrlImportForm onSuccess={onSuccess} />
+      </TabsContent>
+      <TabsContent value="folder">
+        <FolderImportForm onSuccess={onSuccess} />
+      </TabsContent>
+      <TabsContent value="watch">
+        <WatchImportForm />
+      </TabsContent>
+    </Tabs>
   );
 }
 

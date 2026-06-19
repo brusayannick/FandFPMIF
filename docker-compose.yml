@@ -66,9 +66,10 @@ services:
       # Module folder is the platform's extension point — exposed read/write so
       # the install flow can write modules/<id>/ into the host filesystem.
       - ./modules:/app/modules
-      # CV4CDD model — mounted at the same absolute path so the model_path
-      # setting in Settings → Modules → Temporal Dynamics works unchanged.
-      - /Users/yannickbrusa/cv4cdd_model:/Users/yannickbrusa/cv4cdd_model:ro
+      # The CV4CDD model (Temporal Dynamics module) is uploaded at runtime into
+      # modules/cv4cdd/model/, which the ./modules mount above already exposes at
+      # /app/modules/cv4cdd/model — no separate, host-specific mount needed. Set
+      # the module's model_path to /app/modules/cv4cdd/model/<model-dir>.
     environment:
       DATA_DIR: /app/data
       MODULES_DIR: /app/modules

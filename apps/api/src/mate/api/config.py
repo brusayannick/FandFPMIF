@@ -46,7 +46,9 @@ class Settings(BaseSettings):
         description="USER_TRACKING_ONBOARDING — tracking default/policy (force|on|off).",
     )
 
-    # Job queue — minimal config for phase 3; the full set lands in phase 4.
+    # Job queue. ``worker_concurrency`` is the boot default for the asyncio
+    # worker pool; an admin can change it live at Settings → General → Jobs
+    # (persisted in ``system_settings`` and re-applied over this default at boot).
     worker_concurrency: int = Field(default=2, ge=1, le=8)
     progress_persist_every: int = Field(
         default=1000,
@@ -76,6 +78,25 @@ class Settings(BaseSettings):
         description="Expected `aud` claim on access tokens.",
     )
     keycloak_jwks_ttl_seconds: int = Field(default=3600, ge=60)
+
+    # Demo/dev login bypass. When true, a request whose bearer token equals the
+    # demo sentinel (see auth/dependencies.DEMO_ACCESS_TOKEN) is resolved to a
+    # fixed, non-admin demo user WITHOUT any Keycloak/JWKS validation. Pairs with
+    # DEMO_MODE on the web app, which auto-signs that demo session in.
+    # NEVER enable in a multi-tenant or public production deployment — it lets
+    # anyone in as the demo user with no credentials.
+    demo_mode: bool = Field(
+        default=False,
+        description="DEMO_MODE — accept the demo sentinel token as a fixed demo user (no auth).",
+    )
+
+    # When DEMO_MODE is on, grant the fixed demo user the realm "admin" role so it
+    # can reach admin-gated routes (/admin/*). No effect unless demo_mode is set.
+    # Pairs with DEMO_ADMIN on the web app, which flags the demo session isAdmin.
+    demo_admin: bool = Field(
+        default=False,
+        description="DEMO_ADMIN — give the demo user the admin role (only when DEMO_MODE is on).",
+    )
 
     # Secret used to derive the Fernet key that encrypts the S3 secret-access-key
     # stored in the metadata DB (Admin → Storage). Must be set and STABLE in

@@ -27,8 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/empty-state";
 import { JobRow } from "@/components/jobs/job-row";
-import { JobGroupHeader } from "@/components/jobs/job-group-header";
-import { JobChildRow } from "@/components/jobs/job-child-row";
+import { JobGroupCard } from "@/components/jobs/job-group-card";
 import { api } from "@/lib/api";
 import {
   selectActiveJobs,
@@ -47,10 +46,9 @@ type Unit =
   | { kind: "group"; group: JobGroup }
   | { kind: "standalone"; job: LiveJob };
 
-/** A flattened, virtualizable row. */
+/** A virtualizable row: a whole import group (collapsible card) or a standalone job. */
 type DisplayRow =
-  | { kind: "group-header"; key: string; group: JobGroup; expanded: boolean }
-  | { kind: "child"; key: string; job: LiveJob }
+  | { kind: "group"; key: string; group: JobGroup; expanded: boolean }
   | { kind: "standalone"; key: string; job: LiveJob };
 
 function unitJobs(u: Unit): LiveJob[] {
@@ -148,25 +146,20 @@ export function JobsDrawer() {
       visible = visible.filter((u) => unitMatches(u, needle));
     }
 
-    // Flatten units → display rows.
+    // Flatten units → display rows. A group is one collapsible card that nests
+    // its child step rows internally, so it stays a single virtualized row.
     const rows: DisplayRow[] = [];
     for (const u of visible) {
       if (u.kind === "standalone") {
         rows.push({ kind: "standalone", key: u.job.id, job: u.job });
         continue;
       }
-      const expanded = !collapsed.has(u.group.parent.id);
       rows.push({
-        kind: "group-header",
+        kind: "group",
         key: u.group.parent.id,
         group: u.group,
-        expanded,
+        expanded: !collapsed.has(u.group.parent.id),
       });
-      if (expanded) {
-        for (const child of u.group.children) {
-          rows.push({ kind: "child", key: child.id, job: child });
-        }
-      }
     }
     return rows;
   }, [groups, standalone, filter, finishedHidden, q, collapsed]);
@@ -281,9 +274,14 @@ function DrawerBody({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
-    // Standalone rows carry a details affordance and run tall; group headers
-    // and child rows are compact. measureElement corrects the estimate.
-    estimateSize: (i) => (rows[i].kind === "standalone" ? 200 : 64),
+    // Standalone rows carry a details affordance and run tall; a collapsed group
+    // is a compact header, an expanded one grows by its nested child rows.
+    // measureElement corrects the estimate.
+    estimateSize: (i) => {
+      const row = rows[i];
+      if (row.kind === "standalone") return 200;
+      return row.expanded ? 76 + row.group.children.length * 44 : 76;
+    },
     overscan: 6,
   });
 
@@ -315,17 +313,15 @@ function DrawerBody({
                 left: 0,
                 width: "100%",
                 transform: `translateY(${v.start}px)`,
-                paddingBottom: row.kind === "child" ? 4 : 8,
+                paddingBottom: 8,
               }}
             >
-              {row.kind === "group-header" ? (
-                <JobGroupHeader
+              {row.kind === "group" ? (
+                <JobGroupCard
                   group={row.group}
                   expanded={row.expanded}
                   onToggle={() => onToggleGroup(row.group.parent.id)}
                 />
-              ) : row.kind === "child" ? (
-                <JobChildRow job={row.job} />
               ) : (
                 <JobRow job={row.job} />
               )}

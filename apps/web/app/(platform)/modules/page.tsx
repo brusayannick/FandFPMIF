@@ -1,13 +1,20 @@
 "use client";
 
+import { useMemo } from "react";
+
 import Link from "next/link";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  PageContainer,
+  PageHeader,
+  PageTitle,
+  PageDescription,
+} from "@/components/page";
 import { EmptyState } from "@/components/empty-state";
 import { FileBox, Plus, RotateCcw } from "lucide-react";
 import { toastError } from "@/lib/toast";
@@ -18,6 +25,41 @@ import {
   useUpdateModuleConfig,
 } from "@/lib/queries";
 import type { ModuleSummary } from "@/lib/api-types";
+
+// Section order on the page; unknown categories are appended alphabetically.
+const CATEGORY_ORDER = ["foundation", "attribute", "external_input", "advanced", "other"];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  foundation: "Foundation",
+  attribute: "Attribute",
+  external_input: "External input",
+  advanced: "Advanced",
+  other: "Other",
+};
+
+function categoryLabel(cat: string): string {
+  return CATEGORY_LABELS[cat] ?? cat.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Group modules by `category`, ordered by `CATEGORY_ORDER` with any unknown
+ *  category appended alphabetically. */
+function groupByCategory(modules: ModuleSummary[]): [string, ModuleSummary[]][] {
+  const map = new Map<string, ModuleSummary[]>();
+  for (const m of modules) {
+    const list = map.get(m.category);
+    if (list) list.push(m);
+    else map.set(m.category, [m]);
+  }
+  const ordered = [...map.keys()].sort((a, b) => {
+    const ia = CATEGORY_ORDER.indexOf(a);
+    const ib = CATEGORY_ORDER.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b);
+  });
+  return ordered.map((cat) => [cat, map.get(cat)!]);
+}
 
 function ModuleActions() {
   const restore = useRestoreDefaults();
@@ -85,11 +127,9 @@ function ModuleCard({ m }: { m: ModuleSummary }) {
               <h3 className="truncate text-sm font-semibold">{m.name}</h3>
               <span className="text-xs text-muted-foreground">{m.version}</span>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <Badge variant="secondary" className="h-5 px-2 py-0 text-[9px] font-medium uppercase tracking-wide">
-                {m.category.replace("_", " ")}
-              </Badge>
-            </div>
+            {m.author && (
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">by {m.author}</p>
+            )}
           </div>
           <Switch
             checked={enabled}
@@ -112,18 +152,19 @@ function ModuleCard({ m }: { m: ModuleSummary }) {
 
 export default function ModulesPage() {
   const { data: modules, isLoading } = useModules(null);
+  const groups = useMemo(() => groupByCategory(modules ?? []), [modules]);
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Modules</h1>
-          <p className="text-sm text-muted-foreground">
+    <PageContainer>
+      <PageHeader>
+        <div className="space-y-1">
+          <PageTitle>Modules</PageTitle>
+          <PageDescription>
             Enable or disable modules, or open one to configure it.
-          </p>
+          </PageDescription>
         </div>
         <ModuleActions />
-      </div>
+      </PageHeader>
 
       {isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -138,12 +179,22 @@ export default function ModulesPage() {
           description="Restore the defaults above, or upload your own .zip / .tar.gz."
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {modules.map((m) => (
-            <ModuleCard key={m.id} m={m} />
+        <div className="space-y-8">
+          {groups.map(([cat, mods]) => (
+            <section key={cat} className="space-y-3">
+              <div className="flex items-baseline gap-2">
+                <h2 className="text-sm font-semibold tracking-tight">{categoryLabel(cat)}</h2>
+                <span className="text-xs text-muted-foreground">{mods.length}</span>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {mods.map((m) => (
+                  <ModuleCard key={m.id} m={m} />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }

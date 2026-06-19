@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Search, ShieldAlert } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, Search, ShieldAlert } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
-import { AdminTabs } from "@/components/admin/admin-tabs";
 import { rawFetch } from "@/lib/api";
+import { downloadBlob } from "@/lib/download";
 import { cn } from "@/lib/cn";
 import { formatNumber, formatRelative } from "@/lib/format";
 
@@ -108,16 +108,7 @@ export default function AdminLogsPage() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4 p-6">
-      <div className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight">Event logs</h1>
-        <p className="text-sm text-muted-foreground">
-          Every event log imported across all users, with its owner. Read-only.
-        </p>
-      </div>
-
-      <AdminTabs />
-
+    <div className="space-y-4">
       {state === "forbidden" ? (
         <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
@@ -186,18 +177,21 @@ export default function AdminLogsPage() {
                     order={order}
                     onClick={toggleSort}
                   />
+                  <th className="px-3 py-2 text-right font-medium">
+                    <span className="sr-only">Download</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {state === "loading" ? (
                   <tr>
-                    <td colSpan={9} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                    <td colSpan={10} className="px-3 py-8 text-center text-xs text-muted-foreground">
                       Loading…
                     </td>
                   </tr>
                 ) : state === "error" ? (
                   <tr>
-                    <td colSpan={9} className="px-3 py-8 text-center text-xs text-destructive">
+                    <td colSpan={10} className="px-3 py-8 text-center text-xs text-destructive">
                       Failed to load event logs.
                     </td>
                   </tr>
@@ -240,11 +234,27 @@ export default function AdminLogsPage() {
                       <td className="px-3 py-2 text-muted-foreground" title={row.imported_at ?? ""}>
                         {formatRelative(row.imported_at)}
                       </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            downloadBlob(
+                              `/api/v1/admin/insights/event-logs/${row.id}/download`,
+                              row.source_format ? `${row.name}.${row.source_format}` : row.name,
+                            )
+                          }
+                          title="Download original upload"
+                          className="inline-flex cursor-pointer items-center rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >
+                          <Download className="h-4 w-4" />
+                          <span className="sr-only">Download {row.name}</span>
+                        </button>
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={9} className="px-3 py-8 text-center text-xs text-muted-foreground">
+                    <td colSpan={10} className="px-3 py-8 text-center text-xs text-muted-foreground">
                       No event logs match.
                     </td>
                   </tr>

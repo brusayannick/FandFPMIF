@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Settings, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useDashboardFilter } from "@/components/dashboards/dashboard-filter";
 import {
@@ -108,23 +107,25 @@ export function DashboardSettingsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5">
+        <div className="divide-y divide-border">
           {/* Grid granularity */}
-          <section className="space-y-2">
-            <Label className="text-xs font-medium text-muted-foreground">Grid</Label>
+          <Section
+            title="Grid snapping"
+            description="How precisely cards snap when you move or resize them."
+          >
             <Select
               value={settings.granularity}
               onValueChange={(v) => onChange({ ...settings, granularity: v as Granularity })}
             >
-              <SelectTrigger className="h-9 text-sm" aria-label="Canvas grid granularity">
+              <SelectTrigger className="h-9 w-full text-sm" aria-label="Canvas grid granularity">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {(Object.keys(GRANULARITY) as Granularity[]).map((g) => (
                   <SelectItem key={g} value={g}>
-                    <span className="flex flex-col">
+                    <span className="flex items-baseline gap-2">
                       <span>{GRANULARITY[g].label}</span>
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-xs text-muted-foreground">
                         {GRANULARITY[g].description}
                       </span>
                     </span>
@@ -132,52 +133,45 @@ export function DashboardSettingsDialog({
                 ))}
               </SelectContent>
             </Select>
-          </section>
-
-          <Separator />
+          </Section>
 
           {/* Card appearance */}
-          <section className="space-y-3">
-            <Label className="text-xs font-medium text-muted-foreground">Card appearance</Label>
+          <Section title="Card appearance" description="Applies to every card on this board.">
             <ChromeToggle
               label="Border"
+              description="Show a thin outline around each card."
               checked={settings.chrome.border}
               onCheckedChange={(v) => setChrome({ border: v })}
             />
-          </section>
-
-          <Separator />
+          </Section>
 
           {/* Saved filters (persisted presets) */}
-          <section className="space-y-3">
-            <div className="space-y-0.5">
-              <Label className="text-xs font-medium text-muted-foreground">Saved filters</Label>
-              <p className="text-xs text-muted-foreground">
-                Saved filter sets. The active one loads with the board.
-              </p>
-            </div>
-
+          <Section
+            title="Saved filters"
+            description="Reusable filter sets. The active one loads with the board."
+          >
             <RadioGroup
               value={settings.active_preset_id ?? NONE}
               onValueChange={(v) => applyPreset(v === NONE ? null : v)}
-              className="gap-1.5"
+              className="gap-1"
             >
-              <div className="flex items-center gap-2">
+              <Label
+                htmlFor="seg-none"
+                className="flex items-center gap-2.5 rounded-md px-2 py-1.5 font-normal hover:bg-muted/60"
+              >
                 <RadioGroupItem value={NONE} id="seg-none" />
-                <Label htmlFor="seg-none" className="text-sm font-normal">
-                  No filter (full log)
-                </Label>
-              </div>
+                <span className="text-sm">No filter (full log)</span>
+              </Label>
               {settings.presets.length > 0 && (
                 <ScrollArea className="max-h-40">
-                  <div className="space-y-1.5 pr-2">
+                  <div className="pr-2">
                     {settings.presets.map((p) => (
-                      <div key={p.id} className="flex items-center gap-2">
+                      <div
+                        key={p.id}
+                        className="group flex items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted/60"
+                      >
                         <RadioGroupItem value={p.id} id={`seg-${p.id}`} />
-                        <Label
-                          htmlFor={`seg-${p.id}`}
-                          className="flex-1 truncate text-sm font-normal"
-                        >
+                        <Label htmlFor={`seg-${p.id}`} className="flex-1 truncate text-sm font-normal">
                           {p.name}
                         </Label>
                         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
@@ -188,7 +182,7 @@ export function DashboardSettingsDialog({
                           variant="ghost"
                           size="icon"
                           aria-label={`Delete ${p.name}`}
-                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                          className="h-7 w-7 shrink-0 text-muted-foreground opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
                           onClick={() => deletePreset(p.id)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -200,40 +194,67 @@ export function DashboardSettingsDialog({
               )}
             </RadioGroup>
 
-            <div className="flex items-center gap-2">
-              <Input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Name this filter…"
-                className="h-8 text-sm"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    saveCurrentAsPreset();
-                  }
-                }}
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!newName.trim() || columnFilters.length === 0}
-                onClick={saveCurrentAsPreset}
-              >
-                Save current
-              </Button>
+            {/* Capture the live filter bar as a new named set. */}
+            <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+              <p className="text-sm font-medium">Save current filters</p>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Name this filter set…"
+                  className="h-8 text-sm"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      saveCurrentAsPreset();
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!newName.trim() || columnFilters.length === 0}
+                  onClick={saveCurrentAsPreset}
+                >
+                  Save
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {columnFilters.length === 0
+                  ? "Add filters in the bar above, then save them here."
+                  : `Captures the ${columnFilters.length} active filter${
+                      columnFilters.length === 1 ? "" : "s"
+                    } from the bar.`}
+              </p>
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              {columnFilters.length === 0
-                ? "Add filters in the bar above, then save them here."
-                : `Captures the ${columnFilters.length} active filter${
-                    columnFilters.length === 1 ? "" : "s"
-                  } from the bar.`}
-            </p>
-          </section>
+          </Section>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** A titled settings group. Stacked vertically, separated by the parent's
+ * `divide-y`; the title reads as a heading so sections don't blur into one
+ * muted wall of text. */
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-3 py-4 first:pt-0 last:pb-0">
+      <div className="space-y-0.5">
+        <h3 className="text-sm font-medium leading-none">{title}</h3>
+        {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      </div>
+      {children}
+    </section>
   );
 }
 

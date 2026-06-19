@@ -133,6 +133,7 @@ export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
             const link = (
               <Link
                 href={item.href}
+                aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex h-9 items-center gap-3 rounded-md px-3 text-sm transition-colors cursor-pointer",
                   active

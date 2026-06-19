@@ -22,8 +22,6 @@
  * backoff (capped at 8s) so a transient blip never breaks the pipeline.
  */
 
-import { signIn } from "next-auth/react";
-
 import { rawFetch } from "@/lib/api";
 import type { BusEnvelope } from "@/lib/api-types";
 
@@ -83,7 +81,21 @@ function subscribeSse<T>(
     }
 
     if (res.status === 401) {
-      void signIn("keycloak"); // auth failed — don't loop
+      // Auth failed — clear the session and bounce to /login rather than
+      // reconnecting in a loop. We go through /login (not a hardcoded
+      // signIn("keycloak")) so this works for every provider: in demo mode
+      // /login auto-signs the demo user back in, and forcing Keycloak here
+      // would 500 the page when Keycloak isn't reachable. Mirrors lib/api.ts.
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+        const cb = `${window.location.pathname}${window.location.search}`;
+        const loginUrl = `/login?callbackUrl=${encodeURIComponent(cb)}`;
+        try {
+          const { signOut } = await import("next-auth/react");
+          await signOut({ redirectTo: loginUrl });
+        } catch {
+          window.location.assign(loginUrl);
+        }
+      }
       return;
     }
     if (opts.stopOn?.includes(res.status)) return;

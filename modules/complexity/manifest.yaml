@@ -3,6 +3,7 @@ name: Complexity
 version: 1.0.0
 category: advanced
 description: EPA-based complexity measures - variant/sequence entropy (with linear and exponential forgetting), Lempel-Ziv, affinity, structure, Pentland's task and process complexity, plus an enriched-EPA variant when trace/event attributes from the IEEE XES standard are present.
+keywords: ["complexity", "entropy", "variant entropy", "lempel-ziv", "pentland", "structure", "affinity", "epa"]
 author: E. Langer
 license: MIT
 default_enabled: true

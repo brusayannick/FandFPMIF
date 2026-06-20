@@ -183,6 +183,10 @@ class Manifest(BaseModel):
     requirements: Requirements = Field(default_factory=Requirements)
     provides: list[str] = Field(default_factory=list)
     consumes: list[str] = Field(default_factory=list)
+    # Free-form hints (verbs, synonyms, domain terms) that help MATE AI's intent
+    # classifier route a user's chat message to this module. Optional — when
+    # omitted the platform derives keywords from the name/description/provides.
+    keywords: list[str] = Field(default_factory=list)
     dependencies: Dependencies = Field(default_factory=Dependencies)
     frontend: ManifestFrontend = Field(default_factory=ManifestFrontend)
     permissions: list[str] = Field(default_factory=list)

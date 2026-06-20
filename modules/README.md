@@ -54,6 +54,9 @@ category: foundation                # foundation | attribute | external_input | 
 description: One-line summary shown on the module card.
 author: You
 license: MIT
+keywords: [my topic, synonym, domain term]   # optional — helps MATE AI route chat
+                                             # messages to this module. Omit and the
+                                             # platform derives them from name/description.
 
 requirements:
   event_log:                        # checked against the log's detected schema

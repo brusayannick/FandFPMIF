@@ -3,6 +3,7 @@ name: Log evolution
 version: 1.0.0
 category: advanced
 description: Shows how the event log develops over time - case arrivals vs. completions, work-in-progress (open cases), the shifting activity mix, and a dotted chart (one dot per event, x = time, y = case). Reveals growth, backlog build-up, seasonality and drift at a glance.
+keywords: ["log evolution", "over time", "case arrivals", "work in progress", "wip", "dotted chart", "backlog", "seasonality"]
 author: Mate
 license: MIT
 default_enabled: true

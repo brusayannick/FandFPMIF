@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.7
-FROM node:22-alpine AS base
-RUN corepack enable
+FROM node:22.18.0-alpine AS base
+# Install pnpm directly via npm instead of corepack: pinned older Node images
+# ship a corepack with stale signature keys / a vm bug that breaks `pnpm install`.
+RUN npm install -g pnpm@latest
 WORKDIR /repo
 
 # Bring in workspace metadata so pnpm can build the dependency graph.
@@ -33,7 +35,7 @@ RUN pnpm build
 
 # Runtime: copy only the standalone bundle. Next's standalone output already
 # bundles its required node_modules.
-FROM node:22-alpine AS runner
+FROM node:22.18.0-alpine AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
 WORKDIR /app

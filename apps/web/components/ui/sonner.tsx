@@ -10,12 +10,17 @@ import {
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
+import { useMounted } from "@/lib/use-mounted"
+
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme()
+  // Until mounted, the resolved theme is unknown on the server — render the
+  // stable "system" default so SSR and the first client render match (#418).
+  const mounted = useMounted()
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={(mounted ? theme : "system") as ToasterProps["theme"]}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

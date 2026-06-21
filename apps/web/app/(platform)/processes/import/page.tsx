@@ -1,15 +1,23 @@
 import { ImportForm } from "@/components/processes/import-form";
+import {
+  PageContainer,
+  PageHeader,
+  PageTitle,
+  PageDescription,
+} from "@/components/page";
 
 export default function ImportPage() {
   return (
-    <section className="mx-auto max-w-3xl px-6 py-8">
-      <header className="space-y-1 pb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Import event log</h1>
-        <p className="text-sm text-muted-foreground">
-          Upload a XES, XES.gz, or CSV file - or import directly from a URL.
-        </p>
-      </header>
+    <PageContainer>
+      <PageHeader>
+        <div className="space-y-1">
+          <PageTitle>Import event log</PageTitle>
+          <PageDescription>
+            Upload a XES, XES.gz, or CSV file - or import directly from a URL.
+          </PageDescription>
+        </div>
+      </PageHeader>
       <ImportForm />
-    </section>
+    </PageContainer>
   );
 }

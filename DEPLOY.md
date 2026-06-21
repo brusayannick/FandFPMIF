@@ -2,7 +2,43 @@
 
 Production deployment to `pm-mate.uni-muenster.de`, fronted by the FB4 reverse
 proxy. For the local-`localhost` setup, see [`README.md`](./README.md) — this
-doc only covers the server.
+doc only covers the server. **All VM access needs the FB4-DEV-VPN.**
+
+## Quick reference (cheat sheet)
+
+The daily-driver commands. The numbered walkthrough below is the full,
+first-time setup. The prod overlay is always **both** compose files:
+
+```bash
+DC="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+```
+
+```bash
+# Connect (compose stack lives in ~/mate)
+ssh -p 2222 pm-admin@pm-mate-vm.uni-muenster.de
+ssh-copy-id -p 2222 pm-admin@pm-mate-vm.uni-muenster.de   # once, to skip the password
+
+# Deploy
+make deploy                      # from laptop: push branch + redeploy + health-check
+./scripts/deploy.sh --no-push    # redeploy origin's current state, no push
+cd ~/mate && git pull && $DC up -d --build   # manual, on the VM
+
+# Run / stop / status
+$DC up -d --build        # bring up (first boot ~10 min: module deps)
+$DC ps                   # status
+$DC restart api          # restart one service
+$DC restart proxy        # after a Caddyfile-only change
+$DC down                 # stop (keeps volumes/data)
+$DC down -v              # stop + WIPE Keycloak users (re-imports realm next boot)
+
+# Logs
+$DC logs -f api                 # follow API
+$DC logs --tail=80 api web      # last 80 lines
+$DC logs -f proxy keycloak
+```
+
+- `NEXT_PUBLIC_*` change → needs `--build` (inlined into the client bundle).
+- Caddyfile-only change → `$DC restart proxy`.
 
 ## How the two proxies fit together
 
@@ -135,6 +171,31 @@ In the `flows-funds-web` client of the realm JSON, before first boot:
 - `secret`: replace with a fresh value and use the **same** one for `KEYCLOAK_CLIENT_SECRET` in `.env` (§4).
 </details>
 
+### University login (skip the Keycloak form)
+
+To send every login straight to the university's OIDC IdP and never render
+Keycloak's own login page:
+
+1. Register an OIDC client with the university. The redirect URI is Keycloak's
+   broker callback, whose last path segment is the IdP **alias** (not the
+   protocol):
+   `https://pm-mate.uni-muenster.de/auth/realms/flows-funds/broker/keycloak-oidc/endpoint`
+   Keep the Keycloak IdP alias equal to that segment (`keycloak-oidc`) so this
+   URI never has to be re-registered.
+2. Configure the realm (IdP + redirect + silent first login) on the **running**
+   Keycloak — the realm JSON only imports into an empty DB:
+   ```bash
+   UNIV_CLIENT_ID=... UNIV_CLIENT_SECRET=... \
+   UNIV_DISCOVERY_URL=https://idp.uni-muenster.de/.../.well-known/openid-configuration \
+   KC_SERVER=http://localhost:8080/auth \
+     ./infra/keycloak/configure-university-idp.sh   # IDP_ALIAS defaults to keycloak-oidc
+   ```
+3. Set `KEYCLOAK_IDP_HINT=keycloak-oidc` in `.env` (already defaulted in
+   `docker-compose.prod.yml`) and restart the `web` service.
+
+Break-glass: the local `admin@flows-funds.local` user still works via the
+Keycloak admin console (`master` realm), which the redirect does not touch.
+
 ## 3. cv4cdd model (optional)
 
 The base compose mounts a macOS-only path for the cv4cdd model; the prod
@@ -241,6 +302,11 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 `./data/` (SQLite metadata + Parquet logs + module results + cached runtimes)
 is bind-mounted — back it up by copying the directory. Keycloak users live in
 the `kc-data` Docker volume; include it if you need to preserve logins.
+
+```bash
+tar czf mate-data-$(date +%F).tgz -C ~/mate data                                   # SQLite + Parquet + results
+docker run --rm -v kc-data:/v -v "$PWD":/b alpine tar czf /b/kc-data.tgz -C /v .   # Keycloak users
+```
 
 ## Troubleshooting
 

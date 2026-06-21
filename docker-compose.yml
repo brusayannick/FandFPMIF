@@ -66,9 +66,10 @@ services:
       # Module folder is the platform's extension point — exposed read/write so
       # the install flow can write modules/<id>/ into the host filesystem.
       - ./modules:/app/modules
-      # CV4CDD model — mounted at the same absolute path so the model_path
-      # setting in Settings → Modules → Temporal Dynamics works unchanged.
-      - /Users/yannickbrusa/cv4cdd_model:/Users/yannickbrusa/cv4cdd_model:ro
+      # The CV4CDD model (Temporal Dynamics module) is uploaded at runtime into
+      # modules/cv4cdd/model/, which the ./modules mount above already exposes at
+      # /app/modules/cv4cdd/model — no separate, host-specific mount needed. Set
+      # the module's model_path to /app/modules/cv4cdd/model/<model-dir>.
     environment:
       DATA_DIR: /app/data
       MODULES_DIR: /app/modules
@@ -131,6 +132,9 @@ services:
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/flows-funds}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-flows-funds-web}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-flows-funds-web-dev-secret}
+      # Set to a brokered IdP alias (e.g. "keycloak-oidc") to skip Keycloak's
+      # login page and redirect straight to that IdP. Empty = show the local form.
+      KEYCLOAK_IDP_HINT: ${KEYCLOAK_IDP_HINT:-}
     ports:
       - "3000:3000"
     depends_on:

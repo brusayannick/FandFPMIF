@@ -32,9 +32,9 @@ export interface DashboardItem {
   config: Record<string, unknown>;
 }
 
-/** How finely cards snap and how much air sits between them. `free` also drops
- * react-grid-layout's auto-compaction so cards stay exactly where you place
- * them. */
+/** How finely cards snap and how much air sits between them. No level
+ * auto-compacts — cards always stay exactly where you place them; granularity
+ * only changes the snap resolution. */
 export type Granularity = "free" | "fine" | "medium" | "low";
 
 /** Board-wide card appearance toggles, applied to every placed card. */
@@ -99,7 +99,7 @@ export const GRANULARITY: Record<Granularity, GranularitySpec> = {
     cols: 40,
     rowHeight: 12,
     margin: [4, 4],
-    compactType: "vertical",
+    compactType: null,
   },
   medium: {
     label: "Medium",
@@ -107,7 +107,7 @@ export const GRANULARITY: Record<Granularity, GranularitySpec> = {
     cols: 24,
     rowHeight: 18,
     margin: [6, 6],
-    compactType: "vertical",
+    compactType: null,
   },
   low: {
     label: "Low",
@@ -115,7 +115,7 @@ export const GRANULARITY: Record<Granularity, GranularitySpec> = {
     cols: 12,
     rowHeight: 28,
     margin: [8, 8],
-    compactType: "vertical",
+    compactType: null,
   },
 };
 

@@ -76,9 +76,11 @@ data/event_logs/{log_id}/
 ├── events.parquet     # flat event table, sorted by (case_id, timestamp)
 ├── cases.parquet      # cached case-level aggregates
 ├── original.{ext}     # original upload (for audit / re-export)
-└── ocel/              # reserved for future OCEL extension
+└── ocel/              # object-centric tables, written on OCEL import
+    ├── events.parquet
     ├── objects.parquet
-    └── relations.parquet
+    ├── relations.parquet  # flattened event↔object map
+    └── o2o.parquet        # object↔object relations
 ```
 
 **Why Parquet?**
@@ -227,7 +229,7 @@ permissions:
 
 | Category | Purpose | Example |
 |---|---|---|
-| `foundation` | Always-relevant baseline | Discovery, Performance |
+| `foundation` | Always-relevant baseline | Discovery, Performance, Object-Centric Discovery |
 | `attribute` | Mining beyond control-flow (org / time / cost / decisions) | — (no built-in; the manifest schema still supports this category) |
 | `external_input` | Compares the log against an externally-supplied artefact | — (no built-in; the manifest schema still supports this category) |
 | `advanced` | Specialised analytics | — (no built-in; the manifest schema still supports this category) |
@@ -274,7 +276,7 @@ Each module declares its own runtime dependencies in the manifest. The platform 
 
 The manifest sets `dependencies.python.isolation: subprocess` explicitly. Auto-promotion is not implemented — authors pick the mode.
 
-**Subprocess MVP limitations (v1):**
+**Subprocess isolation — current limitations:**
 
 - Only `@route.*` handlers are supported. `@on_event` / `@job`-decorated methods in a subprocess module raise at load time with a clear error pointing the author back to `in_process`.
 - DataFrame views (`ctx.event_log.pandas()` / `polars()` / `pm4py()`) raise inside the worker — shipping a DataFrame across the socket would need Parquet round-trip or Arrow IPC. Use `await ctx.event_log.duckdb_fetch(sql)` instead; it returns JSON-serialisable rows.
@@ -553,7 +555,6 @@ The default landing page after start. Three regions, top-down:
 
 1. **Header.** Page title "Processes", description, and a **primary action group** (top-right):
    - `Button` (primary) — *Import event log* → opens `/processes/import`.
-   - `Button` (secondary, **disabled / greyed-out**) — *Connect to system* with a small `Badge` "Coming soon". Tooltip on hover: *"Connect directly to ERP / CRM systems (SAP, Salesforce, Dynamics, …) to stream events without manual export."* The button is disabled but discoverable on purpose — it signals the roadmap without dead-ending the click.
    - Overflow `DropdownMenu` for: *Import from URL*, *Import demo log*.
 
 2. **Process list.** A shadcn `Table` (or `Card` grid in *Comfortable* density). Columns:
@@ -614,10 +615,10 @@ shadcn `Form` sections:
 - **Appearance.** Theme (`Light` / `Dark` / `System`, `RadioGroup`), Density (`Comfortable` / `Compact`, `RadioGroup`), Accent colour (`RadioGroup` over a small palette using CSS-variable presets), Reduced motion (`Switch`, defaults to system).
 - **Locale & imports.** Timezone (IANA name, defaulted from `Intl.DateTimeFormat().resolvedOptions().timeZone`), date format (`iso` / `us` / `eu`), default CSV delimiter, default CSV timestamp format. The CSV defaults pre-fill the import form so users don't re-pick on every upload.
 - **Data & storage.** Live gauge powered by `GET /api/v1/system/storage` — filesystem total/used/free progress bar plus per-directory byte totals for `data/` and `modules/`, showing the absolute paths of each bind-mount.
-- **Jobs.** Worker concurrency (slider, currently displays the backend value; live-update path lands with the settings sync).
+- **Jobs.** Worker concurrency — a live slider backed by `GET`/`PUT /system/jobs`. Any user sees the current value; an **admin** can change it, which resizes the asyncio worker pool immediately (graceful — running jobs are never interrupted) and persists it in `system_settings` so the change survives a restart. This is a **system-wide** setting (one shared runtime for all tenants), not part of the per-user settings sync.
 - **Telemetry.** Off by default; an opt-in switch (the platform is local-first, no telemetry without consent).
 
-Most settings persist in the client-side zustand store (`useUi`, [apps/web/lib/stores/ui.ts](apps/web/lib/stores/ui.ts)) with the `persist` middleware writing to `localStorage`. Server-side persistence in `user_settings (key, value_json)` is reserved for future cross-device sync.
+Settings live in client-side zustand stores (`useUi`, [apps/web/lib/stores/ui.ts](apps/web/lib/stores/ui.ts); `useVizSettings`) with the `persist` middleware writing to `localStorage` for instant reads. [apps/web/components/server-state-sync.tsx](apps/web/components/server-state-sync.tsx) then bridges these stores to per-user server state in `user_settings (key, value_json)`: each store is hydrated from the server on sign-in and changes are debounce-saved back, so prefs are per-account and follow the user across browsers instead of bleeding between accounts via shared `localStorage`.
 
 #### 7.6.2 Modules
 
@@ -643,7 +644,7 @@ Each module's *Configure* opens the deep page (`/settings/modules/{moduleId}`):
 - Three input methods (`Tabs`):
   1. **Upload `.zip` / `.tar.gz` / `.tar` / `.tgz`** — drop zone, posts multipart to `POST /api/v1/modules/install`. The route streams the upload to `data/module-uploads/`, submits a `module.install.upload` job that unpacks via `_safe_extract`, validates `manifest.yaml`, calls `loader.load_one()`.
   2. **From git URL** — `POST /api/v1/modules/install/git` with `{ url, ref? }`. Job clones with `--depth 1` (optionally `--branch <ref>`), strips `.git/`, then same load path.
-  3. **From PyPI** — `POST /api/v1/modules/install/registry` with `{ source: "pypi", id, version? }`. Job runs `uv pip install <spec>` against the platform venv, then re-scans `importlib.metadata.entry_points(group="mate.modules")` and loads any new module that declared one (§5.3 step 1). npm-source modules currently raise a clear error — no Python entry point to bind to.
+  3. **From PyPI** — `POST /api/v1/modules/install/registry` with `{ source: "pypi", id, version? }`. Job runs `uv pip install <spec>` against the platform venv, then re-scans `importlib.metadata.entry_points(group="mate.modules")` and loads any new module that declared one (§5.3 step 1). The `source: "npm"` variant raises `NotImplementedError` by design — an npm-only package ships no Python entry point for the loader to bind to, so there is nothing to mount in-process (use the Upload / Git / PyPI paths instead).
 - All three return `{ "job_id": "..." }` so the frontend's existing dock/drawer surfaces progress and the toast actions work uniformly with import jobs.
 - On success, a toast + automatic redirect to `/settings/modules/{moduleId}`.
 - On failure, the dock row shows the offending stage + error message. The job handler `rmtree`s any half-extracted staging dir in `finally`.
@@ -834,14 +835,15 @@ Two services. No Redis, no DB container, no Nginx in dev. The `data/` bind-mount
 
 ## 11. Built-in modules
 
-Two foundation modules ship in `modules/` and are loaded at platform startup. They double as the **acceptance test** for the module SDK — both are authored through the same public SDK that any third-party module would use, with no platform-side privileges.
+Several modules ship bundled in `modules/` and load at platform startup. The **foundation** modules below double as the **acceptance test** for the module SDK — all are authored through the same public SDK that any third-party module would use, with no platform-side privileges.
 
 | Module id | Category | Scope |
 |---|---|---|
 | `discovery` | foundation | pm4py inductive / heuristics / alpha; outputs Petri net / DFG / process tree / prefix tree |
 | `performance` | foundation | Lead / sojourn / wait time, throughput, bottleneck detection |
+| `ocel_discovery` | foundation | Object-centric (OCEL) discovery over the events / objects / relations / o2o tables |
 
-Additional modules are installed via Settings → Modules → Import (§7.6.2): zip / tar.gz upload, git URL, or the `mate.modules` entry point.
+The platform also bundles several **advanced** modules in `modules/` — `complexity`, `complexity_over_time`, `cv4cdd` (CV-based concept-drift detection), `concept_drift_explainer`, `log_evolution`, and `process_comparison` — each loaded the same way and owned per-user like any install. Further third-party modules are added via Settings → Modules → Import (§7.6.2): zip / tar.gz upload, git URL, or the `mate.modules` entry point.
 
 ---
 
@@ -862,7 +864,7 @@ The platform discovers the module automatically. **No edits to `main.py`, no har
 
 ## 13. Default User Flow
 
-1. **Land on `/processes`.** First-time users see the empty state with a primary *Import event log* CTA and a greyed *Connect to system* button (ERP / CRM connector — disabled, tagged "Coming soon").
+1. **Land on `/processes`.** First-time users see the empty state with a primary *Import event log* CTA.
 2. **Import an event log** via *Import event log* → `/processes/import` → drop file → (CSV: column-mapping wizard) → submit. The platform allocates a `logId` (UUID v7), creates a **Job**, and returns to `/processes`. The new entry appears in the list, greyed and non-clickable, with an inline progress bar.
 3. **Bottom-left dock** subscribes to `WS /jobs/{job_id}/stream` and shows `currentLine / totalLines` for the running import.
 4. On completion: toast, row un-greys, becomes clickable.
@@ -877,19 +879,16 @@ The platform discovers the module automatically. **No edits to `main.py`, no har
 The previous design document described a Postgres + JSONB graph with hardcoded built-in modules registered in `main.py`. The differences worth flagging:
 
 - **Postgres → SQLite + DuckDB + Parquet.** Dropped the second container; gained columnar analytics.
-- **Built-in modules in `main.py` → manifest-discovered modules.** Removed the registration boilerplate; modules are now extension-point packages, and the two foundation modules (Discovery, Performance) are authored through the same public SDK any third-party module would use (see §11).
+- **Built-in modules in `main.py` → manifest-discovered modules.** Removed the registration boilerplate; modules are now extension-point packages, and the bundled foundation modules (Discovery, Performance, Object-Centric Discovery) are authored through the same public SDK any third-party module would use (see §11).
 - **Hardcoded frontend module registry → manifest-driven dynamic imports.** Frontend no longer needs edits per module.
-- **Event-log workspace + per-process detail.** The old `/discover` workspace and any analytics shipped with the platform are not carried over — analytics is the responsibility of (future) modules that live alongside the platform, not inside it.
+- **Event-log workspace + per-process detail.** The old `/discover` workspace and any analytics shipped with the platform are not carried over — analytics is the responsibility of modules that live alongside the platform, not inside it.
 - **Job + progress system.** Was implicit; now first-class with WebSocket streaming and a bottom-left progress dock.
 - **Module-to-module communication.** Was absent; now a typed event bus + capability registry.
-- **OCEL.** Was not addressed; the storage layout reserves space for it as a non-breaking upgrade.
+- **OCEL.** Now supported end-to-end: `.jsonocel` / `.xmlocel` / OCEL 2.0 `.sqlite` imports parse into object-centric Parquet tables under `ocel/` (events, objects, relations, o2o), surfaced by the Object-Centric Discovery foundation module — kept separate from the case-centric XES/CSV pipeline.
 
 ---
 
-## 15. Out of Scope (for v1)
+## 15. Out of Scope
 
-- **Most analytics modules.** v1 ships only Discovery and Performance (see §11); any other analytics — organizational mining, conformance, decision mining, cost analysis, lifecycle timing, temporal dynamics, etc. — are deferred and would be authored through the same module SDK any third party uses.
-- Multi-user authentication / RBAC. Single-user local mode only.
-- Cloud deployment / Kubernetes manifests.
-- Streaming / real-time event ingestion. v1 is batch-import only.
-- Cross-process linking (case correlation across logs) — defer to OCEL upgrade.
+- **True streaming / real-time event ingestion (CDC).** Ingestion is batch-import based. *Watched Folders* add a storage-backed source that is polled and auto-imports new files, but there is no live event stream / change-data-capture path that ingests events as they happen.
+- **A couple of narrow module-runtime limits**, documented where they apply rather than repeated here: npm-only module installs (§7.6.2 — no Python entry point to bind to) and DataFrame transfer / synchronous `registry.has()` under `subprocess` isolation.

@@ -9,6 +9,7 @@ import {
   FolderOpen,
   Link2,
   Loader2,
+  RefreshCw,
   Sparkles,
   X,
   XCircle,
@@ -29,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useCreateFolder,
   useImportEventLog,
@@ -38,6 +40,8 @@ import {
   type JsonProbeResponse,
   type XmlProbeResponse,
 } from "@/lib/queries";
+import { useCreateWatchedFolder } from "@/lib/watched-queries";
+import type { WatchMode } from "@/lib/api-types";
 import { useAiConfig } from "@/lib/ai-queries";
 import { useImportColumnMapping } from "@/lib/ai-guidance";
 import { useUi } from "@/lib/stores/ui";
@@ -201,47 +205,45 @@ function autoMap(headers: string[]): Partial<CsvMapping> {
   return out;
 }
 
-type ImportTab = "file" | "url" | "folder";
-
 interface ImportFormProps {
   onSuccess?: (logId: string) => void;
 }
 
 export function ImportForm({ onSuccess }: ImportFormProps = {}) {
-  const [tab, setTab] = useState<ImportTab>("file");
-
-  const tabBtn = (
-    key: ImportTab,
-    label: string,
-    Icon: typeof FileUp,
-  ) => (
-    <button
-      key={key}
-      onClick={() => setTab(key)}
-      className={cn(
-        "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer",
-        tab === key
-          ? "bg-background shadow-sm text-foreground"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      <Icon className="h-3.5 w-3.5" />
-      {label}
-    </button>
-  );
-
   return (
-    <div className="space-y-6">
-      <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 w-fit">
-        {tabBtn("file", "Upload file", FileUp)}
-        {tabBtn("url", "From URL", Link2)}
-        {tabBtn("folder", "Upload folder", FolderOpen)}
-      </div>
+    <Tabs defaultValue="file" className="space-y-6">
+      <TabsList>
+        <TabsTrigger value="file" className="cursor-pointer">
+          <FileUp className="mr-1.5 h-3.5 w-3.5" />
+          Upload file
+        </TabsTrigger>
+        <TabsTrigger value="url" className="cursor-pointer">
+          <Link2 className="mr-1.5 h-3.5 w-3.5" />
+          From URL
+        </TabsTrigger>
+        <TabsTrigger value="folder" className="cursor-pointer">
+          <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+          Upload folder
+        </TabsTrigger>
+        <TabsTrigger value="watch" className="cursor-pointer">
+          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+          Watched folder
+        </TabsTrigger>
+      </TabsList>
 
-      {tab === "file" && <FileImportForm onSuccess={onSuccess} />}
-      {tab === "url" && <UrlImportForm onSuccess={onSuccess} />}
-      {tab === "folder" && <FolderImportForm onSuccess={onSuccess} />}
-    </div>
+      <TabsContent value="file">
+        <FileImportForm onSuccess={onSuccess} />
+      </TabsContent>
+      <TabsContent value="url">
+        <UrlImportForm onSuccess={onSuccess} />
+      </TabsContent>
+      <TabsContent value="folder">
+        <FolderImportForm onSuccess={onSuccess} />
+      </TabsContent>
+      <TabsContent value="watch">
+        <WatchImportForm />
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -689,6 +691,154 @@ function UrlImportForm({ onSuccess }: ImportFormProps) {
           >
             {importer.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
             Import
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Watched-folder form ───────────────────────────────────────────────────────
+
+const WATCH_MODES: { value: WatchMode; label: string; hint: string }[] = [
+  { value: "manual", label: "Manual", hint: "Only scan when you click “Scan now”." },
+  {
+    value: "interval",
+    label: "Every N minutes",
+    hint: "Poll on a timer and import any new files found.",
+  },
+  {
+    value: "continuous",
+    label: "Automatic",
+    hint: "Import new files as soon as they appear (checked about once a minute).",
+  },
+];
+
+function WatchImportForm() {
+  const router = useRouter();
+  const createWatch = useCreateWatchedFolder();
+
+  const [name, setName] = useState("");
+  const [sourcePath, setSourcePath] = useState("");
+  const [mode, setMode] = useState<WatchMode>("manual");
+  const [minutes, setMinutes] = useState(10);
+
+  const intervalValid = mode !== "interval" || minutes >= 1;
+  const ready = name.trim().length > 0 && intervalValid;
+
+  const submit = async () => {
+    if (!ready) return;
+    try {
+      const watch = await createWatch.mutateAsync({
+        name: name.trim(),
+        source_path: sourcePath.trim() || undefined,
+        mode,
+        interval_seconds: mode === "interval" ? Math.max(60, Math.round(minutes) * 60) : null,
+        create_dest_folder: true,
+      });
+      toast.success(`Watching “${watch.name}”`);
+      router.push("/processes/watched");
+    } catch (err: unknown) {
+      toastError(`Couldn't create watched folder: ${(err as Error).message}`);
+    }
+  };
+
+  return (
+    <Card>
+      <CardContent className="space-y-4">
+        <div className="rounded-md border border-dashed border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
+          A watched folder scans a location in your storage backend and imports new event-log
+          files automatically. Drop files there from an upstream pipeline (an S3 prefix when S3
+          storage is connected, otherwise a server directory) — nothing is uploaded from your
+          browser here.
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="watch-name">
+            Name <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            id="watch-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Nightly SAP export"
+          />
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="watch-source">Source location (optional)</Label>
+          <Input
+            id="watch-source"
+            value={sourcePath}
+            onChange={(e) => setSourcePath(e.target.value)}
+            placeholder="Leave blank for a managed folder, or enter an S3 prefix / server path"
+          />
+          <p className="text-xs text-muted-foreground">
+            Leave blank to let Mate create and manage the location. Otherwise point it at an
+            existing prefix/path an upstream process already writes to.
+          </p>
+        </div>
+
+        <div className="grid gap-2">
+          <Label>Refresh</Label>
+          <div className="flex flex-wrap gap-2">
+            {WATCH_MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setMode(m.value)}
+                className={cn(
+                  "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer",
+                  mode === m.value
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-border text-muted-foreground hover:text-foreground",
+                )}
+                aria-pressed={mode === m.value}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {WATCH_MODES.find((m) => m.value === mode)?.hint}
+          </p>
+          {mode === "interval" && (
+            <div className="flex items-center gap-2 pt-1">
+              <Label htmlFor="watch-minutes" className="text-xs">
+                Every
+              </Label>
+              <Input
+                id="watch-minutes"
+                type="number"
+                min={1}
+                value={minutes}
+                onChange={(e) => setMinutes(Number(e.target.value))}
+                className="w-24"
+              />
+              <span className="text-xs text-muted-foreground">minute(s)</span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-start gap-2 rounded-md border border-dashed border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            Columns are auto-detected for each file. If a CSV/XML/JSON file maps incorrectly,
+            fix it later in that log’s settings → Column roles.
+          </span>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border pt-4">
+          <Button variant="outline" onClick={() => router.back()} className="cursor-pointer">
+            Cancel
+          </Button>
+          <Button
+            onClick={submit}
+            disabled={!ready || createWatch.isPending}
+            className="cursor-pointer gap-2"
+          >
+            {createWatch.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Create watched folder
           </Button>
         </div>
       </CardContent>

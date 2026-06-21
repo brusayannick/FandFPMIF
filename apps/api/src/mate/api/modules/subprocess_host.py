@@ -14,12 +14,9 @@ real `ModuleContext` looked up by `ctx_token`.
 from __future__ import annotations
 
 import asyncio
-import inspect
-import json
 import os
 import shutil
 import tempfile
-import traceback
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -29,8 +26,12 @@ import structlog
 
 from mate.api.modules.subprocess_worker import WireConnection
 from mate.sdk.decorators import (
-    RouteSpec,
+    _ATTR_JOB,
+    _ATTR_ON_EVENT,
     _ATTR_ROUTE,
+    EventSubscription,
+    JobSpec,
+    RouteSpec,
 )
 from mate.sdk.manifest import Manifest
 
@@ -54,7 +55,9 @@ class SubprocessModule:
     enough.
     """
 
-    def __init__(self, manifest_id: str, handlers_meta: list[dict[str, Any]], bridge: "SubprocessBridge") -> None:
+    def __init__(
+        self, manifest_id: str, handlers_meta: list[dict[str, Any]], bridge: "SubprocessBridge"
+    ) -> None:
         self.id = manifest_id
         self._bridge = bridge
         self._handlers_meta = handlers_meta
@@ -63,29 +66,57 @@ class SubprocessModule:
     def _install_stubs(self) -> None:
         for entry in self._handlers_meta:
             attr = entry["attr"]
-            if "on_event" in entry or entry.get("job"):
-                # Out-of-scope for the v1 subprocess MVP — flagged at load
-                # time in `SubprocessBridge.start()` with a clear error, but
-                # belt-and-braces here too.
-                continue
+            stub = self._make_handler_stub(attr)
+            installed = False
             route_meta = entry.get("route")
-            if not route_meta:
+            if route_meta:
+                setattr(
+                    stub,
+                    _ATTR_ROUTE,
+                    RouteSpec(
+                        method=route_meta["method"],
+                        path=route_meta["path"],
+                        name=route_meta.get("name"),
+                    ),
+                )
+                installed = True
+            event_meta = entry.get("on_event")
+            if event_meta:
+                setattr(stub, _ATTR_ON_EVENT, EventSubscription(topic=event_meta["topic"]))
+                installed = True
+            job_meta = entry.get("job")
+            if job_meta:
+                # title/subtitle are static strings or None; a None means the
+                # author used a callable (which can't cross the socket), so the
+                # loader falls back to its default label via `_resolve_dynamic`.
+                setattr(
+                    stub,
+                    _ATTR_JOB,
+                    JobSpec(
+                        progress=job_meta.get("progress", False),
+                        title=job_meta.get("title"),
+                        subtitle=job_meta.get("subtitle"),
+                        priority=job_meta.get("priority", 0),
+                        cancellable=job_meta.get("cancellable", True),
+                        result_url=job_meta.get("result_url"),
+                    ),
+                )
+                installed = True
+            if not installed:
                 continue
-            stub = self._make_route_stub(attr)
-            setattr(stub, _ATTR_ROUTE, RouteSpec(
-                method=route_meta["method"],
-                path=route_meta["path"],
-                name=route_meta.get("name"),
-            ))
-            # Bind as bound method on the instance.
+            # Bind on the instance AND the type so the loader's `_bind` walk
+            # (which reads decorator metadata off `type(instance)`) picks them
+            # up exactly like an in_process module.
             setattr(self, attr, stub)
             setattr(type(self), attr, stub)
 
-    def _make_route_stub(self, attr: str):
+    def _make_handler_stub(self, attr: str):
+        """One stub for @route/@job/@on_event alike — forwards the call (with
+        any positional payload + kwargs) to the worker over the bridge."""
         bridge = self._bridge
 
-        async def stub(_self, ctx, **kwargs):  # `_self` ignored; we're bound
-            return await bridge.call_handler(attr, ctx, kwargs)
+        async def stub(_self, ctx, *args, **kwargs):  # `_self` ignored; we're bound
+            return await bridge.call_handler(attr, ctx, args, kwargs)
 
         stub.__name__ = attr
         stub.__qualname__ = f"SubprocessModule.{attr}"
@@ -108,20 +139,22 @@ class SubprocessBridge:
         self._ctx_registry: dict[str, Any] = {}
 
     async def start(self) -> SubprocessModule:
-        # Reject decorators the v1 MVP can't service so authors don't get a
-        # confusing route-only export.
-        # We can't tell from the manifest alone, so we wait for the worker's
-        # `ready` and check the handler list there.
-
-        loop = asyncio.get_running_loop()
-        self._server = await asyncio.start_unix_server(self._on_connect, path=str(self._socket_path))
+        # Spawn the worker, wait for its `ready` (which carries the handler
+        # list), then hand back a SubprocessModule whose stubs the loader binds
+        # like any in_process module — @route, @job and @on_event all work.
+        self._server = await asyncio.start_unix_server(
+            self._on_connect, path=str(self._socket_path)
+        )
         os.chmod(self._socket_path, 0o600)
 
         worker_py = _worker_python(self.folder)
+        # Run the worker by file path (not `-m`) so we don't import the whole
+        # `mate.api` package chain under the module's venv Python — the worker
+        # only needs `mate.sdk`, which the installer installs into the venv.
+        worker_script = Path(__file__).with_name("subprocess_worker.py")
         cmd = [
             str(worker_py),
-            "-m",
-            "mate.api.modules.subprocess_worker",
+            str(worker_script),
             str(self._socket_path),
             str(self.folder),
         ]
@@ -144,23 +177,12 @@ class SubprocessBridge:
                 f"Subprocess module {self.manifest.id!r} did not signal ready in 30s."
             ) from exc
 
-        bad = [h for h in self._handlers_meta if "on_event" in h or h.get("job")]
-        if bad:
-            await self.stop()
-            raise SubprocessHostError(
-                f"Subprocess isolation does not support @on_event or @job in v1 "
-                f"(module {self.manifest.id!r}, handlers: {[h['attr'] for h in bad]}). "
-                "Use isolation: in_process for these modules."
-            )
-
         return SubprocessModule(self.manifest.id, self._handlers_meta, self)
 
     async def stop(self) -> None:
         if self._conn is not None:
             try:
-                await asyncio.wait_for(
-                    self._conn.send_request("shutdown", {}), timeout=2.0
-                )
+                await asyncio.wait_for(self._conn.send_request("shutdown", {}), timeout=2.0)
             except Exception:  # noqa: BLE001
                 pass
         if self._proc is not None and self._proc.returncode is None:
@@ -202,7 +224,7 @@ class SubprocessBridge:
         self._ready_evt.set()
         return True
 
-    async def call_handler(self, attr: str, ctx, kwargs: dict[str, Any]) -> Any:
+    async def call_handler(self, attr: str, ctx, args: tuple, kwargs: dict[str, Any]) -> Any:
         if self._conn is None:
             raise SubprocessHostError(f"Worker for {self.manifest.id!r} is not connected.")
         token = uuid.uuid4().hex
@@ -213,10 +235,19 @@ class SubprocessBridge:
                 "module_id": ctx.module_id,
                 "workdir": str(ctx.workdir),
                 "config": ctx.config.value if hasattr(ctx.config, "value") else {},
+                # Snapshot the visible capability names so the worker's
+                # (synchronous) ctx.registry.has() answers without a round-trip.
+                "capabilities": _registry_snapshot(ctx),
             }
             return await self._conn.send_request(
                 "call",
-                {"handler": attr, "ctx_token": token, "ctx": ctx_meta, "kwargs": kwargs},
+                {
+                    "handler": attr,
+                    "ctx_token": token,
+                    "ctx": ctx_meta,
+                    "args": [_jsonify(a) for a in args],
+                    "kwargs": {k: _jsonify(v) for k, v in kwargs.items()},
+                },
             )
         finally:
             self._ctx_registry.pop(token, None)
@@ -229,6 +260,18 @@ class SubprocessBridge:
             async with ctx.event_log as log_access:
                 rows = await log_access.duckdb_fetch(params["sql"], params.get("params"))
             return [list(r) for r in rows]
+
+        async def event_log_materialize(params: dict[str, Any]) -> str:
+            # Write the (filter-applied) log to a Parquet under the per-call
+            # workdir (shared filesystem) and hand the worker the path, so its
+            # ctx.event_log.pandas()/polars()/pm4py() load it locally. The file
+            # rides the workdir's auto-cleanup when the handler finishes.
+            ctx = self._ctx_registry[params["ctx_token"]]
+            async with ctx.event_log as log_access:
+                df = await log_access.pandas()
+            out = Path(ctx.workdir) / f"_eventlog_{uuid.uuid4().hex}.parquet"
+            await asyncio.to_thread(df.to_parquet, str(out))
+            return str(out)
 
         async def bus_emit(params: dict[str, Any]) -> None:
             ctx = self._ctx_registry[params["ctx_token"]]
@@ -272,6 +315,7 @@ class SubprocessBridge:
 
         return {
             "ctx.event_log.duckdb_fetch": event_log_duckdb_fetch,
+            "ctx.event_log.materialize": event_log_materialize,
             "ctx.bus.emit": bus_emit,
             "ctx.cache.get": cache_get,
             "ctx.cache.set": cache_set,
@@ -294,3 +338,26 @@ def _worker_python(folder: Path) -> Path:
     raise SubprocessHostError(
         f"No .venv/bin/python3 under {folder} — install must run before starting the subprocess."
     )
+
+
+def _jsonify(value: Any) -> Any:
+    """Best-effort JSON-native form for a handler arg crossing the socket.
+    Pydantic models dump to dicts; everything else passes through (the worker
+    receives JSON-native types, not reconstructed models)."""
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    return value
+
+
+def _registry_snapshot(ctx: Any) -> list[str]:
+    """Module + capability names visible to this ctx's user, so the worker's
+    synchronous ctx.registry.has() can answer locally."""
+    reg = getattr(ctx, "registry", None)
+    if reg is None:
+        return []
+    names: set[str] = set()
+    if hasattr(reg, "installed_modules"):
+        names.update(reg.installed_modules())
+    if hasattr(reg, "visible_capabilities"):
+        names.update(reg.visible_capabilities())
+    return sorted(names)

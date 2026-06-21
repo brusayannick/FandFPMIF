@@ -92,7 +92,7 @@ class _SdkBusAdapter:
     """Bridge `mate.sdk.context.EventBusProtocol` over our EventBus.
 
     Every emitted payload is stamped with the owning user's id (and the active
-    log id) so the event stays inside that user's tenant: the `WS /events`
+    log id) so the event stays inside that user's tenant: the `/events` SSE
     fan-out filters by `user_id`, and the loader's `@on_event` dispatch only
     delivers to handlers whose owning user matches. Without this stamp a module
     that emits an event would broadcast it to *every* connected user — a
@@ -263,6 +263,13 @@ class _UserScopedRegistry:
 
     def installed_modules(self) -> list[str]:
         return sorted(m for m in self._registry.installed_modules() if m in self._allowed)
+
+    def visible_capabilities(self) -> list[str]:
+        return [
+            c
+            for c in self._registry.capability_names()
+            if (owner := self._registry.owner_of(c)) is not None and owner in self._allowed
+        ]
 
     async def call(self, capability: str, **kwargs: Any) -> Any:
         owner = self._registry.owner_of(capability)

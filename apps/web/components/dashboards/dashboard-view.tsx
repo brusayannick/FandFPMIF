@@ -154,7 +154,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
 
   if (isLoading) {
     return (
-      <div className="space-y-4 p-6">
+      <div className="space-y-4 px-4 py-6 sm:px-6 lg:px-8">
         <Skeleton className="h-9 w-64" />
         <Skeleton className="h-[60vh] w-full" />
       </div>
@@ -182,7 +182,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     <DashboardFilterProvider initialColumnFilters={initialFilters}>
       <div className="flex h-full flex-col">
       {/* Toolbar */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5 sm:px-6 lg:px-8">
         <Button asChild variant="ghost" size="icon" className="h-8 w-8" aria-label="Back">
           <Link href="/dashboards">
             <ArrowLeft className="h-4 w-4" />

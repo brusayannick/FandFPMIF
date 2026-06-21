@@ -387,3 +387,69 @@ export interface EventLogUpdatePayload {
   folder_id?: string | null;
   position?: number;
 }
+
+// ── Watched folders ─────────────────────────────────────────────────────────
+
+export type WatchMode = "manual" | "interval" | "continuous";
+export type WatchStatus = "active" | "paused" | "error";
+
+/** Optional per-format column mapping forced on every imported file. */
+export interface WatchDefaultMapping {
+  csv_mapping?: Record<string, unknown>;
+  xml_mapping?: Record<string, unknown>;
+  json_mapping?: Record<string, unknown>;
+}
+
+export interface WatchedFolderSummary {
+  id: string;
+  name: string;
+  source_path: string;
+  mode: WatchMode | string;
+  interval_seconds: number | null;
+  status: WatchStatus | string;
+  dest_folder_id: string | null;
+  last_scanned_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  imported_count: number;
+  failed_count: number;
+}
+
+export interface WatchedFileSummary {
+  source_name: string;
+  status: string;
+  size: number | null;
+  log_id: string | null;
+  error: string | null;
+  imported_at: string;
+}
+
+export interface WatchedFolderDetail extends WatchedFolderSummary {
+  default_mapping: WatchDefaultMapping | null;
+  files: WatchedFileSummary[];
+}
+
+export interface WatchedFolderCreatePayload {
+  name: string;
+  source_path?: string | null;
+  mode: WatchMode;
+  interval_seconds?: number | null;
+  default_mapping?: WatchDefaultMapping | null;
+  create_dest_folder?: boolean;
+  dest_folder_id?: string | null;
+}
+
+export interface WatchedFolderUpdatePayload {
+  name?: string;
+  mode?: WatchMode;
+  interval_seconds?: number | null;
+  status?: "active" | "paused";
+  default_mapping?: WatchDefaultMapping | null;
+}
+
+export interface ScanResponse {
+  found: number;
+  imported: number;
+  skipped: number;
+  failed: number;
+}

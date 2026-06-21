@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from mate.api.config import Settings, get_settings
 from mate.api.db.engine import get_sessionmaker
-from mate.api.db.models import Job
+from mate.api.db.models import Job, SystemSetting
 from mate.api.events import EventBus, get_event_bus
 from mate.api.uuid7 import uuid7_str
 
@@ -45,6 +45,56 @@ log = structlog.get_logger(__name__)
 
 def _utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+# Worker-pool sizing bounds — mirror ``Settings.worker_concurrency`` (ge=1, le=8).
+# Surfaced to the UI by ``GET /system/jobs`` so the slider can't post out of range.
+MIN_WORKERS = 1
+MAX_WORKERS = 8
+
+# ``system_settings`` key under which an admin's live worker-concurrency change is
+# persisted so it survives a restart (re-applied in ``main.py`` at boot).
+WORKER_CONCURRENCY_KEY = "worker_concurrency"
+
+# Queue sentinel that asks one worker to retire (graceful scale-down). It can
+# never collide with a real job id (those are UUIDv7 strings).
+_RETIRE = object()
+
+
+def _clamp_workers(n: int) -> int:
+    return max(MIN_WORKERS, min(MAX_WORKERS, int(n)))
+
+
+async def load_persisted_concurrency() -> int | None:
+    """Read the admin-set worker concurrency from ``system_settings``.
+
+    Returns ``None`` when nothing was persisted (fresh DB / never changed) so the
+    caller keeps the env/default value. Tolerant of a missing table or bad value
+    — boot must never fail because of this optional setting.
+    """
+    try:
+        sm = get_sessionmaker()
+        async with sm() as session:
+            row = await session.get(SystemSetting, WORKER_CONCURRENCY_KEY)
+        value = row.value_json if row is not None else None
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        return _clamp_workers(value)
+    except Exception:
+        log.warning("job_runtime.load_persisted_concurrency_failed", exc_info=True)
+        return None
+
+
+async def save_persisted_concurrency(n: int) -> None:
+    """Upsert the worker-concurrency value into ``system_settings``."""
+    sm = get_sessionmaker()
+    async with sm() as session:
+        row = await session.get(SystemSetting, WORKER_CONCURRENCY_KEY)
+        if row is None:
+            session.add(SystemSetting(key=WORKER_CONCURRENCY_KEY, value_json=_clamp_workers(n)))
+        else:
+            row.value_json = _clamp_workers(n)
+        await session.commit()
 
 
 class JobCancelled(Exception):
@@ -152,9 +202,11 @@ class JobRuntime:
     def __init__(self, settings: Settings | None = None, bus: EventBus | None = None) -> None:
         self.settings = settings or get_settings()
         self._bus = bus
-        self._queue: asyncio.Queue[str] = asyncio.Queue()
+        # Carries job-id strings plus the ``_RETIRE`` sentinel (graceful scale-down).
+        self._queue: asyncio.Queue[object] = asyncio.Queue()
         self._handlers: dict[str, JobHandler] = {}
         self._workers: list[asyncio.Task[None]] = []
+        self._target_concurrency = _clamp_workers(self.settings.worker_concurrency)
         self._running = False
         # Pause is per-user (the queue itself is shared across all tenants). A
         # user in `_paused_users` has their dequeued jobs parked in `_deferred`
@@ -209,9 +261,10 @@ class JobRuntime:
             return
         await self._reconcile_orphan_running()
         self._running = True
-        for _ in range(self.settings.worker_concurrency):
+        self._target_concurrency = _clamp_workers(self.settings.worker_concurrency)
+        for _ in range(self._target_concurrency):
             self._workers.append(asyncio.create_task(self._worker_loop()))
-        log.info("job_runtime.started", workers=self.settings.worker_concurrency)
+        log.info("job_runtime.started", workers=self._target_concurrency)
 
     async def _reconcile_orphan_running(self) -> None:
         """Fail any rows left in `running` by a previous process.
@@ -267,8 +320,48 @@ class JobRuntime:
         finally:
             await self.stop()
 
+    def concurrency(self) -> int:
+        """Current target worker count — reflects live changes, not just boot."""
+        return self._target_concurrency
+
+    def _live_worker_count(self) -> int:
+        return sum(1 for w in self._workers if not w.done())
+
+    async def set_concurrency(self, n: int) -> int:
+        """Resize the worker pool live (Settings → General → Jobs, admin-only).
+
+        Scale-up spawns workers immediately. Scale-down is graceful: one retire
+        sentinel is queued per surplus worker; an idle worker retires at once, a
+        busy one only after it finishes its current job — so a resize never
+        orphans a running job, and a backlog is drained before any worker is
+        shed. The ProcessPool (CPU offload, §8.3) keeps its current size until
+        next (re)created; the asyncio worker pool — the meaningful knob — is
+        resized here. Returns the clamped value actually applied.
+        """
+        n = _clamp_workers(n)
+        # Mutate the shared Settings singleton so a future ProcessPool and the
+        # diagnostics blob reflect the live value.
+        self.settings.worker_concurrency = n
+        self._target_concurrency = n
+        if not self._running:
+            return n
+        self._workers = [w for w in self._workers if not w.done()]
+        live = len(self._workers)
+        if n > live:
+            for _ in range(n - live):
+                self._workers.append(asyncio.create_task(self._worker_loop()))
+        elif n < live:
+            for _ in range(live - n):
+                self._queue.put_nowait(_RETIRE)
+        log.info("job_runtime.concurrency_changed", workers=n, live_before=live)
+        return n
+
     def is_paused(self, user_id: str) -> bool:
         return user_id in self._paused_users
+
+    def paused_user_ids(self) -> list[str]:
+        """Snapshot of users whose queue is currently paused (admin monitoring)."""
+        return sorted(self._paused_users)
 
     async def pause_queue(self, user_id: str) -> None:
         if user_id in self._paused_users:
@@ -450,11 +543,23 @@ class JobRuntime:
         sm = get_sessionmaker()
         while self._running:
             try:
-                job_id = await self._queue.get()
+                item = await self._queue.get()
             except asyncio.CancelledError:
                 return
 
             try:
+                if item is _RETIRE:
+                    # Graceful scale-down signal: retire this worker iff we're
+                    # still over target. A scale-up that arrived after the
+                    # sentinel was queued cancels the need — then it's a no-op.
+                    if self._live_worker_count() > self._target_concurrency:
+                        current = asyncio.current_task()
+                        self._workers = [w for w in self._workers if w is not current]
+                        return
+                    continue
+                if not isinstance(item, str):
+                    continue
+                job_id = item
                 # Pause is per-user: if this job's owner is paused, park it and
                 # move on so other tenants' jobs keep running. resume_queue()
                 # re-enqueues the parked ids.
@@ -462,7 +567,7 @@ class JobRuntime:
                     continue
                 await self._run_one(job_id, sm)
             except Exception as exc:  # noqa: BLE001
-                log.exception("job_runtime.unexpected_error", job_id=job_id, error=str(exc))
+                log.exception("job_runtime.unexpected_error", job_id=item, error=str(exc))
             finally:
                 self._queue.task_done()
 

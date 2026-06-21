@@ -8,10 +8,11 @@ just like an event-log import:
   (or `POST /api/v1/modules/install`). The route writes the bytes to a
   staging tmpdir and submits a job carrying the file path.
 - ``module.install.git`` — clone a git URL (optionally pinned to a ref).
-- ``module.install.registry`` — install from PyPI or npm by name. Today this
-  resolves via the `mate.modules` entry point (Tier 2.2). Until the
-  entry-point discovery lands, the handler raises a clear error so the UI
-  can show a friendly message.
+- ``module.install.registry`` — install from PyPI by name. After
+  ``uv pip install`` it resolves the new module via its `mate.modules`
+  entry point. The ``source: "npm"`` variant raises ``NotImplementedError``
+  by design: an npm-only package ships no Python entry point for the loader
+  to bind to, so there is nothing to mount in-process.
 
 Every handler ends with `loader.load_one(folder, manifest)` so the module
 becomes available without a restart.

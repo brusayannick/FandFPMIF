@@ -93,6 +93,16 @@ export const queryKeys = {
   job: (id: string) => ["jobs", id] as const,
 };
 
+/** Matches only event-log *list* caches (key `["event-logs", params]`), never
+ *  detail or sub-resource keys — so optimistic list edits don't touch them. */
+function isEventLogListKey(queryKey: readonly unknown[]): boolean {
+  return (
+    queryKey[0] === "event-logs" &&
+    queryKey.length === 2 &&
+    typeof queryKey[1] === "object"
+  );
+}
+
 function eventsPath(logId: string, params: EventsListParams): string {
   const qs = new URLSearchParams();
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
@@ -322,7 +332,23 @@ export function useDeleteEventLog() {
   return useMutation({
     mutationFn: (id: string) =>
       api<void>(`/api/v1/event-logs/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
+    // Optimistic: drop the row from every list cache immediately, roll back on
+    // error, reconcile with the server on settle.
+    onMutate: async (id) => {
+      await qc.cancelQueries({ predicate: (q) => isEventLogListKey(q.queryKey) });
+      const prev = qc.getQueriesData<EventLogSummary[]>({
+        predicate: (q) => isEventLogListKey(q.queryKey),
+      });
+      qc.setQueriesData<EventLogSummary[]>(
+        { predicate: (q) => isEventLogListKey(q.queryKey) },
+        (old) => (Array.isArray(old) ? old.filter((l) => l.id !== id) : old),
+      );
+      return { prev };
+    },
+    onError: (_e, _id, ctx) => {
+      ctx?.prev?.forEach(([key, data]) => qc.setQueryData(key, data));
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
     },
   });
@@ -370,7 +396,18 @@ export function useRenameFolder() {
         method: "PATCH",
         json: { name: input.name },
       }),
-    onSuccess: () => {
+    onMutate: async ({ id, name }) => {
+      await qc.cancelQueries({ queryKey: queryKeys.folders() });
+      const prev = qc.getQueryData<FolderSummary[]>(queryKeys.folders());
+      qc.setQueryData<FolderSummary[]>(queryKeys.folders(), (old) =>
+        old?.map((f) => (f.id === id ? { ...f, name } : f)),
+      );
+      return { prev };
+    },
+    onError: (_e, _vars, ctx) => {
+      if (ctx) qc.setQueryData(queryKeys.folders(), ctx.prev);
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: queryKeys.folders() });
     },
   });
@@ -381,7 +418,18 @@ export function useDeleteFolder() {
   return useMutation({
     mutationFn: (id: string) =>
       api<void>(`/api/v1/folders/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: queryKeys.folders() });
+      const prev = qc.getQueryData<FolderSummary[]>(queryKeys.folders());
+      qc.setQueryData<FolderSummary[]>(queryKeys.folders(), (old) =>
+        old?.filter((f) => f.id !== id),
+      );
+      return { prev };
+    },
+    onError: (_e, _id, ctx) => {
+      if (ctx) qc.setQueryData(queryKeys.folders(), ctx.prev);
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: queryKeys.folders() });
       // Folder delete promotes children to root, so log placement changes.
       qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
@@ -412,7 +460,29 @@ export function useRenameEventLog() {
         method: "PATCH",
         json: { name: input.name },
       }),
-    onSuccess: (_data, vars) => {
+    // Optimistic: reflect the new name in every list + the detail right away.
+    onMutate: async ({ id, name }) => {
+      await qc.cancelQueries({ predicate: (q) => isEventLogListKey(q.queryKey) });
+      await qc.cancelQueries({ queryKey: queryKeys.eventLog(id) });
+      const prevLists = qc.getQueriesData<EventLogSummary[]>({
+        predicate: (q) => isEventLogListKey(q.queryKey),
+      });
+      const prevDetail = qc.getQueryData<EventLogDetail>(queryKeys.eventLog(id));
+      qc.setQueriesData<EventLogSummary[]>(
+        { predicate: (q) => isEventLogListKey(q.queryKey) },
+        (old) =>
+          Array.isArray(old) ? old.map((l) => (l.id === id ? { ...l, name } : l)) : old,
+      );
+      if (prevDetail) {
+        qc.setQueryData<EventLogDetail>(queryKeys.eventLog(id), { ...prevDetail, name });
+      }
+      return { prevLists, prevDetail, id };
+    },
+    onError: (_e, _vars, ctx) => {
+      ctx?.prevLists?.forEach(([key, data]) => qc.setQueryData(key, data));
+      if (ctx) qc.setQueryData(queryKeys.eventLog(ctx.id), ctx.prevDetail);
+    },
+    onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
       qc.invalidateQueries({ queryKey: queryKeys.eventLog(vars.id) });
     },
@@ -524,9 +594,26 @@ export function useModuleConfig(moduleId: string) {
 
 export function useUninstallModule() {
   const qc = useQueryClient();
+  const isModuleListKey = (queryKey: readonly unknown[]) =>
+    queryKey[0] === "modules" && queryKey.length === 2;
   return useMutation({
     mutationFn: (id: string) => api(`/api/v1/modules/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["modules"] }),
+    // Optimistic: pull the card from every module list cache immediately.
+    onMutate: async (id) => {
+      await qc.cancelQueries({ predicate: (q) => isModuleListKey(q.queryKey) });
+      const prev = qc.getQueriesData<ModuleSummary[]>({
+        predicate: (q) => isModuleListKey(q.queryKey),
+      });
+      qc.setQueriesData<ModuleSummary[]>(
+        { predicate: (q) => isModuleListKey(q.queryKey) },
+        (old) => (Array.isArray(old) ? old.filter((m) => m.id !== id) : old),
+      );
+      return { prev };
+    },
+    onError: (_e, _id, ctx) => {
+      ctx?.prev?.forEach(([key, data]) => qc.setQueryData(key, data));
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["modules"] }),
   });
 }
 

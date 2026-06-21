@@ -5,7 +5,6 @@ import { useTheme } from "next-themes";
 import { useMounted } from "@/lib/use-mounted";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
 import {
   RadioGroup,
   RadioGroupItem,
@@ -15,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useUi } from "@/lib/stores/ui";
 import { StorageGauge } from "@/components/settings/storage-gauge";
+import { WorkerConcurrency } from "@/components/settings/worker-concurrency";
 import { useOnboardingState, useUpdateOnboarding } from "@/lib/onboarding-queries";
 import type { ExperienceLevel } from "@/lib/stores/onboarding";
 
@@ -219,12 +219,7 @@ export default function GeneralSettingsPage() {
         <CardContent className="space-y-3">
           <div className="space-y-2">
             <Label>Worker concurrency</Label>
-            <p className="text-xs text-muted-foreground">
-              Backend setting - change <code className="rounded bg-muted px-1 text-[11px]">WORKER_CONCURRENCY</code> in
-              the API env and restart. The slider below is a placeholder for the
-              live-update path that lands with the settings sync (phase 9+).
-            </p>
-            <Slider defaultValue={[2]} min={1} max={8} step={1} disabled className="cursor-not-allowed" />
+            <WorkerConcurrency />
           </div>
         </CardContent>
       </Card>

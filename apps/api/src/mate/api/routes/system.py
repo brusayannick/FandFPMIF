@@ -13,13 +13,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from mate.api import __version__
-from mate.api.auth import CurrentUserDep
+from mate.api.auth import ADMIN_ROLE, AdminUserDep, CurrentUserDep
 from mate.api.config import get_settings
+from mate.api.jobs.runtime import (
+    MAX_WORKERS,
+    MIN_WORKERS,
+    get_job_runtime,
+    save_persisted_concurrency,
+)
 from mate.api.modules import get_module_loader
 
+log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/system", tags=["system"])
 
 
@@ -68,6 +77,45 @@ async def storage(user: CurrentUserDep) -> dict[str, Any]:
         "data_dir": str(data_dir),
         "modules_dir": str(modules_dir),
     }
+
+
+class JobsConfigOut(BaseModel):
+    worker_concurrency: int
+    min: int = MIN_WORKERS
+    max: int = MAX_WORKERS
+    # Whether the caller may change it. The slider renders read-only otherwise.
+    is_admin: bool
+
+
+class JobsConfigIn(BaseModel):
+    worker_concurrency: int = Field(ge=MIN_WORKERS, le=MAX_WORKERS)
+
+
+@router.get("/jobs", response_model=JobsConfigOut)
+async def get_jobs_config(user: CurrentUserDep) -> JobsConfigOut:
+    """Live job-runtime worker concurrency + bounds (Settings → General → Jobs).
+
+    Readable by any user so the slider shows the current value; only admins can
+    change it (see the PUT). Mirrors the ``admin/storage`` GET's ``is_admin``
+    pattern so the page renders a read-only state rather than a hard 403.
+    """
+    return JobsConfigOut(
+        worker_concurrency=get_job_runtime().concurrency(),
+        is_admin=ADMIN_ROLE in user.roles,
+    )
+
+
+@router.put("/jobs", response_model=JobsConfigOut)
+async def put_jobs_config(body: JobsConfigIn, user: AdminUserDep) -> JobsConfigOut:
+    """Resize the worker pool live and persist the value (admin only).
+
+    The change takes effect immediately (graceful — running jobs are never
+    interrupted) and survives a restart via ``system_settings``.
+    """
+    applied = await get_job_runtime().set_concurrency(body.worker_concurrency)
+    await save_persisted_concurrency(applied)
+    log.info("system_jobs_concurrency_set", admin_id=user.id, workers=applied)
+    return JobsConfigOut(worker_concurrency=applied, is_admin=True)
 
 
 @router.get("/diagnostics")

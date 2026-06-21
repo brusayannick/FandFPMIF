@@ -53,6 +53,11 @@ services:
       NEXT_PUBLIC_API_URL: https://pm-mate.uni-muenster.de
       AUTH_URL: https://pm-mate.uni-muenster.de
       KEYCLOAK_ISSUER: https://pm-mate.uni-muenster.de/auth/realms/flows-funds
+      # Redirect every login straight to the university IdP (no Keycloak form).
+      # Value is the IdP *alias* — must equal the segment in the registered
+      # broker redirect URI (.../broker/keycloak-oidc/endpoint). See
+      # infra/keycloak/configure-university-idp.sh.
+      KEYCLOAK_IDP_HINT: ${KEYCLOAK_IDP_HINT:-keycloak-oidc}
       # Server-side OIDC calls (esp. the code→token POST) must NOT hairpin out
       # through the uni proxy — that retried the POST and invalidated the
       # single-use code ("Code not valid"). The proxy service carries a docker
@@ -74,9 +79,10 @@ services:
       # Internal (container -> container) fetch of the signing keys. Note the
       # /auth prefix — it must match KC_HTTP_RELATIVE_PATH or every token fails.
       KEYCLOAK_JWKS_URL: http://keycloak:8080/auth/realms/flows-funds/protocol/openid-connect/certs
-    # Replace the base volume list to drop the macOS-only cv4cdd model mount.
-    # To use cv4cdd on the VM, copy the model onto the host and add a mount
-    # here, e.g. - /srv/flows-funds/cv4cdd_model:/srv/flows-funds/cv4cdd_model:ro
+    # Stated explicitly for the VM. The CV4CDD model is uploaded at runtime into
+    # modules/cv4cdd/model/ (covered by the ./modules mount). Only add a separate
+    # host mount here if you keep the model outside the repo, e.g.
+    #   - /srv/flows-funds/cv4cdd_model:/srv/flows-funds/cv4cdd_model:ro
     volumes: !override
       - ./data:/app/data
       - ./modules:/app/modules

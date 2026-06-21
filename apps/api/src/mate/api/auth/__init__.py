@@ -13,6 +13,7 @@ from mate.api.auth.ownership import (
     get_owned_event_log,
     get_owned_folder,
     get_owned_job,
+    get_owned_watched_folder,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "get_owned_event_log",
     "get_owned_folder",
     "get_owned_job",
+    "get_owned_watched_folder",
 ]

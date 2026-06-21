@@ -549,3 +549,33 @@ async def test_job_progress_adapter_fraction_vs_counter() -> None:
     # Float endpoints of the fraction range still map onto the 0-100 scale.
     await adapter.update(1.0)
     assert calls[-1] == (100, 100, None, None)
+
+
+def test_discover_skips_duplicate_id_across_roots(tmp_path: Path) -> None:
+    """A leftover upload colliding with a bundled default must not abort the
+    whole load. Regression: a stray ``uploaded_modules/discovery`` next to the
+    default ``modules/discovery`` made ``discover()`` raise, which the boot path
+    swallowed — leaving the platform with zero modules and no log. discover()
+    now keeps the first-seen (defaults) copy and skips the duplicate.
+    """
+    from mate.api.modules.discovery import discover
+
+    def _write_module(root: Path, module_id: str) -> Path:
+        folder = root / module_id
+        folder.mkdir(parents=True)
+        (folder / "manifest.yaml").write_text(
+            f"id: {module_id}\nname: Dup\nversion: 0.1.0\ncategory: foundation\n"
+        )
+        return folder
+
+    defaults_root = tmp_path / "modules"
+    uploads_root = tmp_path / "uploaded_modules"
+    kept = _write_module(defaults_root, "discovery")
+    _write_module(uploads_root, "discovery")
+
+    # Defaults root is scanned first, so its copy wins and the upload is skipped
+    # — without raising.
+    found = discover(defaults_root, uploads_root)
+    discovery_mods = [d for d in found if d.id == "discovery"]
+    assert len(discovery_mods) == 1
+    assert discovery_mods[0].folder == kept

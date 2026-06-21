@@ -20,6 +20,7 @@
 import { randomBytes } from "node:crypto";
 import NextAuth, { type DefaultSession } from "next-auth";
 import KeycloakProvider from "next-auth/providers/keycloak";
+import CredentialsProvider from "next-auth/providers/credentials";
 import type { JWT, JWTEncodeParams, JWTDecodeParams } from "next-auth/jwt";
 import * as sessionStore from "@/lib/session-store";
 
@@ -30,6 +31,10 @@ declare module "next-auth" {
     provider?: string;
     user: {
       id: string;
+      /** Keycloak realm roles, surfaced for client-side nav gating. */
+      roles?: string[];
+      /** Convenience flag — true iff `roles` includes the `admin` realm role. */
+      isAdmin?: boolean;
     } & DefaultSession["user"];
   }
 }
@@ -41,14 +46,59 @@ declare module "next-auth/jwt" {
     expiresAt?: number;
     provider?: string;
     error?: "RefreshAccessTokenError";
+    /** Keycloak realm roles, decoded from the access token (no signature check
+     * — we trust our own freshly-minted token; the API re-validates server-side). */
+    roles?: string[];
     /** Server-side store key — present only when SESSION_STORE_DIR is set. */
     sid?: string;
+  }
+}
+
+/** Decode the `realm_access.roles` from a Keycloak access token's payload.
+ * No signature verification — this only drives UI affordances; every protected
+ * API call is independently validated against the JWKS on the backend. */
+function rolesFromAccessToken(accessToken: string | undefined): string[] {
+  if (!accessToken) return [];
+  const payload = accessToken.split(".")[1];
+  if (!payload) return [];
+  try {
+    const json = Buffer.from(
+      payload.replace(/-/g, "+").replace(/_/g, "/"),
+      "base64",
+    ).toString("utf8");
+    const claims = JSON.parse(json) as { realm_access?: { roles?: unknown } };
+    const roles = claims.realm_access?.roles;
+    return Array.isArray(roles) ? roles.filter((r): r is string => typeof r === "string") : [];
+  } catch {
+    return [];
   }
 }
 
 const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER ?? "http://localhost:8080/realms/flows-funds";
 const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID ?? "flows-funds-web";
 const KEYCLOAK_CLIENT_SECRET = process.env.KEYCLOAK_CLIENT_SECRET ?? "";
+// When set to a brokered IdP alias (e.g. "keycloak-oidc"), we pass kc_idp_hint on
+// the authorize request so Keycloak skips its own login form and redirects
+// straight to that IdP. Leave empty to show Keycloak's local login form (also
+// the break-glass path for the admin@flows-funds.local account).
+const KEYCLOAK_IDP_HINT = process.env.KEYCLOAK_IDP_HINT ?? "";
+
+// Demo/dev login bypass. When DEMO_MODE is truthy we add a credentials provider
+// ("demo") that signs a fixed demo user in with no form and no Keycloak round
+// trip, minting DEMO_ACCESS_TOKEN as the session access token. The API accepts
+// that exact sentinel as the demo user when its own DEMO_MODE is on (see
+// auth/dependencies.DEMO_ACCESS_TOKEN). Both flags must be set, and NEITHER
+// belongs in a real production deployment.
+export const DEMO_MODE = ["1", "true", "yes", "on"].includes(
+  (process.env.DEMO_MODE ?? "").toLowerCase(),
+);
+// When DEMO_ADMIN is truthy, the demo session is flagged isAdmin so admin-only UI
+// shows. The API must also have DEMO_ADMIN on to actually authorise /admin/*.
+export const DEMO_ADMIN = ["1", "true", "yes", "on"].includes(
+  (process.env.DEMO_ADMIN ?? "").toLowerCase(),
+);
+const DEMO_ACCESS_TOKEN = "demo-access-token";
+const DEMO_USER = { id: "demo-user", name: "Demo User", email: "demo@mate.local" };
 
 // Single-flight guard: several modules (`lib/api`, `lib/ws`, the analytics
 // client) each call `getSession()` independently, so after the access token
@@ -138,19 +188,55 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       clientId: KEYCLOAK_CLIENT_ID,
       clientSecret: KEYCLOAK_CLIENT_SECRET,
       issuer: KEYCLOAK_ISSUER,
+      // Forward kc_idp_hint so Keycloak redirects straight to the brokered IdP
+      // (no Keycloak login page). Only added when KEYCLOAK_IDP_HINT is set; we
+      // re-declare the default OIDC scope here so adding `params` doesn't drop
+      // it.
+      ...(KEYCLOAK_IDP_HINT
+        ? {
+            authorization: {
+              params: { scope: "openid email profile", kc_idp_hint: KEYCLOAK_IDP_HINT },
+            },
+          }
+        : {}),
     }),
+    // Demo bypass — only registered when DEMO_MODE is on. No credentials are
+    // checked; it always returns the same fixed demo user.
+    ...(DEMO_MODE
+      ? [
+          CredentialsProvider({
+            id: "demo",
+            name: "Demo",
+            credentials: {},
+            authorize: () => DEMO_USER,
+          }),
+        ]
+      : []),
   ],
   session: { strategy: "jwt", maxAge: SESSION_MAX_AGE },
   ...(jwtOverride ? { jwt: jwtOverride } : {}),
   callbacks: {
     async jwt({ token, account }) {
       if (account) {
+        if (account.provider === "demo") {
+          // Fixed demo session — sentinel token the API maps to the demo user.
+          // No refresh token; keep it valid for the full session lifetime.
+          token.accessToken = DEMO_ACCESS_TOKEN;
+          token.provider = "demo";
+          token.expiresAt = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE;
+          token.refreshToken = undefined;
+          token.error = undefined;
+          return token;
+        }
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
         token.expiresAt = account.expires_at;
         token.provider = account.provider;
         return token;
       }
+      // The demo session is non-expiring and has no refresh token — never try
+      // to rotate it (that would fail and flag RefreshAccessTokenError).
+      if (token.provider === "demo") return token;
       const now = Math.floor(Date.now() / 1000);
       if (token.expiresAt && now < token.expiresAt - 30) {
         return token;
@@ -162,6 +248,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       session.error = token.error;
       session.provider = token.provider;
       if (token.sub) session.user.id = token.sub;
+      // The demo sentinel token isn't a JWT, so roles can't be decoded from it —
+      // derive them from DEMO_ADMIN instead (mirrors the API's demo_admin flag).
+      if (token.provider === "demo") {
+        session.user.roles = DEMO_ADMIN ? ["admin"] : [];
+        session.user.isAdmin = DEMO_ADMIN;
+        return session;
+      }
+      // Decode roles from the current access token (re-decoded each read so a
+      // rotated token's roles stay correct). Drives only UI gating.
+      const roles = rolesFromAccessToken(token.accessToken);
+      session.user.roles = roles;
+      session.user.isAdmin = roles.includes("admin");
       return session;
     },
   },

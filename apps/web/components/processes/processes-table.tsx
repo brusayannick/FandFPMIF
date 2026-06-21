@@ -194,7 +194,10 @@ interface ProcessesTableProps {
 
 export function ProcessesTable({ rows }: ProcessesTableProps) {
   const foldersQ = useFolders();
-  const folders = foldersQ.data ?? [];
+  // Keep a stable reference: `?? []` would allocate a fresh array every render
+  // while the query is loading, which churns every downstream memo/effect that
+  // depends on `folders` (notably the auto-expand effect below → render loop).
+  const folders = useMemo(() => foldersQ.data ?? [], [foldersQ.data]);
   const tree = useMemo(() => buildTree(folders, rows), [folders, rows]);
 
   const [expanded, setExpanded] = useState<Set<string>>(() => {

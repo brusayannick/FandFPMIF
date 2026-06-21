@@ -73,6 +73,34 @@
       ]
     }
   ],
+  "identityProviders": [
+    {
+      "alias": "keycloak-oidc",
+      "displayName": "University Login",
+      "providerId": "keycloak-oidc",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "clientId": "REPLACE_WITH_UNIVERSITY_OIDC_CLIENT_ID",
+        "clientSecret": "REPLACE_WITH_UNIVERSITY_OIDC_CLIENT_SECRET",
+        "issuer": "https://idp.uni-muenster.de/REPLACE",
+        "authorizationUrl": "https://idp.uni-muenster.de/REPLACE/authorize",
+        "tokenUrl": "https://idp.uni-muenster.de/REPLACE/token",
+        "userInfoUrl": "https://idp.uni-muenster.de/REPLACE/userinfo",
+        "jwksUrl": "https://idp.uni-muenster.de/REPLACE/jwks",
+        "useJwksUrl": "true",
+        "validateSignature": "true",
+        "defaultScope": "openid profile email",
+        "syncMode": "IMPORT",
+        "pkceEnabled": "true",
+        "pkceMethod": "S256"
+      }
+    }
+  ],
   "users": [
     {
       "username": "admin@flows-funds.local",

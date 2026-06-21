@@ -11,6 +11,7 @@
  * Single-instance only: a horizontally scaled deployment would need a shared
  * store (Redis/DB) instead of the local filesystem.
  */
+import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { JWT } from "next-auth/jwt";
@@ -32,7 +33,11 @@ export async function putSession(sid: string, token: JWT, ttlSeconds: number): P
   await fs.mkdir(DIR as string, { recursive: true });
   const entry: Entry = { token, exp: Date.now() + ttlSeconds * 1000 };
   const target = fileFor(sid);
-  const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  // Unique per write: concurrent encodes for the same sid (a burst of parallel
+  // authed requests) used to collide on a pid+ms tmp name, so the first rename
+  // won and the rest hit ENOENT (JWTSessionError). A random suffix avoids that;
+  // rename stays atomic and last-writer-wins is fine for a session store.
+  const tmp = `${target}.${randomBytes(8).toString("hex")}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(entry), { mode: 0o600 });
   await fs.rename(tmp, target); // atomic within the same filesystem
 }

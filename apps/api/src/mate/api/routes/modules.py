@@ -337,7 +337,7 @@ async def install_from_upload(
 ) -> InstallJobResponse:
     """Accept a zip / tar.gz, persist it to a staging dir, and submit a job
     that unpacks and registers the module. Returns the job id so the dock can
-    stream progress (`WS /api/v1/events` filtered by `job.*`).
+    stream progress (`GET /api/v1/events` SSE filtered by `job.*`).
     """
     filename = file.filename or "upload"
     if not _has_allowed_upload_suffix(filename):

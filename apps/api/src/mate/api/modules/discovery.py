@@ -50,9 +50,11 @@ def discover(*roots: Path) -> list[DiscoveredModule]:
     override an installed module by dropping a folder in `modules/`).
 
     ``roots`` are filesystem roots scanned in order — typically the repo
-    ``modules/`` defaults root first, then the persistent uploads root. A
-    module id declared in two roots (e.g. an upload colliding with a default)
-    is a hard error, which is exactly the protection we want.
+    ``modules/`` defaults root first, then the persistent uploads root. The
+    first copy of an id wins; a later duplicate (e.g. a leftover upload
+    colliding with a bundled default) is skipped with a warning rather than
+    aborting the whole load — one stray module must fail itself, not brick
+    every module at boot. Rejecting an id collision is the upload path's job.
     """
 
     discovered: list[DiscoveredModule] = []
@@ -78,10 +80,19 @@ def discover(*roots: Path) -> list[DiscoveredModule]:
                 )
                 raise
             if manifest.id in seen_ids:
-                raise ModuleManifestError(
-                    f"Two modules declare the same id {manifest.id!r}: "
-                    f"{seen_ids[manifest.id]} and {entry}."
+                # Roots are scanned defaults-first, so the first-seen copy wins
+                # and a later duplicate (almost always a leftover upload sitting
+                # next to the bundled default) is skipped. Skipping with a
+                # warning — instead of raising — keeps one stray module from
+                # aborting the entire load and silently leaving the platform
+                # with no modules at all.
+                log.warning(
+                    "modules.discovery.duplicate_id_skipped",
+                    module_id=manifest.id,
+                    kept=str(seen_ids[manifest.id]),
+                    skipped=str(entry),
                 )
+                continue
             seen_ids[manifest.id] = entry
             discovered.append(
                 DiscoveredModule(folder=entry, manifest=manifest, source="filesystem")

@@ -2,8 +2,8 @@
 
 Two consumers in the platform process:
 
-  - The frontend, via `WS /api/v1/events` (topic-filtered) and per-job
-    `WS /api/v1/jobs/{id}/stream` — both implemented as bus subscribers.
+  - The frontend, via `GET /api/v1/events` (SSE, topic-filtered) and per-job
+    `GET /api/v1/jobs/{id}/stream` — both implemented as bus subscribers.
   - Modules, via `ctx.bus` (phase 5) — module authors publish/subscribe
     Pydantic-typed events (§5.7).
 

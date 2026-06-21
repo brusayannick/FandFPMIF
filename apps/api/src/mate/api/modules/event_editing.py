@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mate.api.db.models import EventEdit, EventLog
 from mate.api.ingest.aggregation import compute_cases
 from mate.api.ingest.storage import log_paths
+from mate.api.storage import sync as storage_sync
 from mate.api.schemas.event_log_data import ColumnSpec, EventsHeader
 
 _locks: dict[str, asyncio.Lock] = {}
@@ -162,6 +163,8 @@ def _rewrite_with_edits(
 ) -> CellEditOutcome:
     """Synchronous parquet rewrite — runs on a worker thread."""
     paths = log_paths(log_id, user_id)
+    # Pull the log dir from S3 if the local cache is cold (no-op in local mode).
+    storage_sync.hydrate_dir_sync(paths.root)
     if not paths.events.exists():
         raise FileNotFoundError(f"events.parquet missing for log {log_id!r}.")
 
@@ -261,6 +264,8 @@ async def _persist_after_write(
             )
         )
     await session.commit()
+    # Re-mirror the edited parquet to the S3 primary store (no-op in local mode).
+    await storage_sync.persist_log(log_id=log_id, user_id=user_id)
 
 
 def _align_to_column(series: pd.Series, value: Any) -> Any:

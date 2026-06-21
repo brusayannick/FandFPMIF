@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { GripVertical, Settings2, X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -22,7 +23,7 @@ import { DEFAULT_CARD_CHROME, type CardChrome, type DashboardItem, type WidgetCo
  * (`.dashboard-drag-handle`) and exposes per-card settings (title + the
  * widget's `config_schema`) and a remove button.
  */
-export function DashboardCard({
+export const DashboardCard = memo(function DashboardCard({
   item,
   logId,
   editing,
@@ -118,4 +119,4 @@ export function DashboardCard({
       </div>
     </div>
   );
-}
+});

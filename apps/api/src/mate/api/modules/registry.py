@@ -67,10 +67,11 @@ class CapabilityRegistry:
     def installed_modules(self) -> list[str]:
         return sorted(self._modules)
 
+    def capability_names(self) -> list[str]:
+        return list(self._caps.keys())
+
     async def call(self, capability: str, **kwargs: Any) -> Any:
         cap = self._caps.get(capability)
         if cap is None:
-            raise LookupError(
-                f"Capability {capability!r} is not provided by any loaded module."
-            )
+            raise LookupError(f"Capability {capability!r} is not provided by any loaded module.")
         return await cap.handler(**kwargs)

@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 
-import { auth, signIn } from "@/auth";
+import { auth, signIn, DEMO_MODE } from "@/auth";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { Button } from "@/components/ui/button";
+import { DemoAutoSignIn } from "./demo-auto-signin";
 
 export default async function LoginPage({
   searchParams,
@@ -26,19 +27,37 @@ export default async function LoginPage({
       <div className="space-y-2 text-center">
         <h1 className="text-2xl font-semibold">Mate</h1>
         <p className="text-sm text-muted-foreground">
-          Sign in with your workspace account to continue.
+          {DEMO_MODE
+            ? "Demo mode — signing you in…"
+            : "Sign in with your workspace account to continue."}
         </p>
       </div>
-      <form
-        action={async () => {
-          "use server";
-          await signIn("keycloak", { redirectTo: callbackUrl });
-        }}
-      >
-        <Button type="submit" className="w-full" size="lg">
-          Continue with Keycloak
-        </Button>
-      </form>
+      {DEMO_MODE ? (
+        <>
+          <DemoAutoSignIn callbackUrl={callbackUrl} />
+          <form
+            action={async () => {
+              "use server";
+              await signIn("demo", { redirectTo: callbackUrl });
+            }}
+          >
+            <Button type="submit" className="w-full" size="lg">
+              Enter demo workspace
+            </Button>
+          </form>
+        </>
+      ) : (
+        <form
+          action={async () => {
+            "use server";
+            await signIn("keycloak", { redirectTo: callbackUrl });
+          }}
+        >
+          <Button type="submit" className="w-full" size="lg">
+            Login with university account
+          </Button>
+        </form>
+      )}
     </div>
   );
 }

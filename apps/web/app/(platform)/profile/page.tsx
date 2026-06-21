@@ -5,6 +5,7 @@ import { signOut, useSession } from "next-auth/react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { PageContainer } from "@/components/page";
 import { initials } from "@/components/user-menu";
 
 function providerLabel(provider?: string): string {
@@ -19,7 +20,7 @@ export default function ProfilePage() {
   const isLoading = status === "loading";
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-6">
+    <PageContainer className="space-y-4">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Profile</CardTitle>
@@ -72,7 +73,7 @@ export default function ProfilePage() {
           </Button>
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }
 

@@ -125,9 +125,11 @@ async def test_retry_only_failed(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_unknown_job_409(client: AsyncClient) -> None:
+async def test_cancel_unknown_job_404(client: AsyncClient) -> None:
+    # Cancel enforces ownership first (get_owned_job), so an unknown/not-yours
+    # job id is 404 — like get/retry. 409 is reserved for "exists but finished".
     resp = await client.post("/api/v1/jobs/00000000-0000-0000-0000-000000000000/cancel")
-    assert resp.status_code == 409
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -141,45 +143,53 @@ async def test_pause_resume_idempotent(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_ws_events_receives_job_lifecycle(client: AsyncClient) -> None:
-    """Subscribe to job.* over WS, kick off an import, expect a queued/started/completed sequence.
+async def test_sse_events_receives_job_lifecycle(client: AsyncClient) -> None:
+    """The platform SSE stream relays a job's queued/started/completed lifecycle.
 
-    We use the same ASGI transport so this exercises the real route — no network hop.
+    The stream is SSE, not WebSocket: the prod proxy chain drops WS upgrades, so
+    a handshake reaches the API as a plain GET and 404s. httpx's ASGITransport
+    buffers the whole response and so can't read an open-ended stream, so we
+    drive the route's streaming generator directly while a real import publishes
+    `job.*` events onto the bus.
     """
-    from mate.api.main import create_app
+    from mate.api.auth.dependencies import CurrentUser
+    from mate.api.routes.events_sse import stream_events
 
-    app = create_app()
+    from .conftest import TEST_USER_EMAIL, TEST_USER_ID
+
+    user = CurrentUser(
+        id=TEST_USER_ID,
+        email=TEST_USER_EMAIL,
+        preferred_username="test",
+        name="Test User",
+        roles=("user",),
+    )
+    resp = await stream_events(user=user, topic=["job.*"])
     received: list[dict] = []
 
-    async with app.router.lifespan_context(app):
-        # Use websockets via httpx is awkward; use Starlette's TestClient pattern via
-        # the app's ASGI directly. Easiest: drive the route handler with a Starlette
-        # WebSocket client.
-        from starlette.testclient import TestClient
+    async def _collect() -> None:
+        async for chunk in resp.body_iterator:
+            for line in chunk.splitlines():
+                if not line.startswith("data:"):  # skip `: ping` keep-alives
+                    continue
+                msg = json.loads(line[5:].lstrip(" "))
+                received.append(msg)
+                if msg["topic"] == "job.completed":
+                    return
 
-        with TestClient(app) as tc:
-            with tc.websocket_connect("/api/v1/events?topic=job.*") as ws:
-                # Drive an import in a thread (TestClient is sync); read messages until completed.
-                from threading import Thread
+    async def _kick() -> None:
+        # Let the bus subscription register before publishing — no replay.
+        await asyncio.sleep(0.3)
+        with (FIXTURES / "sample.xes").open("rb") as f:
+            await client.post(
+                "/api/v1/event-logs",
+                files={"file": ("sample.xes", f, "application/xml")},
+            )
 
-                def _kick() -> None:
-                    with (FIXTURES / "sample.xes").open("rb") as f:
-                        tc.post(
-                            "/api/v1/event-logs",
-                            files={"file": ("sample.xes", f, "application/xml")},
-                        )
-
-                Thread(target=_kick, daemon=True).start()
-                # Read until we see job.completed or 5 s.
-                import time
-
-                deadline = time.monotonic() + 5.0
-                while time.monotonic() < deadline:
-                    raw = ws.receive_text()
-                    msg = json.loads(raw)
-                    received.append(msg)
-                    if msg["topic"] == "job.completed":
-                        break
+    try:
+        await asyncio.wait_for(asyncio.gather(_collect(), _kick()), timeout=15)
+    finally:
+        await resp.body_iterator.aclose()
 
     topics = [m["topic"] for m in received]
     assert "job.queued" in topics

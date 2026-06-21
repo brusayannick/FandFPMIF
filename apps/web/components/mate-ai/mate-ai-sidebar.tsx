@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
 import {
   Activity,
   AlertTriangle,
@@ -28,11 +29,26 @@ import { useModules } from "@/lib/queries";
 import { useUi } from "@/lib/stores/ui";
 import { useTrack } from "@/lib/analytics/hooks";
 import { EV } from "@/lib/analytics/events";
+import { useOnboardingState, useUpdateOnboarding } from "@/lib/onboarding-queries";
+import {
+  NavWidget,
+  type ActionTarget,
+  type NavTarget,
+} from "@/components/mate-ai/nav-widget";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   isError?: boolean;
+  navTargets?: NavTarget[];
+  actionTargets?: ActionTarget[];
+}
+
+interface RouteResponse {
+  intent: string;
+  confidence: number;
+  targets: NavTarget[];
+  actions: ActionTarget[];
 }
 
 interface Starter {
@@ -265,19 +281,35 @@ function AssistantBubble({
 // grounded in cached module outputs without the user pasting context in.
 const PROCESS_RE = /\/processes\/([^/?#]+)(?:\/modules\/([^/?#]+))?/;
 
-function deriveChatContext(pathname: string | null): {
-  log_id?: string;
-  module_ids?: string[];
-} | undefined {
+function deriveChatContext(pathname: string | null):
+  | { current_path?: string; log_id?: string; module_ids?: string[] }
+  | undefined {
   if (!pathname) return undefined;
+  // Always send the current route so the assistant is location-aware and the
+  // router can drop a shortcut to the page the user is already on.
+  const ctx: { current_path: string; log_id?: string; module_ids?: string[] } = {
+    current_path: pathname,
+  };
   const m = pathname.match(PROCESS_RE);
-  if (!m) return undefined;
-  const log_id = decodeURIComponent(m[1]!);
-  // Reserved sub-routes like /processes/import or /processes/new aren't real
-  // log ids — skip them so the chat doesn't try to load nonexistent state.
-  if (log_id === "import" || log_id === "new") return undefined;
-  const module_id = m[2] ? decodeURIComponent(m[2]) : null;
-  return { log_id, module_ids: module_id ? [module_id] : [] };
+  if (m) {
+    const log_id = decodeURIComponent(m[1]!);
+    // Reserved sub-routes like /processes/import or /processes/new aren't real
+    // log ids — skip them so the chat doesn't try to load nonexistent state.
+    if (log_id !== "import" && log_id !== "new") {
+      ctx.log_id = log_id;
+      const module_id = m[2] ? decodeURIComponent(m[2]) : null;
+      ctx.module_ids = module_id ? [module_id] : [];
+    }
+  }
+  return ctx;
+}
+
+// Short, client-side line shown above a chip when we skip the chat LLM (no
+// tokens). References the real destination/action so it reads naturally.
+function confirmationText(targets: NavTarget[], actions: ActionTarget[]): string {
+  if (targets.length) return `Here you go — use the shortcut below to open ${targets[0]!.label}.`;
+  if (actions.length) return `Sure — use the button below to ${actions[0]!.label.toLowerCase()}.`;
+  return "Done.";
 }
 
 export function MateAiSidebar() {
@@ -309,9 +341,64 @@ export function MateAiSidebar() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const track = useTrack();
+  const router = useRouter();
+  const { setTheme } = useTheme();
+  const updateOnboarding = useUpdateOnboarding();
+  const { data: onboarding } = useOnboardingState();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const onNavigate = (target: NavTarget) => {
+    track(EV.AI_NAV_CLICKED, { target_id: target.id, kind: target.kind });
+    // Keep the sidebar open across navigation (the platform layout persists, so
+    // the conversation stays put) — the user can keep chatting after the jump.
+    router.push(target.href);
+  };
+
+  // Apply a whitelisted settings change on click. An EXPLICIT switch (no dynamic
+  // store access) is the client-side half of the safety boundary: only the
+  // settings enumerated here can ever be touched. useUi changes auto-persist.
+  const applyUiSetting = (setting: string, value: string | boolean) => {
+    const s = useUi.getState();
+    switch (setting) {
+      case "notifications_muted":
+        return s.setNotificationsMuted(value as boolean);
+      case "confidential_only":
+        return s.setConfidentialOnly(value as boolean);
+      case "sidebar_collapsed":
+        return s.setSidebarCollapsed(value as boolean);
+      case "show_unavailable_modules":
+        return s.setShowUnavailableModules(value as boolean);
+      case "show_disabled_modules":
+        return s.setShowDisabledModules(value as boolean);
+      case "date_format":
+        return s.setDateFormat(value as "iso" | "us" | "eu");
+      case "timezone":
+        return s.setTimezone(value as string);
+      case "csv_delimiter":
+        return s.setCsvDelimiter(value as "," | ";" | "\t" | "|");
+      case "csv_timestamp_format":
+        return s.setCsvTimestampFormat(value as string);
+    }
+  };
+
+  const onAction = (action: ActionTarget) => {
+    track(EV.AI_ACTION_APPLIED, { setting: action.setting, target: action.target });
+    if (action.target === "theme") {
+      setTheme(String(action.value));
+    } else if (action.target === "onboarding") {
+      if (action.setting === "experience_level" && onboarding) {
+        // Preserve the completed flag — only re-tune the proficiency level.
+        updateOnboarding.mutate({
+          completed: onboarding.completed,
+          experience_level: action.value as "beginner" | "intermediate" | "expert",
+        });
+      }
+    } else {
+      applyUiSetting(action.setting, action.value);
+    }
+  };
 
   const isStreaming = streamingContent !== null;
   const hasMessages = messages.length > 0 || isStreaming;
@@ -343,7 +430,6 @@ export function MateAiSidebar() {
     const userMsg: Message = { role: "user", content: trimmed };
     const history: Message[] = [...messages, userMsg];
     setMessages(history);
-    setStreamingContent("");
     setDraft("");
 
     // Only send non-error messages to the API
@@ -351,23 +437,84 @@ export function MateAiSidebar() {
       .filter((m) => !m.isError)
       .map((m) => ({ role: m.role, content: m.content }));
 
+    // 1) Classify first (cheap nano). This decides whether the chat LLM is even
+    //    needed and lets the chat reply stay concise when a chip is shown.
+    let route: RouteResponse | null = null;
+    try {
+      const r = await rawFetch("/api/v1/ai/route", {
+        method: "POST",
+        json: chatContext ? { message: trimmed, context: chatContext } : { message: trimmed },
+      });
+      route = r.ok ? ((await r.json()) as RouteResponse) : null;
+    } catch {
+      route = null;
+    }
+
+    const targets = route?.targets ?? [];
+    const actions = route?.actions ?? [];
+    if (targets.length) {
+      track(EV.AI_NAV_SUGGESTED, {
+        intent: route?.intent,
+        confidence: route?.confidence,
+        count: targets.length,
+        target_ids: targets.map((t) => t.id),
+      });
+    }
+    if (actions.length) {
+      track(EV.AI_ACTION_SUGGESTED, { settings: actions.map((a) => a.setting) });
+    }
+
+    // 2) Command-style turns skip the chat LLM entirely and show a templated line
+    //    + chip(s): an available navigation target, or ANY settings action (a
+    //    setting chip never needs an LLM answer — just like a nav chip).
+    const navChip = targets[0];
+    const pureNavigate = route?.intent === "navigate" && navChip?.available === true;
+    if (pureNavigate || actions.length > 0) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: confirmationText(targets, actions),
+          navTargets: targets.length ? targets : undefined,
+          actionTargets: actions.length ? actions : undefined,
+        },
+      ]);
+      return;
+    }
+
+    // 3) Run the chat LLM. Targets/actions are already known (route awaited), so
+    //    attach them on finalise; pass a nav_hint so the answer stays concise.
+    setStreamingContent("");
     let full = "";
     let finalised = false;
 
     const finalise = (content: string, isError = false) => {
       if (finalised) return;
       finalised = true;
-      setMessages((prev) => [...prev, { role: "assistant", content, isError }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content,
+          isError,
+          navTargets: !isError && targets.length ? targets : undefined,
+          actionTargets: !isError && actions.length ? actions : undefined,
+        },
+      ]);
       setStreamingContent(null);
     };
 
+    const chatBody: Record<string, unknown> = { messages: apiMessages };
+    if (chatContext) chatBody.context = chatContext;
+    if (navChip) {
+      chatBody.nav_hint = {
+        label: navChip.label,
+        intent: route?.intent === "both" ? "both" : "navigate",
+      };
+    }
+
     try {
-      const res = await rawFetch("/api/v1/ai/chat", {
-        method: "POST",
-        json: chatContext
-          ? { messages: apiMessages, context: chatContext }
-          : { messages: apiMessages },
-      });
+      const res = await rawFetch("/api/v1/ai/chat", { method: "POST", json: chatBody });
 
       if (!res.ok) {
         let detail: string;
@@ -540,7 +687,20 @@ export function MateAiSidebar() {
                 msg.role === "user" ? (
                   <UserBubble key={i} content={msg.content} />
                 ) : (
-                  <AssistantBubble key={i} content={msg.content} isError={msg.isError} />
+                  <div key={i}>
+                    <AssistantBubble content={msg.content} isError={msg.isError} />
+                    {((msg.navTargets?.length ?? 0) > 0 ||
+                      (msg.actionTargets?.length ?? 0) > 0) && (
+                      <div className="pl-[30px]">
+                        <NavWidget
+                          targets={msg.navTargets}
+                          actions={msg.actionTargets}
+                          onNavigate={onNavigate}
+                          onAction={onAction}
+                        />
+                      </div>
+                    )}
+                  </div>
                 ),
               )}
               {isStreaming && (

@@ -6,6 +6,7 @@ About → Copy diagnostics* button (§7.6.1, §7.6.3).
 
 from __future__ import annotations
 
+import asyncio
 import platform
 import shutil
 import sys
@@ -62,9 +63,12 @@ async def storage(user: CurrentUserDep) -> dict[str, Any]:
         usage = shutil.disk_usage(data_dir if data_dir.exists() else data_dir.parent)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"shutil.disk_usage failed: {exc}") from exc
+    # The recursive size walk can touch tens of thousands of files (uv caches,
+    # module venvs, parquet) on a slow bind-mount. Run it off the event loop so
+    # it can't stall every other request (including /health) for minutes.
     by_dir: dict[str, int] = {}
     for label, p in (("data", data_dir), ("modules", modules_dir)):
-        by_dir[label] = _dir_size_bytes(p) if p.exists() else 0
+        by_dir[label] = await asyncio.to_thread(_dir_size_bytes, p) if p.exists() else 0
     return {
         "fs_total": usage.total,
         "fs_used": usage.used,

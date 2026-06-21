@@ -25,6 +25,11 @@ services:
       dockerfile: apps/web/Dockerfile
       target: deps
     command: ["pnpm", "--filter", "@mate/web", "dev", "--port", "3000"]
+    environment:
+      # The module bundler defaults to <repo-root>/modules, which isn't mounted
+      # into the dev container; the modules live at /app/modules (base compose
+      # bind-mount). Point the watcher there so panels get rebuilt on change.
+      FF_MODULES_DIR: /app/modules
     volumes:
       - ./apps/web:/repo/apps/web
       - /repo/apps/web/node_modules

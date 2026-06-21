@@ -19,6 +19,7 @@ interface UiState {
   csvDelimiter: "," | ";" | "\t" | "|";
   csvTimestampFormat: string;
   toggleSidebar: () => void;
+  setSidebarCollapsed: (v: boolean) => void;
   setShowUnavailableModules: (v: boolean) => void;
   setShowDisabledModules: (v: boolean) => void;
   setConfidentialOnly: (v: boolean) => void;
@@ -60,6 +61,7 @@ export const UI_DEFAULTS = {
 export const useUi = create<UiState>((set) => ({
   ...UI_DEFAULTS,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
   setShowUnavailableModules: (v) => set({ showUnavailableModules: v }),
   setShowDisabledModules: (v) => set({ showDisabledModules: v }),
   setConfidentialOnly: (v) => set({ confidentialOnly: v }),

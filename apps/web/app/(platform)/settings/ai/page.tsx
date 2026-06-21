@@ -24,6 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -129,7 +130,9 @@ function isProviderConfigured(
 ): boolean {
   if (!provider) return false;
   const p = cfg[provider];
-  if (!p.api_key) return false;
+  // Defensive: `cfg` may carry non-provider keys (e.g. classifier_model);
+  // guard so a stray/null value can't throw on `.api_key`.
+  if (!p || !p.api_key) return false;
   const meta = providerMeta(provider);
   if (meta.needsBaseUrl && !p.base_url) return false;
   return true;
@@ -273,6 +276,7 @@ export default function AiSettingsPage() {
                 k !== "system_prompt" &&
                 k !== "selected_provider" &&
                 k !== "selected_model" &&
+                k !== "classifier_model" &&
                 isProviderConfigured(k as AiProvider, stored),
             ),
           )
@@ -300,8 +304,23 @@ export default function AiSettingsPage() {
               setDraft((d) => ({ ...d, selected_model: m }))
             }
           />
+
+          <ClassifierModelCard
+            provider={selected}
+            classifierModel={draft.classifier_model}
+            defaultModel={draft.selected_model}
+            models={models[selected]}
+            onChange={(m) =>
+              setDraft((d) => ({ ...d, classifier_model: m }))
+            }
+          />
         </>
       )}
+
+      <ProcessDataCard
+        enabled={draft.allow_process_data}
+        onChange={(v) => setDraft((d) => ({ ...d, allow_process_data: v }))}
+      />
 
       <SystemPromptCard
         value={draft.system_prompt}
@@ -578,6 +597,117 @@ function ModelSelectCard({
             <em>Fetch models</em> in the configuration card above to see
             other options.
           </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Classifier model (optional, cheaper) ───────────────────────────────────
+
+function ClassifierModelCard({
+  provider,
+  classifierModel,
+  defaultModel,
+  models,
+  onChange,
+}: {
+  provider: AiProvider;
+  classifierModel: string | null;
+  defaultModel: string | null;
+  models: ModelInfo[];
+  onChange: (modelId: string | null) => void;
+}) {
+  const savedNotInList =
+    classifierModel !== null && !models.some((m) => m.id === classifierModel);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Navigation classifier model</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          MATE AI runs a tiny intent check on each message to suggest in-app
+          navigation. Pick a cheaper/faster model here to keep that overhead low.
+          Leave on <em>Same as default</em> to reuse the default model.
+        </p>
+        <Select
+          value={classifierModel ?? "__default"}
+          onValueChange={(v) => onChange(v === "__default" ? null : v)}
+        >
+          <SelectTrigger className="text-xs">
+            <SelectValue placeholder="Same as default model" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__default">
+              Same as default
+              {defaultModel ? ` (${cleanDisplayName(defaultModel)})` : ""}
+            </SelectItem>
+            {savedNotInList && classifierModel && (
+              <SelectItem value={classifierModel}>
+                {cleanDisplayName(classifierModel)}{" "}
+                <span className="text-muted-foreground">(saved)</span>
+              </SelectItem>
+            )}
+            {models.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.display_name ?? cleanDisplayName(m.id)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {models.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            No models fetched yet for {providerMeta(provider).label}.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Process-data access (opt-in, sensitive) ─────────────────────────────────
+
+function ProcessDataCard({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Access process data</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <Label htmlFor="allow-process-data" className="cursor-pointer">
+              Let MATE AI read your process data
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Enables data answers like &quot;how many variants does Process X have?&quot;.
+              Navigating to a process&apos;s modules by name works regardless of this setting.
+            </p>
+          </div>
+          <Switch
+            id="allow-process-data"
+            checked={enabled}
+            onCheckedChange={onChange}
+          />
+        </div>
+        {enabled && (
+          <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              When enabled, your process statistics (e.g. case, event and variant counts)
+              are sent to the configured AI provider to answer data questions. Only turn
+              this on if sharing this potentially sensitive data with that provider is
+              acceptable.
+            </span>
+          </div>
         )}
       </CardContent>
     </Card>

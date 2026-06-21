@@ -18,6 +18,7 @@ import {
 import { useShallow } from "zustand/react/shallow";
 
 import { cn } from "@/lib/cn";
+import { useMounted } from "@/lib/use-mounted";
 import { useUi } from "@/lib/stores/ui";
 import { Button } from "@/components/ui/button";
 import { UserMenu } from "@/components/user-menu";
@@ -222,14 +223,19 @@ function JobsSidebarButton({ collapsed }: { collapsed: boolean }) {
 
 function ThemeToggle({ collapsed }: { collapsed: boolean }) {
   const { resolvedTheme, setTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
+  // resolvedTheme is client-only; gate on mount so SSR and first client render
+  // agree on the icon/label (otherwise React hydration mismatch #418).
+  const mounted = useMounted();
+  const isDark = mounted && resolvedTheme === "dark";
   const Icon = isDark ? Moon : Sun;
   const button = (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label={
+        mounted ? (isDark ? "Switch to light mode" : "Switch to dark mode") : "Toggle theme"
+      }
       onClick={() => setTheme(isDark ? "light" : "dark")}
       className="h-8 w-8 cursor-pointer text-sidebar-foreground/70"
     >
@@ -240,7 +246,7 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
     <Tooltip>
       <TooltipTrigger asChild>{button}</TooltipTrigger>
       <TooltipContent side={collapsed ? "right" : "top"}>
-        {isDark ? "Light mode" : "Dark mode"}
+        {mounted ? (isDark ? "Light mode" : "Dark mode") : "Theme"}
       </TooltipContent>
     </Tooltip>
   );

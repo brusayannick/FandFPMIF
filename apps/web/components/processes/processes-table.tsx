@@ -204,9 +204,10 @@ export function ProcessesTable({ rows }: ProcessesTableProps) {
     // Start with everything expanded — folders are usually shallow.
     return new Set(folders.map((f) => f.id));
   });
-  // Auto-expand newly created folders. Return the *same* Set when nothing was
-  // added so this never schedules a no-op re-render (which would re-run the
-  // effect and spin into React's "max update depth" loop).
+  // Auto-expand newly created folders. Returns `prev` unchanged when nothing
+  // was added — otherwise this would emit a fresh Set on every render and, with
+  // `folders` being a new `[]` reference while the query loads, spin into an
+  // infinite render loop (React error #185).
   useEffect(() => {
     setExpanded((prev) => {
       let changed = false;

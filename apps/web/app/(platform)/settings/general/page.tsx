@@ -2,6 +2,7 @@
 
 import { useTheme } from "next-themes";
 
+import { useMounted } from "@/lib/use-mounted";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -19,6 +20,9 @@ import type { ExperienceLevel } from "@/lib/stores/onboarding";
 
 export default function GeneralSettingsPage() {
   const { theme = "system", setTheme } = useTheme();
+  // The user's stored theme is client-only; until mounted, render the "system"
+  // default so the RadioGroup's checked state matches SSR (hydration #418).
+  const mounted = useMounted();
   const muted = useUi((s) => s.notificationsMuted);
   const setMuted = useUi((s) => s.setNotificationsMuted);
   const confidentialOnly = useUi((s) => s.confidentialOnly);
@@ -55,7 +59,7 @@ export default function GeneralSettingsPage() {
           <div className="space-y-2">
             <Label>Theme</Label>
             <RadioGroup
-              value={theme}
+              value={mounted ? theme : "system"}
               onValueChange={setTheme}
               className="flex gap-3"
             >

@@ -49,9 +49,16 @@ COPY --from=builder /repo/apps/web/public /app/apps/web/public
 # standalone output is a tightly traced tree we don't want to perturb, so
 # install the bundler in its own /opt/ff-bundler/ dir with its own
 # node_modules. The script picks up MODULES_DIR + RUNTIME_EXTERNALS via env.
+#
+# The bundler must also resolve any npm dep a module panel *bundles* (i.e. is
+# NOT in runtime-externals.json). Today that's only bpmn-js/bpmn-auto-layout/
+# diagram-js-minimap, which the discovery panel bundles deliberately (Turbopack
+# mis-bundles bpmn-moddle — see modules/discovery/.../BpmnCanvas.tsx). These
+# are client-only and never enter Next's standalone trace, so they must be
+# installed here. Keep versions in sync with apps/web/package.json.
 RUN mkdir -p /opt/ff-bundler \
     && cd /opt/ff-bundler \
-    && printf '{"name":"ff-bundler","private":true,"type":"module","dependencies":{"esbuild":"^0.24","yaml":"^2"}}\n' > package.json \
+    && printf '{"name":"ff-bundler","private":true,"type":"module","dependencies":{"esbuild":"^0.24","yaml":"^2","bpmn-js":"^18.16.1","bpmn-auto-layout":"^1.3.0","diagram-js-minimap":"^5.3.0"}}\n' > package.json \
     && npm install --no-fund --no-audit
 COPY apps/web/scripts/bundle-modules.mjs /opt/ff-bundler/bundle-modules.mjs
 COPY apps/web/lib/runtime-externals.json /opt/ff-bundler/runtime-externals.json

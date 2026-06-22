@@ -334,6 +334,18 @@ class WireConnection:
     def register(self, method: str, fn) -> None:
         self._dispatcher[method] = fn
 
+    def fail_all_pending(self, exc: BaseException) -> None:
+        """Reject every in-flight outbound request with `exc`.
+
+        Called when the peer process dies (e.g. the host SIGKILLs the worker
+        to cancel a job): without this, the futures returned by `send_request`
+        never resolve and their awaiting tasks hang forever. Idempotent.
+        """
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.set_exception(exc)
+        self._pending.clear()
+
     async def send_request(self, method: str, params: dict[str, Any]) -> Any:
         async with self._lock:
             rid = self._next_id

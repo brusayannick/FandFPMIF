@@ -38,6 +38,19 @@ function resolveExternalsPath() {
 
 const RUNTIME_EXTERNALS = JSON.parse(readFileSync(resolveExternalsPath(), "utf8"));
 
+// esbuild resolves a bare import (e.g. `bpmn-js`, bundled and intentionally NOT
+// externalised) by walking up the directory tree from the importing module
+// source. In the production image the module tree (/app/modules) and the
+// bundler's own deps (/opt/ff-bundler/node_modules) live under separate roots,
+// so that walk never reaches the bundler's deps. Mirror NODE_PATH (which
+// esbuild ignores from the environment by design) via the nodePaths option:
+// list the bundler's node_modules as a resolve fallback. Only consulted when
+// normal resolution fails, so it never perturbs the dev tree-walk.
+const NODE_PATHS = [
+  resolve(__dirname, "node_modules"),
+  resolve(WEB_ROOT, "node_modules"),
+].filter((p) => existsSync(p));
+
 const argv = process.argv.slice(2);
 const WATCH = argv.includes("--watch");
 const ONLY_IDS = new Set(argv.filter((a) => !a.startsWith("--")));
@@ -119,6 +132,9 @@ function commonOptions(entry, outdir) {
     // Runtime externals stay as require() calls; the frontend loader resolves
     // them against window.__FF_RUNTIME__.
     external: RUNTIME_EXTERNALS,
+    // Fallback resolve roots for bundled (non-externalised) npm deps — see
+    // NODE_PATHS above. Empty in dev (normal resolution already succeeds).
+    nodePaths: NODE_PATHS,
     plugins: [aliasPlugin],
     define: {
       "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV || "development"),

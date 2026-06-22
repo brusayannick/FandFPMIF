@@ -486,6 +486,10 @@ class ModuleLoader:
         self._mount_router: APIRouter | None = None
         self._sub_event_tasks: list[asyncio.Task] = []
         self._bridges: dict[str, SubprocessBridge] = {}
+        # Let the job runtime reach a subprocess module's worker on cancel:
+        # the cooperative token can't stop an un-interruptible worker handler,
+        # so cancelling a running subprocess job kills+respawns its worker.
+        self.runtime.set_subprocess_canceller(self._cancel_subprocess_job)
         # topic (as declared in `@on_event`) → module_ids subscribing to it.
         # Populated by `_bind_event`; consumed by `event_subscriber_module_ids`
         # so the import handler can freeze the set of modules a log must wait on.
@@ -636,6 +640,14 @@ class ModuleLoader:
             self._rebind_events(remaining)
         self.registry.remove_module(module_id)
         return True
+
+    async def _cancel_subprocess_job(self, job_id: str, module_id: str) -> None:
+        """Runtime hook: hard-stop a running subprocess-module job by killing
+        and respawning the module's worker. No-op for in-process modules (no
+        bridge) — their jobs cancel cooperatively via the token."""
+        bridge = self._bridges.get(module_id)
+        if bridge is not None:
+            await bridge.cancel_active()
 
     def _rebind_events(self, loaded: LoadedModule) -> None:
         for attr_name in dir(loaded.instance):

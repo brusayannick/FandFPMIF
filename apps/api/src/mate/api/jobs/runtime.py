@@ -218,6 +218,17 @@ class JobRuntime:
         self._cancel_tokens: dict[str, CancelToken] = {}
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._process_pool: ProcessPoolExecutor | None = None
+        # Optional hook (wired by the module loader) invoked when a *running*
+        # job owned by a subprocess-isolated module is cancelled. The
+        # cooperative token + asyncio task-cancel only unwind the host-side
+        # proxy await; the worker process keeps running the (often
+        # un-interruptible, native/threaded) handler. The hook kills+respawns
+        # that module's worker so the compute actually stops.
+        self._subprocess_canceller: Callable[[str, str], Awaitable[None]] | None = None
+
+    def set_subprocess_canceller(self, fn: Callable[[str, str], Awaitable[None]] | None) -> None:
+        """Register the `(job_id, module_id) -> None` hook described above."""
+        self._subprocess_canceller = fn
 
     def _ensure_bus(self) -> EventBus:
         return self._bus if self._bus is not None else get_event_bus()
@@ -453,6 +464,7 @@ class JobRuntime:
                 return False
             running = job.status == "running"
             owner_id = job.user_id
+            module_id = job.module_id
             if not running:
                 job.status = "cancelled"
                 job.finished_at = _utcnow_naive()
@@ -465,6 +477,15 @@ class JobRuntime:
         task = self._running_tasks.get(job_id)
         if task is not None:
             task.cancel()
+
+        # The token/task-cancel above only unwinds the host-side await for a
+        # subprocess module — the worker keeps running. Kill+respawn its worker
+        # so the underlying compute (e.g. AgentSimulator's pipeline) halts.
+        if running and module_id and self._subprocess_canceller is not None:
+            try:
+                await self._subprocess_canceller(job_id, module_id)
+            except Exception:
+                logging.exception("subprocess cancel hook failed for job %s", job_id)
 
         if not running:
             await self._ensure_bus().publish(

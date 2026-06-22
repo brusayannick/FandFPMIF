@@ -14,8 +14,10 @@ real `ModuleContext` looked up by `ctx_token`.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shutil
+import signal
 import tempfile
 import uuid
 from collections.abc import Callable
@@ -143,6 +145,11 @@ class SubprocessBridge:
         self._ready_evt = asyncio.Event()
         self._handlers_meta: list[dict[str, Any]] = []
         self._ctx_registry: dict[str, Any] = {}
+        # Set once `stop()` is called so a concurrent cancel-triggered respawn
+        # doesn't resurrect the worker during teardown.
+        self._stopping = False
+        # Hold the respawn task so it isn't garbage-collected mid-flight.
+        self._respawn_task: asyncio.Task[None] | None = None
 
     async def start(self) -> SubprocessModule:
         # Spawn the worker, wait for its `ready` (which carries the handler
@@ -153,6 +160,24 @@ class SubprocessBridge:
         )
         os.chmod(self._socket_path, 0o600)
 
+        await self._spawn_worker()
+        try:
+            await asyncio.wait_for(self._ready_evt.wait(), timeout=30.0)
+        except TimeoutError as exc:
+            await self.stop()
+            raise SubprocessHostError(
+                f"Subprocess module {self.manifest.id!r} did not signal ready in 30s."
+            ) from exc
+
+        return SubprocessModule(self.manifest.id, self._handlers_meta, self)
+
+    async def _spawn_worker(self) -> None:
+        """Spawn (or respawn) the worker process against the live socket.
+
+        `start_new_session=True` puts the worker in its own process group, so
+        `cancel_active()` can `killpg` the whole subtree — the worker *and* any
+        grandchildren it forked — without touching the API process group.
+        """
         worker_py = _worker_python(self.folder)
         # Run the worker by file path (not `-m`) so we don't import the whole
         # `mate.api` package chain under the module's venv Python — the worker
@@ -169,23 +194,69 @@ class SubprocessBridge:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            start_new_session=True,
         )
 
         # Pipe worker stderr to our log so author tracebacks aren't lost.
         asyncio.create_task(self._drain_pipe(self._proc.stderr, "stderr"))
         asyncio.create_task(self._drain_pipe(self._proc.stdout, "stdout"))
 
-        try:
-            await asyncio.wait_for(self._ready_evt.wait(), timeout=30.0)
-        except TimeoutError as exc:
-            await self.stop()
-            raise SubprocessHostError(
-                f"Subprocess module {self.manifest.id!r} did not signal ready in 30s."
-            ) from exc
+    async def cancel_active(self) -> None:
+        """Hard-stop whatever the worker is running by killing its process
+        group, then respawn a fresh worker.
 
-        return SubprocessModule(self.manifest.id, self._handlers_meta, self)
+        Subprocess handlers — especially native/threaded ones like
+        AgentSimulator's pm4py/Mesa pipeline, which runs via
+        `asyncio.to_thread` with no poll point — cannot be cancelled
+        cooperatively: a Python thread can't be interrupted and the upstream
+        call never yields. Killing the OS process is the only reliable stop.
+
+        Collateral: there is one shared worker per module, so any *other* call
+        in flight on it dies too. Those host-side awaits are failed with a
+        clear, retryable error rather than left hanging. Heavy subprocess runs
+        are exclusive in practice, so overlap is rare.
+        """
+        if self._stopping:
+            return
+        self._kill_worker_group()
+        if self._conn is not None:
+            self._conn.fail_all_pending(
+                SubprocessHostError(
+                    f"Worker for {self.manifest.id!r} was restarted to cancel a running job."
+                )
+            )
+        # Respawn off the request path so cancel returns immediately; new calls
+        # block on `_ready_evt` (see `call_handler`) until the worker is back.
+        self._ready_evt.clear()
+        self._respawn_task = asyncio.create_task(self._respawn())
+
+    async def _respawn(self) -> None:
+        if self._stopping:
+            return
+        try:
+            await self._spawn_worker()
+            await asyncio.wait_for(self._ready_evt.wait(), timeout=30.0)
+            log.info("modules.subprocess.worker_restarted", module_id=self.manifest.id)
+        except Exception:
+            log.exception("modules.subprocess.worker_restart_failed", module_id=self.manifest.id)
+
+    def _kill_worker_group(self) -> None:
+        """SIGKILL the worker's whole process group. SIGKILL (not TERM) because
+        a thread deep in a native numpy/pm4py call won't service a handler in
+        time — only an unconditional kill guarantees the CPU stops now."""
+        proc = self._proc
+        if proc is None or proc.returncode is not None:
+            return
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
 
     async def stop(self) -> None:
+        # Block any in-flight `cancel_active()` respawn from resurrecting the
+        # worker mid-teardown.
+        self._stopping = True
         if self._conn is not None:
             try:
                 await asyncio.wait_for(self._conn.send_request("shutdown", {}), timeout=2.0)
@@ -196,7 +267,7 @@ class SubprocessBridge:
                 self._proc.terminate()
                 await asyncio.wait_for(self._proc.wait(), timeout=5.0)
             except (TimeoutError, ProcessLookupError):
-                self._proc.kill()
+                self._kill_worker_group()
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
@@ -225,12 +296,29 @@ class SubprocessBridge:
 
         await conn.run()
 
+        # The connection ended — the worker exited (cancel kill, crash, or
+        # clean shutdown). Fail outstanding calls so awaiting handler tasks
+        # don't hang; if this was the live worker and we're not deliberately
+        # stopping, drop ready so the next call waits for a respawn.
+        conn.fail_all_pending(SubprocessHostError(f"Worker for {self.manifest.id!r} exited."))
+        if conn is self._conn and not self._stopping:
+            self._ready_evt.clear()
+
     async def _on_ready(self, params: dict[str, Any]) -> Any:
         self._handlers_meta = params.get("handlers", [])
         self._ready_evt.set()
         return True
 
     async def call_handler(self, attr: str, ctx, args: tuple, kwargs: dict[str, Any]) -> Any:
+        # A cancel may be mid-respawn — wait for the fresh worker rather than
+        # dispatching onto a dead connection.
+        if not self._ready_evt.is_set():
+            try:
+                await asyncio.wait_for(self._ready_evt.wait(), timeout=35.0)
+            except TimeoutError as exc:
+                raise SubprocessHostError(
+                    f"Worker for {self.manifest.id!r} is not ready (restart timed out)."
+                ) from exc
         if self._conn is None:
             raise SubprocessHostError(f"Worker for {self.manifest.id!r} is not connected.")
         token = uuid.uuid4().hex

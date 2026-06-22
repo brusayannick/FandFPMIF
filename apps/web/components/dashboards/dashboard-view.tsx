@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Loader2,
   Pencil,
+  Share2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,6 +29,7 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { CardPalette } from "@/components/dashboards/card-palette";
 import { DashboardCanvas } from "@/components/dashboards/dashboard-canvas";
+import { ShareDialog } from "@/components/dashboards/share-dialog";
 import {
   DashboardFilterProvider,
   DashboardWidgetScope,
@@ -65,6 +67,10 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const [logId, setLogId] = useState<string | null>(null);
   const [settings, setSettings] = useState<CanvasSettings>(DEFAULT_CANVAS_SETTINGS);
   const [pendingCard, setPendingCard] = useState<CatalogCard | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  // Shared boards open read-only for the recipient — no edit toolbar, no log
+  // picker. The backend also 404s owner-only mutations, so this is just UX.
+  const isOwner = dashboard?.is_owner ?? true;
   // Snapshot of the last-saved state, to compute the dirty flag.
   const savedRef = useRef<string>("");
 
@@ -205,25 +211,27 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           {dashboard.log_model === "object_centric" ? "Object-centric" : "Case-centric"}
         </Badge>
 
-        <div className="ml-2 flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">Log</span>
-          <Select
-            value={logId ?? "__none__"}
-            onValueChange={(v) => setLogId(v === "__none__" ? null : v)}
-          >
-            <SelectTrigger className="h-8 w-48 text-xs">
-              <SelectValue placeholder="Select event log" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">No log selected</SelectItem>
-              {readyLogs.map((l) => (
-                <SelectItem key={l.id} value={l.id}>
-                  {l.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {isOwner && (
+          <div className="ml-2 flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Log</span>
+            <Select
+              value={logId ?? "__none__"}
+              onValueChange={(v) => setLogId(v === "__none__" ? null : v)}
+            >
+              <SelectTrigger className="h-8 w-48 text-xs">
+                <SelectValue placeholder="Select event log" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">No log selected</SelectItem>
+                {readyLogs.map((l) => (
+                  <SelectItem key={l.id} value={l.id}>
+                    {l.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         <div className="ml-auto flex items-center gap-2">
           {editing && (
@@ -260,11 +268,27 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
                 Save
               </Button>
             </>
+          ) : isOwner ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShareOpen(true)}
+              >
+                <Share2 className="mr-1.5 h-3.5 w-3.5" />
+                Share
+              </Button>
+              <Button type="button" size="sm" onClick={() => setEditing(true)}>
+                <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                Edit
+              </Button>
+            </>
           ) : (
-            <Button type="button" size="sm" onClick={() => setEditing(true)}>
-              <Pencil className="mr-1.5 h-3.5 w-3.5" />
-              Edit
-            </Button>
+            <Badge variant="outline" className="shrink-0 font-normal text-muted-foreground">
+              <Eye className="mr-1.5 h-3.5 w-3.5" />
+              Shared · read-only
+            </Badge>
           )}
         </div>
       </div>
@@ -284,12 +308,18 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
                   <EmptyState
                     icon={LayoutDashboard}
                     title="No cards yet"
-                    description="Switch to edit mode to add cards from your modules."
+                    description={
+                      isOwner
+                        ? "Switch to edit mode to add cards from your modules."
+                        : "The owner hasn't added any cards yet."
+                    }
                     primaryAction={
-                      <Button size="sm" onClick={() => setEditing(true)}>
-                        <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                        Edit dashboard
-                      </Button>
+                      isOwner ? (
+                        <Button size="sm" onClick={() => setEditing(true)}>
+                          <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                          Edit dashboard
+                        </Button>
+                      ) : undefined
                     }
                   />
                 ) : (
@@ -320,6 +350,14 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           {logId && <DashboardTimeRangeConnected logId={logId} />}
         </div>
       </div>
+      {isOwner && (
+        <ShareDialog
+          dashboardId={dashboardId}
+          dashboardName={name}
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+        />
+      )}
     </DashboardFilterProvider>
   );
 }

@@ -10,9 +10,12 @@ shape (set by the route in `routes/event_logs.py`) is::
         "csv_mapping":   dict | None,    # serialised CsvColumnMapping
     }
 
-On success the row in `process_logs` is updated to status='ready' and
-`events.parquet` / `cases.parquet` / `meta.json` are written. On failure the
-status is flipped to 'failed' with `error` set.
+On success `events.parquet` / `cases.parquet` / `meta.json` are written and the
+row in `process_logs` is moved to status='ready' — or 'processing' when an
+installed module subscribes to the import topic, in which case
+`mate.api.modules.processing` un-gates the log to 'ready' once those modules
+finish precomputing. On failure the status is flipped to 'failed' with `error`
+set.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from typing import Any
 import pandas as pd
 import structlog
 from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mate.api.db.models import EventLog
 from mate.api.ingest.aggregation import compute_cases
@@ -211,12 +215,18 @@ async def _import_handler(handle: JobHandle) -> None:
     }
     paths.write_meta(meta)
 
+    # Decide the resting status: `ready` immediately when no installed module
+    # subscribes to `log.imported`, else `processing` until those modules finish
+    # precomputing (the coordinator un-gates the log off their terminal jobs).
     async with handle.sessionmaker() as session:
+        expected = await _expected_modules("log.imported", handle.user_id, session)
         await session.execute(
             update(EventLog)
             .where(EventLog.id == log_id)
             .values(
-                status="ready",
+                status="ready" if not expected else "processing",
+                processing_import_job_id=None if not expected else handle.id,
+                expected_modules=None if not expected else sorted(expected),
                 log_model="case_centric",
                 events_count=meta["events_count"],
                 cases_count=meta["cases_count"],
@@ -266,6 +276,10 @@ async def _import_handler(handle: JobHandle) -> None:
             "fixed_columns": fixed_columns,
         },
     )
+    # No subscribing module → the log is already openable; emit `log.ready` so
+    # the frontend flips it without waiting on a (never-coming) module finish.
+    if not expected:
+        await handle.bus.publish("log.ready", {"user_id": handle.user_id, "log_id": log_id})
 
 
 async def _import_ocel(
@@ -358,11 +372,14 @@ async def _import_ocel(
     paths.write_meta(meta)
 
     async with handle.sessionmaker() as session:
+        expected = await _expected_modules("ocel.imported", handle.user_id, session)
         await session.execute(
             update(EventLog)
             .where(EventLog.id == log_id)
             .values(
-                status="ready",
+                status="ready" if not expected else "processing",
+                processing_import_job_id=None if not expected else handle.id,
+                expected_modules=None if not expected else sorted(expected),
                 log_model="object_centric",
                 events_count=result.stats["events_count"],
                 objects_count=result.stats["objects_count"],
@@ -415,6 +432,8 @@ async def _import_ocel(
             "detected_schema": result.detected_schema,
         },
     )
+    if not expected:
+        await handle.bus.publish("log.ready", {"user_id": handle.user_id, "log_id": log_id})
 
 
 def _to_iso(value: Any) -> str | None:
@@ -427,6 +446,22 @@ def _to_iso(value: Any) -> str | None:
     if isinstance(value, datetime):
         return value.isoformat()
     return str(value)
+
+
+async def _expected_modules(topic: str, user_id: str, session: AsyncSession) -> set[str]:
+    """Modules the just-imported log must wait on before it can go ``ready``.
+
+    Delegates to the process-global :class:`ModuleProcessingCoordinator`. When it
+    isn't wired (e.g. a bare-runtime test that never started the module loader)
+    we return an empty set so the import falls back to the legacy "ready
+    immediately" behaviour instead of failing.
+    """
+    from mate.api.modules.processing import get_coordinator
+
+    coordinator = get_coordinator()
+    if coordinator is None:
+        return set()
+    return await coordinator.expected_modules(topic, user_id, session)
 
 
 def register_import_handler(runtime: JobRuntime) -> None:

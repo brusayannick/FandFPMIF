@@ -95,9 +95,7 @@ def _hash_payload(payload: Any) -> str:
     return hashlib.blake2b(raw, digest_size=16).hexdigest()
 
 
-async def _build_payload(
-    module_id: str, log_id: str, user_id: str
-) -> tuple[Any, str, str]:
+async def _build_payload(module_id: str, log_id: str, user_id: str) -> tuple[Any, str, str]:
     """Resolve a module's ``guidance_payload`` for a log.
 
     Returns ``(payload, system_prompt, user_prefix)``.
@@ -125,29 +123,24 @@ async def _build_payload(
 
     ctx = await loader._make_context(module_id, log_id, user_id)
     try:
-        payload = await fn(ctx) if asyncio.iscoroutinefunction(fn) else await asyncio.to_thread(fn, ctx)
+        payload = (
+            await fn(ctx) if asyncio.iscoroutinefunction(fn) else await asyncio.to_thread(fn, ctx)
+        )
     finally:
         shutil.rmtree(ctx.workdir, ignore_errors=True)
 
     if payload is None:
         raise HTTPException(
             409,
-            detail=(
-                f"Module {module_id!r} has no data to interpret yet - "
-                "run the module first."
-            ),
+            detail=(f"Module {module_id!r} has no data to interpret yet - run the module first."),
         )
     return payload, system_prompt, user_prefix
 
 
-async def _enabled_modules_with_guidance(
-    session: SessionDep, user_id: str
-) -> list[str]:
+async def _enabled_modules_with_guidance(session: SessionDep, user_id: str) -> list[str]:
     """Return ids of loaded modules that are enabled AND expose guidance_payload."""
     rows = await session.execute(
-        select(ModuleConfig.module_id, ModuleConfig.enabled).where(
-            ModuleConfig.user_id == user_id
-        )
+        select(ModuleConfig.module_id, ModuleConfig.enabled).where(ModuleConfig.user_id == user_id)
     )
     enabled_map: dict[str, bool] = {mid: en for mid, en in rows.all()}
     loader = get_module_loader()
@@ -172,9 +165,7 @@ async def module_guidance(
     log_id: str = Query(..., min_length=1),
 ) -> GuidanceResponse:
     await get_owned_event_log(session, log_id, user.id)
-    payload, system_prompt, user_prefix = await _build_payload(
-        module_id, log_id, user.id
-    )
+    payload, system_prompt, user_prefix = await _build_payload(module_id, log_id, user.id)
     output_hash = _hash_payload(payload)
     cache = ResultCache(log_id, module_id, user.id)
 
@@ -244,9 +235,7 @@ async def module_guidance_stream(
     log_id: str = Query(..., min_length=1),
 ) -> StreamingResponse:
     await get_owned_event_log(session, log_id, user.id)
-    payload, system_prompt, user_prefix = await _build_payload(
-        module_id, log_id, user.id
-    )
+    payload, system_prompt, user_prefix = await _build_payload(module_id, log_id, user.id)
     output_hash = _hash_payload(payload)
     cfg = await load_ai_config(session, user.id)
     cache = ResultCache(log_id, module_id, user.id)
@@ -423,14 +412,10 @@ async def import_column_mapping(
         return ImportColumnMappingResponse(suggestions={})
     cfg = await load_ai_config(session, user.id)
     if not cfg.selected_provider or not cfg.selected_model:
-        raise HTTPException(
-            400, detail="No AI model selected. Configure one in Settings → AI."
-        )
+        raise HTTPException(400, detail="No AI model selected. Configure one in Settings → AI.")
     p = getattr(cfg, cfg.selected_provider)
     if not p.api_key:
-        raise HTTPException(
-            400, detail=f"No API key configured for {cfg.selected_provider!r}."
-        )
+        raise HTTPException(400, detail=f"No API key configured for {cfg.selected_provider!r}.")
 
     payload = {
         "headers": body.headers,

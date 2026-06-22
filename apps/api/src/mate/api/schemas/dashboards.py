@@ -94,6 +94,10 @@ class DashboardDetail(BaseModel):
     settings: CanvasSettings = Field(default_factory=CanvasSettings)
     created_at: datetime
     updated_at: datetime
+    # False when the board was opened via a share — the UI then renders it
+    # read-only (no edit toolbar, no save). The owner-only mutation routes also
+    # 404 for a non-owner, so this is defence-in-depth, not the only gate.
+    is_owner: bool = True
 
 
 class DashboardCreate(BaseModel):

@@ -7,14 +7,13 @@ we attempt a best-effort autodetect over common column-name conventions.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from mate.api.schemas.event_logs import CsvColumnMapping
-
-import re
 
 AUTODETECT_CANDIDATES: dict[str, list[str]] = {
     "case_id": ["case_id", "case", "case concept name", "trace_id", "id"],

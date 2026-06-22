@@ -56,26 +56,18 @@ def evaluate(
 
     missing_cols = _columns_present(manifest.requirements.event_log, schema)
     if missing_cols:
-        reasons.append(
-            f"Missing required column(s) on events: {', '.join(missing_cols)}."
-        )
+        reasons.append(f"Missing required column(s) on events: {', '.join(missing_cols)}.")
 
     min_events = manifest.requirements.event_log.min_events
     if min_events is not None and (events_count or 0) < min_events:
-        reasons.append(
-            f"Needs at least {min_events} events; this log has {events_count or 0}."
-        )
+        reasons.append(f"Needs at least {min_events} events; this log has {events_count or 0}.")
     min_cases = manifest.requirements.event_log.min_cases
     if min_cases is not None and (cases_count or 0) < min_cases:
-        reasons.append(
-            f"Needs at least {min_cases} cases; this log has {cases_count or 0}."
-        )
+        reasons.append(f"Needs at least {min_cases} cases; this log has {cases_count or 0}.")
 
     missing_hard = [m for m in manifest.requirements.modules if m not in installed_module_ids]
     if missing_hard:
-        reasons.append(
-            f"Requires module(s) not installed: {', '.join(missing_hard)}."
-        )
+        reasons.append(f"Requires module(s) not installed: {', '.join(missing_hard)}.")
 
     if reasons:
         return Availability(status="unavailable", reasons=reasons)

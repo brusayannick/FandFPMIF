@@ -6,18 +6,25 @@
 // See apps/web/app/layout.tsx for the actual imports.
 
 import { useEffect, useRef, useState } from "react";
-import { Maximize, Minus, Plus } from "lucide-react";
+import { AlertTriangle, Maximize, Minus, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/empty-state";
 import { formatNumber } from "@/lib/format";
 
-// Static imports — these specifiers are listed in
-// apps/web/lib/runtime-externals.json, so the module bundler leaves them as
-// `require()` calls that the host's __FF_RUNTIME__ shim resolves to the
-// single bpmn-js instance shared across modules. Don't switch these to
-// `import("...")`: the bundler matches externals against static specifiers,
-// and a dynamic import would get inlined into the panel bundle.
-import BpmnModeler from "bpmn-js/lib/Modeler";
+// bpmn-js / bpmn-auto-layout / diagram-js-minimap are bundled straight into
+// this panel — they are intentionally NOT in runtime-externals.json. The host
+// runs `next dev --turbo`, and Turbopack mis-bundles bpmn-moddle so its parser
+// stops recognising the `bpmn:Definitions` root: every importXML/layoutProcess
+// then fails with "failed to parse document as <bpmn:Definitions>" on valid
+// BPMN. esbuild (this panel's bundler) handles bpmn-moddle correctly, so we
+// bundle here and never touch the host copy. Do NOT re-externalise these to
+// "share" the host instance — that reintroduces the parse failure.
+//
+// NavigatedViewer is the strictly view-only bpmn-js entry: pan + scroll-zoom +
+// keyboard-pan, and NO editing services (no palette / context-pad /
+// direct-editing / create / connect / move / resize / bendpoints / label-edit).
+import NavigatedViewer from "bpmn-js/lib/NavigatedViewer";
 import minimapModule from "diagram-js-minimap";
 import { layoutProcess } from "bpmn-auto-layout";
 
@@ -43,25 +50,16 @@ async function ensureLayout(xml: string): Promise<string> {
 export interface BpmnDecor {
   heatmap: boolean;
   freqLabels: boolean;
-  dimRare: boolean;
-  dimLevel: number;
 }
 
 export interface BpmnCanvasProps {
   /** Initial BPMN XML. Updates after mount are ignored — re-mount the
    *  component via a `key` prop to swap models. */
   xml: string;
-  /** Fired whenever the user mutates the diagram. Receives the latest XML. */
-  onChange?: (xml: string) => void;
-  /** Optional fired-once callback with the modeler instance, for callers
-   *  that need to drive imperative actions (e.g. fit-viewport, export). */
-  onReady?: (modeler: unknown) => void;
   /** DFG-derived frequency maps driving the heatmap / badges. */
   freq?: FrequencyMaps;
   /** Frequency-overlay display toggles. */
   decor?: BpmnDecor;
-  /** Read-only mode — hides palette/context-pad, blocks edits, keeps pan/zoom. */
-  locked?: boolean;
   /** Activity search term; centred + highlighted whenever `searchNonce` bumps. */
   searchQuery?: string;
   searchNonce?: number;
@@ -71,25 +69,18 @@ export interface BpmnCanvasProps {
 
 type ModelerHandle = BpmnModelerLike & {
   destroy: () => void;
-  saveXML: (opts: { format: boolean }) => Promise<{ xml?: string }>;
   importXML: (xml: string) => Promise<unknown>;
-  on: (event: string, cb: () => void) => void;
 };
 
 const DEFAULT_DECOR: BpmnDecor = {
   heatmap: true,
   freqLabels: true,
-  dimRare: false,
-  dimLevel: 0.15,
 };
 
 export function BpmnCanvas({
   xml,
-  onChange,
-  onReady,
   freq,
   decor,
-  locked = true,
   searchQuery,
   searchNonce,
   onSearchResult,
@@ -97,13 +88,10 @@ export function BpmnCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const modelerRef = useRef<ModelerHandle | null>(null);
   const [ready, setReady] = useState(false);
-  // Capture handlers in refs so the mount effect can stay [] without
-  // re-creating the modeler when the parent's callback identities change.
-  const onChangeRef = useRef(onChange);
-  const onReadyRef = useRef(onReady);
+  const [error, setError] = useState<string | null>(null);
+  // Capture the handler in a ref so the mount effect can stay [] without
+  // re-creating the viewer when the parent's callback identity changes.
   const onSearchResultRef = useRef(onSearchResult);
-  onChangeRef.current = onChange;
-  onReadyRef.current = onReady;
   onSearchResultRef.current = onSearchResult;
 
   useEffect(() => {
@@ -115,7 +103,7 @@ export function BpmnCanvas({
     let cancelled = false;
 
     (async () => {
-      modeler = new BpmnModeler({
+      modeler = new NavigatedViewer({
         container,
         additionalModules: [minimapModule],
       }) as unknown as ModelerHandle;
@@ -132,26 +120,15 @@ export function BpmnCanvas({
           // minimap module already initialised in some other state — ignore.
         }
       } catch (err) {
+        // A blank canvas with no signal hid genuine import failures. Surface
+        // them in an empty state instead of only logging to the console.
         console.error("BpmnCanvas: importXML failed", err);
+        if (!cancelled) setError((err as Error)?.message ?? "Failed to render BPMN");
         return;
       }
 
       modelerRef.current = modeler;
       setReady(true);
-      onReadyRef.current?.(modeler);
-
-      // commandStack.changed fires for create / move / delete / property
-      // edits. Save the resulting XML so the parent can persist on demand.
-      // Decoration uses markers/overlays only, so it never lands here.
-      modeler.on("commandStack.changed", () => {
-        if (!modeler) return;
-        modeler
-          .saveXML({ format: true })
-          .then(({ xml: out }) => {
-            if (out !== undefined) onChangeRef.current?.(out);
-          })
-          .catch((err) => console.error("BpmnCanvas: saveXML failed", err));
-      });
     })();
 
     return () => {
@@ -177,31 +154,12 @@ export function BpmnCanvas({
         freq,
         heatmap: d.heatmap,
         freqLabels: d.freqLabels,
-        dimRare: d.dimRare,
-        dimLevel: d.dimLevel,
         formatNumber,
       });
     } catch (err) {
       console.error("BpmnCanvas: applyBpmnOverlay failed", err);
     }
   }, [ready, freq, decor]);
-
-  // Toggle read-only mode.
-  useEffect(() => {
-    const modeler = modelerRef.current;
-    const container = containerRef.current;
-    if (!ready || !modeler || !container) return;
-    container.classList.toggle("ff-bpmn-locked", locked);
-    try {
-      const keyboard = modeler.get<{ bind: (n: Document) => void; unbind: () => void }>(
-        "keyboard",
-      );
-      if (locked) keyboard.unbind();
-      else keyboard.bind(document);
-    } catch {
-      // keyboard module not present — palette hiding alone is enough.
-    }
-  }, [ready, locked]);
 
   // Locate an activity on demand.
   useEffect(() => {
@@ -219,7 +177,18 @@ export function BpmnCanvas({
     const current = canvas.zoom();
     canvas.zoom(typeof current === "number" ? current * factor : "fit-viewport");
   };
-  const fit = () => modelerRef.current?.get<{ zoom: (m: string) => void }>("canvas").zoom("fit-viewport");
+  const fit = () =>
+    modelerRef.current?.get<{ zoom: (m: string) => void }>("canvas").zoom("fit-viewport");
+
+  if (error) {
+    return (
+      <EmptyState
+        icon={AlertTriangle}
+        title="Could not render BPMN"
+        description={error}
+      />
+    );
+  }
 
   return (
     <div className="relative h-full w-full">

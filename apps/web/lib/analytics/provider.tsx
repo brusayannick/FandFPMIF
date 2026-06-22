@@ -123,7 +123,9 @@ function AutoTrackers() {
   // Delegated click capture — every click on the document is recorded, not
   // just interactive elements. We attach the nearest button/link if one
   // exists in the ancestor chain so dashboards can still group by action,
-  // but raw target metadata is always present. Skipped only when the target
+  // but raw target metadata is always present. Left-click (`click`),
+  // middle-click (`auxclick`), and right-click (`contextmenu`) are all
+  // captured; the `kind` property records which. Skipped only when the target
   // (or an ancestor) is marked `data-no-track`.
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -131,6 +133,14 @@ function AutoTrackers() {
       const target = e.target;
       if (!(target instanceof Element)) return;
       if (target.closest("[data-no-track]")) return;
+      // `contextmenu` fires for keyboard-menu / touch-hold too — coerce the
+      // discrete event types to a stable label for grouping.
+      const kind =
+        e.type === "auxclick"
+          ? "auxclick"
+          : e.type === "contextmenu"
+            ? "contextmenu"
+            : "click";
 
       const targetEl = target as HTMLElement;
       const action = targetEl.closest<HTMLElement>(
@@ -175,6 +185,7 @@ function AutoTrackers() {
         event_name: trackName || EV.CLICK,
         path: window.location.pathname,
         properties: {
+          kind,
           target_tag: targetEl.tagName.toLowerCase(),
           target_id: targetEl.id || null,
           target_classes: classes || null,
@@ -192,9 +203,16 @@ function AutoTrackers() {
         },
       });
     };
+    // Capture-phase so we see the click even if a child stops propagation.
+    // `auxclick` = middle button, `contextmenu` = right button / menu key.
     document.addEventListener("click", handler, { capture: true });
-    return () =>
+    document.addEventListener("auxclick", handler, { capture: true });
+    document.addEventListener("contextmenu", handler, { capture: true });
+    return () => {
       document.removeEventListener("click", handler, { capture: true });
+      document.removeEventListener("auxclick", handler, { capture: true });
+      document.removeEventListener("contextmenu", handler, { capture: true });
+    };
   }, []);
 
   // Global error capture

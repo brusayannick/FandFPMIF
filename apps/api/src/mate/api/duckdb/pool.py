@@ -73,7 +73,7 @@ class DuckDBPool:
         cur = self._conn().execute(sql, params or [])
         return cur.fetchall()
 
-    def run_in_thread(self, fn: Callable[[duckdb.DuckDBPyConnection], T]) -> "asyncio.Future[T]":
+    def run_in_thread(self, fn: Callable[[duckdb.DuckDBPyConnection], T]) -> asyncio.Future[T]:
         async def _await() -> T:
             return await asyncio.to_thread(lambda: fn(self._conn()))
 

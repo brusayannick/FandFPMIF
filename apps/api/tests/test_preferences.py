@@ -10,9 +10,7 @@ from httpx import AsyncClient
 async def test_preferences_roundtrip_and_allowlist(client: AsyncClient) -> None:
     # Non-allowlisted keys 404 (and don't reveal the valid set).
     assert (await client.get("/api/v1/preferences/secrets")).status_code == 404
-    assert (
-        await client.put("/api/v1/preferences/secrets", json={"x": 1})
-    ).status_code == 404
+    assert (await client.put("/api/v1/preferences/secrets", json={"x": 1})).status_code == 404
 
     # An allowlisted key with nothing saved → empty object; the client falls
     # back to store defaults (so a new user starts clean, not with someone

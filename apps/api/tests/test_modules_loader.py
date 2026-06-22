@@ -218,7 +218,6 @@ async def test_module_assets_served_and_traversal_rejected(
     (the bundler's output dir). Path traversal must be rejected. We synthesise a
     fake `panel.js` under the fixture module's `.dist/` so we can exercise the
     route without running esbuild from a test."""
-    import os
     from mate.api.config import get_settings
 
     settings = get_settings()
@@ -336,7 +335,6 @@ async def test_entry_point_discovery(client_with_sample_mod: AsyncClient) -> Non
     """
     import importlib.metadata
     import sys
-    import types
     from pathlib import Path
 
     from mate.api.modules.discovery import discover_entry_points
@@ -461,7 +459,7 @@ async def test_subprocess_wire_protocol_bidirectional() -> None:
     for t in (task_a, task_b):
         try:
             await asyncio.wait_for(t, timeout=1.0)
-        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+        except (TimeoutError, asyncio.CancelledError, Exception):
             t.cancel()
 
 

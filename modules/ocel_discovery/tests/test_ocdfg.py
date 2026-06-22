@@ -45,3 +45,22 @@ def test_serialize_ocdfg_shape() -> None:
     assert all(e["count"] >= 1 for e in out["edges"])
     assert any(a["activity"] == "create order" for a in out["start_activities"])
     assert any(a["activity"] == "ship" for a in out["end_activities"])
+
+
+def test_serialize_ocdfg_measures_and_performance() -> None:
+    out = _serialize_ocdfg(pm4py.discover_ocdfg(_sample_ocel()))
+
+    for e in out["edges"]:
+        # All three frequency measures are present and ordered consistently.
+        assert e["events"] >= 1
+        assert e["count"] == e["unique_objects"]
+        assert e["total_objects"] >= e["unique_objects"]
+        assert "perf_mean" in e and "perf_median" in e
+    # The single linear order spans real time, so at least one edge has a
+    # numeric (non-null) performance.
+    assert any(e["perf_mean"] is not None for e in out["edges"])
+
+    for a in out["start_activities"] + out["end_activities"]:
+        assert a["events"] >= 1
+        assert a["count"] == a["unique_objects"]
+        assert a["total_objects"] >= a["unique_objects"]

@@ -52,6 +52,7 @@ from mate.api.modules.installs import user_module_ids, user_owns_module
 from mate.api.modules.object_centric_log_access import ObjectCentricLogAccess
 from mate.api.modules.registry import CapabilityRegistry
 from mate.api.modules.subprocess_host import SubprocessBridge
+from mate.api.sharing import user_can_read_log
 from mate.sdk.context import ModuleContext
 from mate.sdk.decorators import (
     JobSpec,
@@ -64,6 +65,30 @@ from mate.sdk.manifest import Manifest
 from mate.sdk.module import Module
 
 log = structlog.get_logger(__name__)
+
+
+def _topic_matches(pattern: str, topic: str) -> bool:
+    """Whether a subscription `pattern` matches a concrete `topic`.
+
+    Mirrors the bus fan-out logic (`events.bus._topic_matches`, kept private
+    there) so a module that subscribes via a wildcard (`log.*`) is still counted
+    as a subscriber of `log.imported`. Kept in sync deliberately — both decide
+    the same thing for the same patterns.
+    """
+    if pattern in ("*", "**"):
+        return True
+    p_segs = pattern.split(".")
+    t_segs = topic.split(".")
+    for idx, seg in enumerate(p_segs):
+        if seg == "**":
+            return True
+        if idx >= len(t_segs):
+            return False
+        if seg == "*":
+            continue
+        if seg != t_segs[idx]:
+            return False
+    return len(t_segs) >= len(p_segs)
 
 
 @dataclass
@@ -461,6 +486,10 @@ class ModuleLoader:
         self._mount_router: APIRouter | None = None
         self._sub_event_tasks: list[asyncio.Task] = []
         self._bridges: dict[str, SubprocessBridge] = {}
+        # topic (as declared in `@on_event`) → module_ids subscribing to it.
+        # Populated by `_bind_event`; consumed by `event_subscriber_module_ids`
+        # so the import handler can freeze the set of modules a log must wait on.
+        self._event_subscribers: dict[str, set[str]] = {}
 
     async def load_all(self) -> list[LoadedModule]:
         discovered = discover(self.modules_dir, self.uploaded_modules_dir)
@@ -534,6 +563,7 @@ class ModuleLoader:
         for loaded in self.loaded.values():
             self.registry.remove_module(loaded.id)
         self.loaded.clear()
+        self._event_subscribers.clear()
         reset_finder()
 
     async def load_one(
@@ -598,7 +628,10 @@ class ModuleLoader:
             task.cancel()
         await asyncio.gather(*self._sub_event_tasks, return_exceptions=True)
         self._sub_event_tasks.clear()
-        # Re-bind events for the remaining modules.
+        # Re-bind events for the remaining modules. Reset the subscriber index
+        # first so the unloaded module's topics don't linger (it's rebuilt by
+        # `_bind_event` for each remaining module below).
+        self._event_subscribers.clear()
         for remaining in self.loaded.values():
             self._rebind_events(remaining)
         self.registry.remove_module(module_id)
@@ -626,6 +659,21 @@ class ModuleLoader:
 
     def manifests(self) -> list[Manifest]:
         return [m.manifest for m in self.loaded.values()]
+
+    def event_subscriber_module_ids(self, topic: str) -> set[str]:
+        """Module-ids whose `@on_event` handlers fire for `topic`.
+
+        A subscription is registered under the *pattern* the module declared,
+        which may be a wildcard (`log.*`). We match each registered pattern
+        against the concrete `topic` with the same segment/wildcard semantics
+        the bus uses (`events.bus._topic_matches`) so the import handler can
+        freeze exactly the set of modules a log must wait on.
+        """
+        out: set[str] = set()
+        for pattern, module_ids in self._event_subscribers.items():
+            if _topic_matches(pattern, topic):
+                out |= module_ids
+        return out
 
     def availability_for(
         self,
@@ -899,6 +947,10 @@ class ModuleLoader:
     ) -> None:
         topic = sub_spec.topic
         module_id = loaded.id
+        # Record the subscription so `event_subscriber_module_ids` can answer
+        # "which modules wait on `log.imported`?" at import time. A module may
+        # subscribe via a wildcard (`log.*`) — kept verbatim and matched later.
+        self._event_subscribers.setdefault(topic, set()).add(module_id)
 
         if job_spec is None:
 
@@ -1054,6 +1106,13 @@ class ModuleLoader:
         owned_ids: set[str] = set()
         active_filter: list[dict[str, Any]] | None = None
         log_model: str = "case_centric"
+        # Whose data dir the bound log's Parquet is read from. Equals user_id for
+        # an owned log; for a log reached through a shared dashboard it becomes
+        # the owner's id so path resolution points at the owner's data. This is
+        # the single sanctioned cross-account read widening — every other facet
+        # of the context (config, owned modules, cache, bus) stays scoped to the
+        # requesting user. See mate.api.sharing.user_can_read_log.
+        storage_user_id = user_id
         try:
             sm = get_sessionmaker()
             async with sm() as session:
@@ -1071,6 +1130,12 @@ class ModuleLoader:
                         log_model = log_row.log_model
                         if log_row.active_filter:
                             active_filter = log_row.active_filter
+                        # Not the owner? Only a shared dashboard bound to this
+                        # log grants read; then read from the owner's dir.
+                        if log_row.user_id != user_id and await user_can_read_log(
+                            session, log_id, user_id
+                        ):
+                            storage_user_id = log_row.user_id
         except Exception:
             cfg_json = {}
 
@@ -1122,11 +1187,13 @@ class ModuleLoader:
             module_id=module_id,
             user_id=user_id,
             event_log=(
-                EventLogAccess(log_id, user_id, active_filter)
+                EventLogAccess(log_id, storage_user_id, active_filter)
                 if log_id and not object_centric
                 else _UnboundEventLog()
             ),  # type: ignore[arg-type]
-            object_log=(ObjectCentricLogAccess(log_id, user_id) if object_centric else None),  # type: ignore[arg-type]
+            object_log=(
+                ObjectCentricLogAccess(log_id, storage_user_id) if object_centric else None
+            ),  # type: ignore[arg-type]
             bus=_SdkBusAdapter(self.bus, user_id, log_id),  # type: ignore[arg-type]
             registry=_UserScopedRegistry(self.registry, frozenset(owned_ids)),  # type: ignore[arg-type]
             cache=(  # type: ignore[arg-type]

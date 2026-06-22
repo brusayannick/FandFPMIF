@@ -28,8 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mate.api.db.models import EventEdit, EventLog
 from mate.api.ingest.aggregation import compute_cases
 from mate.api.ingest.storage import log_paths
-from mate.api.storage import sync as storage_sync
 from mate.api.schemas.event_log_data import ColumnSpec, EventsHeader
+from mate.api.storage import sync as storage_sync
 
 _locks: dict[str, asyncio.Lock] = {}
 _locks_guard = asyncio.Lock()
@@ -103,9 +103,7 @@ def coerce_value(field: str, value: Any, specs: list[ColumnSpec]) -> Any:
     if spec.type == "enum":
         s = str(value)
         if spec.enum_values and s not in spec.enum_values:
-            raise ValueError(
-                f"{field} must be one of: {', '.join(spec.enum_values)}."
-            )
+            raise ValueError(f"{field} must be one of: {', '.join(spec.enum_values)}.")
         return s
     return str(value)
 
@@ -145,9 +143,7 @@ async def apply_bulk_fill(
     edits = [(idx, field, coerced) for idx in row_indices]
     lock = await _lock_for(log_id)
     async with lock:
-        outcome = await asyncio.to_thread(
-            _rewrite_with_edits, log_id, user_id, edits
-        )
+        outcome = await asyncio.to_thread(_rewrite_with_edits, log_id, user_id, edits)
         await _persist_after_write(log_id, outcome, session, user_id)
     return BulkFillOutcome(
         updated=len(edits),

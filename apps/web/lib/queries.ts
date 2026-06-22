@@ -144,7 +144,9 @@ export function useEventLog(id: string | null) {
     refetchInterval: (q) => {
       const data = q.state.data as EventLogDetail | undefined;
       if (!data) return false;
-      return data.status === "importing" ? 1000 : false;
+      // Poll through both transient states: `importing` (parsing) and
+      // `processing` (modules precomputing) both resolve to `ready`/`failed`.
+      return data.status === "importing" || data.status === "processing" ? 1000 : false;
     },
   });
 }

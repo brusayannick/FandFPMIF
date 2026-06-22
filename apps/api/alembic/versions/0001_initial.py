@@ -17,6 +17,7 @@ this revision would otherwise collide ("table already exists") on the retry.
 Each ``create_table`` is guarded on the live schema so the seed recovers that
 stuck state and is a no-op on an already-populated DB alike.
 """
+
 from __future__ import annotations
 
 import sqlalchemy as sa
@@ -147,9 +148,7 @@ def upgrade() -> None:
             sa.Column("last_edited_at", sa.DateTime(), nullable=True),
             sa.Column("deleted_at", sa.DateTime(), nullable=True),
         )
-        op.create_index(
-            "ix_process_logs_user_status", "process_logs", ["user_id", "status"]
-        )
+        op.create_index("ix_process_logs_user_status", "process_logs", ["user_id", "status"])
         op.create_index(
             "ix_process_logs_user_created_at",
             "process_logs",
@@ -176,12 +175,8 @@ def upgrade() -> None:
             sa.Column("subtitle", sa.String(length=255), nullable=True),
             sa.Column("module_id", sa.String(length=64), nullable=True),
             sa.Column("payload_json", sa.JSON(), nullable=False),
-            sa.Column(
-                "status", sa.String(length=16), nullable=False, server_default="queued"
-            ),
-            sa.Column(
-                "progress_current", sa.Integer(), nullable=False, server_default="0"
-            ),
+            sa.Column("status", sa.String(length=16), nullable=False, server_default="queued"),
+            sa.Column("progress_current", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("progress_total", sa.Integer(), nullable=True),
             sa.Column("stage", sa.String(length=64), nullable=True),
             sa.Column("message", sa.Text(), nullable=True),
@@ -215,9 +210,7 @@ def upgrade() -> None:
             ),
             sa.Column("module_id", sa.String(length=64), primary_key=True),
             sa.Column("config_json", sa.JSON(), nullable=False),
-            sa.Column(
-                "enabled", sa.Boolean(), nullable=False, server_default=sa.true()
-            ),
+            sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
             sa.Column("updated_at", sa.DateTime(), nullable=False),
         )
 
@@ -234,9 +227,7 @@ def upgrade() -> None:
             sa.Column("source", sa.String(length=16), nullable=True),
             sa.Column("installed_at", sa.DateTime(), nullable=False),
         )
-        op.create_index(
-            "ix_module_installs_module_id", "module_installs", ["module_id"]
-        )
+        op.create_index("ix_module_installs_module_id", "module_installs", ["module_id"])
 
     if "module_layouts" not in existing:
         op.create_table(
@@ -412,14 +403,10 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(), nullable=False),
             sa.Column("updated_at", sa.DateTime(), nullable=False),
             sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
-            sa.ForeignKeyConstraint(
-                ["event_log_id"], ["process_logs.id"], ondelete="SET NULL"
-            ),
+            sa.ForeignKeyConstraint(["event_log_id"], ["process_logs.id"], ondelete="SET NULL"),
             sa.PrimaryKeyConstraint("id"),
         )
-        op.create_index(
-            "ix_dashboards_user_created_at", "dashboards", ["user_id", "created_at"]
-        )
+        op.create_index("ix_dashboards_user_created_at", "dashboards", ["user_id", "created_at"])
 
     if "watched_folders" not in existing:
         op.create_table(
@@ -434,13 +421,9 @@ def upgrade() -> None:
                 nullable=False,
                 server_default="",
             ),
-            sa.Column(
-                "mode", sa.String(length=16), nullable=False, server_default="manual"
-            ),
+            sa.Column("mode", sa.String(length=16), nullable=False, server_default="manual"),
             sa.Column("interval_seconds", sa.Integer(), nullable=True),
-            sa.Column(
-                "status", sa.String(length=16), nullable=False, server_default="active"
-            ),
+            sa.Column("status", sa.String(length=16), nullable=False, server_default="active"),
             sa.Column("last_scanned_at", sa.DateTime(), nullable=True),
             sa.Column("last_error", sa.Text(), nullable=True),
             sa.Column("default_mapping", sa.JSON(), nullable=True),
@@ -452,9 +435,7 @@ def upgrade() -> None:
             ),
             sa.PrimaryKeyConstraint("id"),
         )
-        op.create_index(
-            "ix_watched_folders_user_status", "watched_folders", ["user_id", "status"]
-        )
+        op.create_index("ix_watched_folders_user_status", "watched_folders", ["user_id", "status"])
 
     if "watched_folder_files" not in existing:
         op.create_table(
@@ -474,12 +455,8 @@ def upgrade() -> None:
             ),
             sa.Column("error", sa.Text(), nullable=True),
             sa.Column("imported_at", sa.DateTime(), nullable=False),
-            sa.ForeignKeyConstraint(
-                ["watch_id"], ["watched_folders.id"], ondelete="CASCADE"
-            ),
-            sa.ForeignKeyConstraint(
-                ["log_id"], ["process_logs.id"], ondelete="SET NULL"
-            ),
+            sa.ForeignKeyConstraint(["watch_id"], ["watched_folders.id"], ondelete="CASCADE"),
+            sa.ForeignKeyConstraint(["log_id"], ["process_logs.id"], ondelete="SET NULL"),
             sa.PrimaryKeyConstraint("id"),
         )
         op.create_index(

@@ -34,7 +34,6 @@ from mate.api.ingest.detect import (
 from mate.api.ingest.dispatch import IMPORT_JOB_TYPE
 from mate.api.ingest.storage import log_paths
 from mate.api.jobs.runtime import JobRuntime, get_job_runtime
-from mate.api.storage import sync as storage_sync
 from mate.api.schemas.event_logs import (
     CsvColumnMapping,
     EventLogCreateResponse,
@@ -47,6 +46,7 @@ from mate.api.schemas.event_logs import (
     XmlColumnMapping,
     XmlProbeResponse,
 )
+from mate.api.storage import sync as storage_sync
 from mate.api.uuid7 import uuid7_str
 
 log = structlog.get_logger(__name__)

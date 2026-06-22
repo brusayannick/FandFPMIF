@@ -3,7 +3,17 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Boxes, LayoutDashboard, Loader2, Plus, Trash2, Upload, Workflow } from "lucide-react";
+import {
+  Boxes,
+  LayoutDashboard,
+  Loader2,
+  Plus,
+  Share2,
+  Trash2,
+  Upload,
+  Users,
+  Workflow,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -48,6 +58,8 @@ import {
   type DashboardItem,
   type LogModel,
 } from "@/lib/dashboard-queries";
+import { useSharedWithMe } from "@/lib/sharing-queries";
+import { ShareDialog } from "@/components/dashboards/share-dialog";
 
 const MODEL_OPTIONS: {
   value: LogModel;
@@ -72,6 +84,7 @@ const MODEL_OPTIONS: {
 export function DashboardList() {
   const router = useRouter();
   const { data: dashboards, isLoading } = useDashboards();
+  const { data: sharedWithMe } = useSharedWithMe();
   const create = useCreateDashboard();
   const del = useDeleteDashboard();
   const importDash = useImportDashboard();
@@ -81,6 +94,7 @@ export function DashboardList() {
   const [newName, setNewName] = useState("");
   const [model, setModel] = useState<LogModel>("case_centric");
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null);
 
   const onCreateOpenChange = (open: boolean) => {
     setCreateOpen(open);
@@ -198,19 +212,34 @@ export function DashboardList() {
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-2">
                   <CardTitle className="truncate text-base">{d.name}</CardTitle>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Delete ${d.name}`}
-                    className="relative z-10 h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setDeleteId(d.id);
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="relative z-10 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Share ${d.name}`}
+                      className="h-7 w-7 text-muted-foreground hover:text-primary"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setShareTarget({ id: d.id, name: d.name });
+                      }}
+                    >
+                      <Share2 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Delete ${d.name}`}
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setDeleteId(d.id);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="text-xs text-muted-foreground">
@@ -228,6 +257,52 @@ export function DashboardList() {
             </Card>
           ))}
         </div>
+      )}
+
+      {/* Shared with me */}
+      {sharedWithMe && sharedWithMe.length > 0 && (
+        <div className="mt-8 space-y-3">
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-medium">Shared with me</h2>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {sharedWithMe.map((d) => (
+              <Card key={d.id} className="group relative transition-colors hover:border-primary/40">
+                <Link
+                  href={`/dashboards/${d.id}`}
+                  className="absolute inset-0"
+                  aria-label={d.name}
+                >
+                  <span className="sr-only">{d.name}</span>
+                </Link>
+                <CardHeader className="pb-2">
+                  <CardTitle className="truncate text-base">{d.name}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex items-center gap-1">
+                      <LayoutDashboard className="h-3.5 w-3.5" />
+                      {d.card_count} card{d.card_count === 1 ? "" : "s"}
+                    </span>
+                    <span>by {d.owner_label}</span>
+                  </div>
+                  {d.description && <p className="mt-2 line-clamp-2">{d.description}</p>}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Share dialog */}
+      {shareTarget && (
+        <ShareDialog
+          dashboardId={shareTarget.id}
+          dashboardName={shareTarget.name}
+          open={shareTarget !== null}
+          onOpenChange={(o) => !o && setShareTarget(null)}
+        />
       )}
 
       {/* Create dialog */}

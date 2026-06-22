@@ -17,10 +17,10 @@ under its own meta-path) is heavier than v1 needs.
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from importlib.abc import MetaPathFinder
 from importlib.machinery import ModuleSpec, PathFinder
 from pathlib import Path
-from typing import Sequence
 
 import structlog
 

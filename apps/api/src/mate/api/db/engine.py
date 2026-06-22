@@ -12,7 +12,7 @@ from mate.api.config import get_settings
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-_engine: "AsyncEngine | None" = None
+_engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
@@ -25,7 +25,7 @@ def _enable_wal_and_fk(dbapi_conn, _record) -> None:  # pragma: no cover - SQLAl
     cur.close()
 
 
-def get_engine() -> "AsyncEngine":
+def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         settings = get_settings()

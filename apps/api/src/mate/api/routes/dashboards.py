@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from mate.api.auth import CurrentUserDep, get_owned_event_log
-from mate.api.db.models import Dashboard
+from mate.api.db.models import Dashboard, DashboardShare, Team, User
 from mate.api.db.session import SessionDep
 from mate.api.schemas.dashboards import (
     CanvasSettings,
@@ -30,6 +30,13 @@ from mate.api.schemas.dashboards import (
     DashboardItem,
     DashboardSummary,
     DashboardUpdate,
+)
+from mate.api.schemas.sharing import DashboardShareOut, ShareCreate
+from mate.api.sharing import (
+    can_share_with_team,
+    can_share_with_user,
+    get_accessible_dashboard,
+    user_label,
 )
 from mate.api.uuid7 import uuid7_str
 
@@ -70,7 +77,7 @@ def _layout_blob(items: list[DashboardItem], settings: CanvasSettings) -> dict[s
     return {"items": [it.model_dump() for it in items], "settings": settings.model_dump()}
 
 
-def _detail(row: Dashboard) -> DashboardDetail:
+def _detail(row: Dashboard, *, is_owner: bool = True) -> DashboardDetail:
     return DashboardDetail(
         id=row.id,
         name=row.name,
@@ -81,6 +88,7 @@ def _detail(row: Dashboard) -> DashboardDetail:
         settings=_settings_of(row),
         created_at=row.created_at,
         updated_at=row.updated_at,
+        is_owner=is_owner,
     )
 
 
@@ -153,8 +161,9 @@ async def create_dashboard(
 async def get_dashboard(
     dashboard_id: str, session: SessionDep, user: CurrentUserDep
 ) -> DashboardDetail:
-    row = await _get_owned(session, dashboard_id, user.id)
-    return _detail(row)
+    # Owner or share recipient may view; recipients get a read-only board.
+    row = await get_accessible_dashboard(session, dashboard_id, user.id)
+    return _detail(row, is_owner=row.user_id == user.id)
 
 
 @router.patch("/{dashboard_id}", response_model=DashboardDetail)
@@ -233,3 +242,126 @@ async def import_dashboard(
     await session.commit()
     log.info("dashboard.imported", dashboard_id=row.id, cards=len(payload.items))
     return _detail(row)
+
+
+# --- Sharing (owner-managed) -------------------------------------------------
+
+
+async def _share_out(session: SessionDep, share: DashboardShare) -> DashboardShareOut:
+    if share.target_team_id is not None:
+        team = await session.get(Team, share.target_team_id)
+        label = team.name if team is not None else "Deleted team"
+        return DashboardShareOut(
+            id=share.id,
+            dashboard_id=share.dashboard_id,
+            kind="team",
+            target_id=share.target_team_id,
+            label=label,
+            created_at=share.created_at,
+        )
+    target_user = await session.get(User, share.target_user_id)
+    return DashboardShareOut(
+        id=share.id,
+        dashboard_id=share.dashboard_id,
+        kind="user",
+        target_id=share.target_user_id or "",
+        label=user_label(target_user),
+        created_at=share.created_at,
+    )
+
+
+@router.get("/{dashboard_id}/shares", response_model=list[DashboardShareOut])
+async def list_shares(
+    dashboard_id: str, session: SessionDep, user: CurrentUserDep
+) -> list[DashboardShareOut]:
+    await _get_owned(session, dashboard_id, user.id)
+    rows = (
+        (
+            await session.execute(
+                select(DashboardShare)
+                .where(DashboardShare.dashboard_id == dashboard_id)
+                .order_by(DashboardShare.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [await _share_out(session, r) for r in rows]
+
+
+@router.post(
+    "/{dashboard_id}/shares",
+    response_model=DashboardShareOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_share(
+    dashboard_id: str,
+    payload: ShareCreate,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> DashboardShareOut:
+    await _get_owned(session, dashboard_id, user.id)
+
+    # Validate the target exists and is reachable: you can only share with a
+    # teammate or a team you belong to (the same scope /sharing/targets offers).
+    if payload.target_user_id is not None:
+        if payload.target_user_id == user.id:
+            raise HTTPException(status_code=400, detail="You already own this dashboard.")
+        if await session.get(User, payload.target_user_id) is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if not await can_share_with_user(session, payload.target_user_id, user.id):
+            raise HTTPException(
+                status_code=403, detail="You can only share with members of your teams."
+            )
+        dup = (
+            select(DashboardShare.id)
+            .where(
+                DashboardShare.dashboard_id == dashboard_id,
+                DashboardShare.target_user_id == payload.target_user_id,
+            )
+            .limit(1)
+        )
+    else:
+        if await session.get(Team, payload.target_team_id) is None:
+            raise HTTPException(status_code=404, detail="Team not found.")
+        if not await can_share_with_team(session, payload.target_team_id or "", user.id):
+            raise HTTPException(
+                status_code=403, detail="You can only share with teams you belong to."
+            )
+        dup = (
+            select(DashboardShare.id)
+            .where(
+                DashboardShare.dashboard_id == dashboard_id,
+                DashboardShare.target_team_id == payload.target_team_id,
+            )
+            .limit(1)
+        )
+
+    if (await session.execute(dup)).first() is not None:
+        raise HTTPException(status_code=409, detail="Already shared with this target.")
+
+    share = DashboardShare(
+        id=uuid7_str(),
+        dashboard_id=dashboard_id,
+        target_user_id=payload.target_user_id,
+        target_team_id=payload.target_team_id,
+        created_by=user.id,
+        created_at=_utcnow(),
+    )
+    session.add(share)
+    await session.commit()
+    log.info("dashboard.shared", dashboard_id=dashboard_id, share_id=share.id)
+    return await _share_out(session, share)
+
+
+@router.delete("/{dashboard_id}/shares/{share_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_share(
+    dashboard_id: str, share_id: str, session: SessionDep, user: CurrentUserDep
+) -> None:
+    await _get_owned(session, dashboard_id, user.id)
+    share = await session.get(DashboardShare, share_id)
+    if share is None or share.dashboard_id != dashboard_id:
+        raise HTTPException(status_code=404, detail="Share not found.")
+    await session.delete(share)
+    await session.commit()
+    log.info("dashboard.unshared", dashboard_id=dashboard_id, share_id=share_id)

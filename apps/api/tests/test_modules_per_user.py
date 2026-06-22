@@ -41,10 +41,10 @@ def _module_zip(module_id: str) -> bytes:
             (
                 "from mate.sdk import Module, ModuleContext, route\n\n"
                 f"class TheModule(Module):\n"
-                f"    id = \"{module_id}\"\n\n"
-                "    @route.get(\"/ping\")\n"
+                f'    id = "{module_id}"\n\n'
+                '    @route.get("/ping")\n'
                 "    async def ping(self, ctx: ModuleContext) -> dict[str, str]:\n"
-                "        return {\"id\": ctx.module_id}\n"
+                '        return {"id": ctx.module_id}\n'
             ),
         )
     return buf.getvalue()
@@ -76,6 +76,35 @@ async def _install_row_source(user_id: str, module_id: str) -> str | None:
         return None if row is None else row.source
 
 
+async def _set_seeded_record(value, user_id: str = TEST_USER_ID) -> None:
+    """Force the per-user "defaults already offered" record to *value* (a list,
+    a legacy bare ``True``, or ``None`` to clear)."""
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.db.models import UserSetting
+
+    sm = get_sessionmaker()
+    async with sm() as s:
+        row = await s.get(UserSetting, (user_id, _DEFAULTS_SEEDED_KEY))
+        if value is None:
+            if row is not None:
+                await s.delete(row)
+        elif row is None:
+            s.add(UserSetting(user_id=user_id, key=_DEFAULTS_SEEDED_KEY, value_json=value))
+        else:
+            row.value_json = value
+        await s.commit()
+
+
+async def _seeded_record(user_id: str = TEST_USER_ID):
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.db.models import UserSetting
+
+    sm = get_sessionmaker()
+    async with sm() as s:
+        row = await s.get(UserSetting, (user_id, _DEFAULTS_SEEDED_KEY))
+        return None if row is None else row.value_json
+
+
 async def _await_job(client: AsyncClient, job_id: str) -> dict:
     for _ in range(50):
         d = await client.get(f"/api/v1/jobs/{job_id}")
@@ -98,6 +127,61 @@ async def test_list_modules_auto_seeds_defaults(
 
     # The seeded row is tagged source="default" (not "upload").
     assert await _install_row_source(TEST_USER_ID, "sample_mod") == "default"
+
+
+@pytest.mark.asyncio
+async def test_list_grants_newly_bundled_default_to_seeded_user(
+    client_with_sample_mod_fresh: AsyncClient,
+) -> None:
+    """A default that appears *after* a user was seeded is granted on next list.
+
+    Simulate an already-seeded user whose recorded set predates `sample_mod`
+    (e.g. it was bundled later): listing should grant it and extend the record.
+    """
+    await _reset_user_modules()
+    # User previously seeded with some other default; `sample_mod` is "new".
+    await _set_seeded_record(["some_old_default"])
+
+    resp = await client_with_sample_mod_fresh.get("/api/v1/modules")
+    assert resp.status_code == 200
+    assert "sample_mod" in [m["id"] for m in resp.json()]
+    assert await _install_row_source(TEST_USER_ID, "sample_mod") == "default"
+    assert "sample_mod" in (await _seeded_record())
+
+
+@pytest.mark.asyncio
+async def test_list_legacy_bool_flag_migrates_and_reconciles(
+    client_with_sample_mod_fresh: AsyncClient,
+) -> None:
+    """A legacy one-shot ``True`` flag reconciles the full set once, then becomes
+    an id list so removals stick afterwards."""
+    await _reset_user_modules()
+    await _set_seeded_record(True)  # legacy flag, no ids recorded
+
+    resp = await client_with_sample_mod_fresh.get("/api/v1/modules")
+    assert resp.status_code == 200
+    assert await _install_row_source(TEST_USER_ID, "sample_mod") == "default"
+    record = await _seeded_record()
+    assert isinstance(record, list) and "sample_mod" in record
+
+
+@pytest.mark.asyncio
+async def test_list_does_not_resurrect_removed_default(
+    client_with_sample_mod: AsyncClient,
+) -> None:
+    """Once a default is in the recorded set, uninstalling it and re-listing must
+    not bring it back (only explicit restore-defaults does)."""
+    # First list records `sample_mod` as offered.
+    assert (await client_with_sample_mod.get("/api/v1/modules")).status_code == 200
+    assert "sample_mod" in (await _seeded_record())
+
+    deleted = await client_with_sample_mod.delete("/api/v1/modules/sample_mod")
+    assert deleted.status_code == 204
+
+    resp = await client_with_sample_mod.get("/api/v1/modules")
+    assert resp.status_code == 200
+    assert "sample_mod" not in [m["id"] for m in resp.json()]
+    assert await _install_row_source(TEST_USER_ID, "sample_mod") is None
 
 
 @pytest.mark.asyncio
@@ -173,11 +257,7 @@ async def test_upload_rejects_other_users_id(
             s.add(User(id=OTHER_USER_ID, email="other@mate.local"))
             await s.flush()
         if await s.get(ModuleInstall, (OTHER_USER_ID, "foreign_mod")) is None:
-            s.add(
-                ModuleInstall(
-                    user_id=OTHER_USER_ID, module_id="foreign_mod", source="upload"
-                )
-            )
+            s.add(ModuleInstall(user_id=OTHER_USER_ID, module_id="foreign_mod", source="upload"))
         await s.commit()
 
     resp = await client_with_sample_mod.post(

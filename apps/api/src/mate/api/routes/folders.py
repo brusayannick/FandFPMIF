@@ -9,10 +9,10 @@ exactly once when the drag ends.
 from __future__ import annotations
 
 import shutil
-import structlog
 from datetime import UTC, datetime
 from typing import Annotated
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
@@ -63,9 +63,7 @@ async def _ensure_no_cycle(
 
 
 @router.get("", response_model=list[FolderSummary])
-async def list_folders(
-    session: SessionDep, user: CurrentUserDep
-) -> list[FolderSummary]:
+async def list_folders(session: SessionDep, user: CurrentUserDep) -> list[FolderSummary]:
     stmt = (
         select(Folder)
         .where(Folder.user_id == user.id, Folder.deleted_at.is_(None))
@@ -164,14 +162,18 @@ async def delete_folder(
         cur = stack.pop()
         folder_ids.append(cur)
         descendants = (
-            await session.execute(
-                select(Folder.id).where(
-                    Folder.user_id == user.id,
-                    Folder.parent_id == cur,
-                    Folder.deleted_at.is_(None),
+            (
+                await session.execute(
+                    select(Folder.id).where(
+                        Folder.user_id == user.id,
+                        Folder.parent_id == cur,
+                        Folder.deleted_at.is_(None),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         stack.extend(descendants)
 
     log_rows = (
@@ -221,9 +223,7 @@ async def delete_folder(
 
 
 @router.post("/reorder", status_code=status.HTTP_204_NO_CONTENT)
-async def reorder(
-    payload: ReorderRequest, session: SessionDep, user: CurrentUserDep
-) -> None:
+async def reorder(payload: ReorderRequest, session: SessionDep, user: CurrentUserDep) -> None:
     """Bulk-update parent + position for any mix of folders and logs.
 
     The frontend calls this exactly once at the end of a drag with the full

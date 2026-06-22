@@ -20,7 +20,11 @@ requirements:
 
 provides:
   - ocel_discovery.ocdfg
+  - ocel_discovery.ocpn
   - ocel_discovery.summary
+  - ocel_discovery.objects_graph
+  - ocel_discovery.activity_object_types
+  - ocel_discovery.objects_summary
 
 consumes:
   - ocel.imported
@@ -36,6 +40,7 @@ dependencies:
     isolation: in_process
 
 frontend:
+  panel: ./panel/index.tsx
   widgets:
     - id: object-type-summary
       entry: ./widgets/ObjectTypeSummary.tsx
@@ -52,6 +57,22 @@ frontend:
       icon: Network
       default_w: 6
       default_h: 10
+      log_models: [object_centric]
+    - id: activity-object-types
+      entry: ./widgets/ActivityObjectTypes.tsx
+      title: Activity / object-type matrix
+      description: How often each activity touches each object type.
+      icon: Table2
+      default_w: 6
+      default_h: 6
+      log_models: [object_centric]
+    - id: object-lifecycle
+      entry: ./widgets/ObjectLifecycle.tsx
+      title: Object lifecycles
+      description: Per-object-type median lifecycle duration and event counts.
+      icon: Timer
+      default_w: 5
+      default_h: 6
       log_models: [object_centric]
 
 permissions:

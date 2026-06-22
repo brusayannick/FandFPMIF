@@ -39,9 +39,12 @@ from mate.api.modules.installs import (
 )
 from mate.api.schemas.event_logs import LogModel
 
-# UserSetting flag marking that a user has had the default module set seeded
-# at least once. Lets unlocked users intentionally remove a default without it
-# being resurrected on the next list call.
+# UserSetting key holding the per-user record of which default module ids have
+# already been offered to a user (a JSON list). Seeding grants only the defaults
+# that are new since the last visit, so a freshly bundled module reaches
+# existing users automatically while a default the user intentionally removed
+# stays gone (its id is already in the recorded set). Legacy rows hold a bare
+# `true` (the old one-shot "seeded at least once" flag).
 _DEFAULTS_SEEDED_KEY = "modules_defaults_seeded"
 
 router = APIRouter(prefix="/modules", tags=["modules"])
@@ -55,31 +58,39 @@ async def _assert_owns_module(session: SessionDep, user_id: str, module_id: str)
     leaking which module ids exist.
     """
     if not await user_owns_module(session, user_id, module_id):
-        raise HTTPException(
-            status_code=404, detail=f"Module {module_id!r} is not installed."
-        )
+        raise HTTPException(status_code=404, detail=f"Module {module_id!r} is not installed.")
 
 
 async def _reconcile_default_modules(
     session: SessionDep, user_id: str, default_ids: set[str]
 ) -> None:
-    """Ensure *user_id* owns the default module set on first sighting.
+    """Grant *user_id* any default modules not previously offered to them.
 
-    Seeding is one-shot, gated by a per-user flag: the brand-new user is granted
-    the full default set, and the flag is set so a user can later intentionally
-    uninstall a default without it being resurrected on the next list call.
+    The set of already-offered default ids is recorded per user. On each visit
+    we grant only the defaults that are new since last time, then extend the
+    record — so a newly bundled default shows up for existing users without a
+    re-seed, while a default the user intentionally uninstalled is not brought
+    back (its id is already in the recorded set).
+
+    A legacy row stores a bare ``True`` (the old one-shot flag); we can't recover
+    which ids it covered, so it is treated as "nothing recorded" and the full
+    current default set is reconciled once. That can re-grant a default removed
+    *before* this upgrade, but only that once — afterwards the row is an id list
+    and removals stick.
     """
-    flag = await session.get(UserSetting, (user_id, _DEFAULTS_SEEDED_KEY))
-    if flag and flag.value_json:
+    row = await session.get(UserSetting, (user_id, _DEFAULTS_SEEDED_KEY))
+    tracked = row is not None and isinstance(row.value_json, list)
+    recorded: set[str] = set(row.value_json) if tracked else set()  # type: ignore[arg-type]
+    new_ids = default_ids - recorded
+    if not new_ids and tracked:
         return
 
-    await seed_default_modules(session, user_id, default_ids)
-    if flag is None:
-        session.add(
-            UserSetting(user_id=user_id, key=_DEFAULTS_SEEDED_KEY, value_json=True)
-        )
+    await seed_default_modules(session, user_id, new_ids)
+    merged = sorted(recorded | default_ids)
+    if row is None:
+        session.add(UserSetting(user_id=user_id, key=_DEFAULTS_SEEDED_KEY, value_json=merged))
     else:
-        flag.value_json = True
+        row.value_json = merged
 
 
 class ModuleSummary(BaseModel):
@@ -141,9 +152,7 @@ async def list_modules(
         )
 
     rows = await session.execute(
-        select(ModuleConfig.module_id, ModuleConfig.enabled).where(
-            ModuleConfig.user_id == user.id
-        )
+        select(ModuleConfig.module_id, ModuleConfig.enabled).where(ModuleConfig.user_id == user.id)
     )
     enabled_map: dict[str, bool] = {module_id: enabled for module_id, enabled in rows.all()}
 
@@ -232,9 +241,7 @@ async def list_cards(session: SessionDep, user: CurrentUserDep) -> list[Dashboar
 
 
 @router.get("/{module_id}/manifest")
-async def get_manifest(
-    module_id: str, session: SessionDep, user: CurrentUserDep
-) -> dict[str, Any]:
+async def get_manifest(module_id: str, session: SessionDep, user: CurrentUserDep) -> dict[str, Any]:
     await _assert_owns_module(session, user.id, module_id)
     try:
         loader = get_module_loader()
@@ -372,9 +379,7 @@ async def install_from_upload(
 @router.post(
     "/install/git", response_model=InstallJobResponse, status_code=status.HTTP_202_ACCEPTED
 )
-async def install_from_git(
-    payload: GitInstallPayload, user: CurrentUserDep
-) -> InstallJobResponse:
+async def install_from_git(payload: GitInstallPayload, user: CurrentUserDep) -> InstallJobResponse:
     runtime = get_job_runtime()
     title = f"Install module — {payload.url.rsplit('/', 1)[-1]}"
     if payload.ref:
@@ -455,9 +460,7 @@ async def put_module_layout(
 
 
 @router.get("/{module_id}/assets/{asset_path:path}")
-async def get_module_asset(
-    module_id: str, asset_path: str, user: CurrentUserDep
-) -> FileResponse:
+async def get_module_asset(module_id: str, asset_path: str, user: CurrentUserDep) -> FileResponse:
     """Serve a file from the loaded module's `.dist/` (§5.4).
 
     The frontend dynamic loader fetches `panel.js` / `widget-*.js` from this
@@ -493,9 +496,7 @@ class RestoreDefaultsResponse(BaseModel):
 
 
 @router.post("/restore-defaults", response_model=RestoreDefaultsResponse)
-async def restore_defaults(
-    session: SessionDep, user: CurrentUserDep
-) -> RestoreDefaultsResponse:
+async def restore_defaults(session: SessionDep, user: CurrentUserDep) -> RestoreDefaultsResponse:
     """Re-add any default modules the user has removed (idempotent).
 
     Only ever *adds* the shared defaults — never touches custom uploads.
@@ -503,11 +504,16 @@ async def restore_defaults(
     listing.
     """
     loader = get_module_loader()
-    default_ids = set(loader.default_module_ids)
+    # `default_module_ids` is computed from discovery (before install/import), so
+    # a default that failed to install or import is in that set but absent from
+    # `loaded`. Restrict to actually-loaded modules — otherwise we'd write an
+    # install row and report "restored" for a module that never appears in the
+    # listing (which only shows loaded manifests).
+    default_ids = {mid for mid in loader.default_module_ids if mid in loader.loaded}
     owned = await user_module_ids(session, user.id)
     missing = sorted(default_ids - owned)
     if missing:
-        await seed_default_modules(session, user.id, default_ids)
+        await seed_default_modules(session, user.id, missing)
         await session.commit()
         for module_id in missing:
             await loader.bus.publish(
@@ -518,9 +524,7 @@ async def restore_defaults(
 
 
 @router.delete("/{module_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def uninstall(
-    module_id: str, session: SessionDep, user: CurrentUserDep
-) -> None:
+async def uninstall(module_id: str, session: SessionDep, user: CurrentUserDep) -> None:
     # Per-user uninstall: drop this user's ownership record. The shared
     # on-disk artifact and in-process load are only torn down once the last
     # owner removes it — other users keep using it untouched.
@@ -533,10 +537,7 @@ async def uninstall(
     # is removed above. Uploads live under uploaded_modules_dir and are removed
     # only once their last owner uninstalls. Entry-point/registry modules live
     # in neither root, so the existence check below leaves them alone.
-    if (
-        module_id not in loader.default_module_ids
-        and await owner_count(session, module_id) == 0
-    ):
+    if module_id not in loader.default_module_ids and await owner_count(session, module_id) == 0:
         target = get_settings().uploaded_modules_dir.resolve() / module_id
         await loader.unload_one(module_id)
         if target.exists():
@@ -545,6 +546,4 @@ async def uninstall(
 
     # Scope the event to this user so the WS only notifies their sessions —
     # other owners' module lists are unaffected.
-    await loader.bus.publish(
-        "module.uninstalled", {"id": module_id, "user_id": user.id}
-    )
+    await loader.bus.publish("module.uninstalled", {"id": module_id, "user_id": user.id})

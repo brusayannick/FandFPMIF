@@ -104,6 +104,14 @@ class EventLog(Base):
     status: Mapped[str] = mapped_column(String(16), default="importing", nullable=False)
     error: Mapped[str | None] = mapped_column(Text)
 
+    # While `status == "processing"`, the log is held disabled until every
+    # subscribing module finishes precomputing against it. The import job whose
+    # children are the precompute jobs to wait on, and the module-id set frozen
+    # at import time (deterministic — avoids a "0/0 → flip early" race). Both are
+    # cleared the moment the log goes `ready`. See `mate.api.modules.processing`.
+    processing_import_job_id: Mapped[str | None] = mapped_column(String(36))
+    expected_modules: Mapped[list[str] | None] = mapped_column(JSON)
+
     events_count: Mapped[int | None] = mapped_column(Integer)
     # Case-centric counts — left NULL for object-centric logs (their NULLness is
     # itself a tell that the case-centric path never ran).
@@ -520,6 +528,10 @@ class AnalyticsEvent(Base):
         Index("ix_analytics_events_user_session", "user_id", "session_id", "occurred_at"),
         Index("ix_analytics_events_user_type_name", "user_id", "event_type", "event_name"),
         Index("ix_analytics_events_user_occurred", "user_id", "occurred_at"),
+        # Cross-user (no leading user_id) — serve the admin behaviour-export
+        # filters in routes/admin.py (Alembic 0004).
+        Index("ix_analytics_events_occurred", "occurred_at"),
+        Index("ix_analytics_events_type_occurred", "event_type", "occurred_at"),
     )
 
 
@@ -564,3 +576,80 @@ class Dashboard(Base):
     )
 
     __table_args__ = (Index("ix_dashboards_user_created_at", "user_id", "created_at"),)
+
+
+class Team(Base):
+    """A named group of users (a "workspace") used as a dashboard-share target.
+
+    Teams are admin-managed: an operator creates a team and assigns members via
+    the admin panel. A team is the coarse share target — sharing a dashboard
+    with a team grants every current member read access. Soft-deleted
+    (``deleted_at``) so historical shares keep a stable name to display.
+    """
+
+    __tablename__ = "teams"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class TeamMember(Base):
+    """Membership edge: which users belong to which team.
+
+    Composite PK ``(team_id, user_id)`` makes membership a set (no duplicates).
+    ``role`` distinguishes a team ``owner`` (reserved for future self-service
+    management) from a plain ``member``; today both are assigned by an admin.
+    """
+
+    __tablename__ = "team_members"
+
+    team_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(
+        String(16), default="member", server_default="member", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (Index("ix_team_members_user", "user_id"),)
+
+
+class DashboardShare(Base):
+    """A grant of read access to one dashboard for one target.
+
+    Exactly one of ``target_user_id`` (share with a single member) or
+    ``target_team_id`` (share with a whole team) is set — the route layer
+    enforces the xor. ``created_by`` is the sharer (the dashboard owner) for
+    audit. A share is the *only* sanctioned way a dashboard — and, transitively,
+    the data of its bound event log — crosses an account boundary; see
+    ``mate.api.sharing``. Read-only: recipients never mutate the dashboard or
+    the log.
+    """
+
+    __tablename__ = "dashboard_shares"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    dashboard_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("dashboards.id", ondelete="CASCADE"), nullable=False
+    )
+    target_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE")
+    )
+    target_team_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("teams.id", ondelete="CASCADE")
+    )
+    created_by: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_dashboard_shares_dashboard", "dashboard_id"),
+        Index("ix_dashboard_shares_target_user", "target_user_id"),
+        Index("ix_dashboard_shares_target_team", "target_team_id"),
+    )

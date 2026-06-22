@@ -248,6 +248,7 @@ class JobRuntime:
         loop = asyncio.get_running_loop()
         if kwargs:
             from functools import partial
+
             return await loop.run_in_executor(pool, partial(fn, *args, **kwargs))
         return await loop.run_in_executor(pool, fn, *args)
 
@@ -288,7 +289,8 @@ class JobRuntime:
             await session.commit()
             if result.rowcount:
                 log.info(
-                    "job_runtime.orphans_reconciled", count=result.rowcount,
+                    "job_runtime.orphans_reconciled",
+                    count=result.rowcount,
                 )
 
     async def stop(self) -> None:
@@ -486,9 +488,7 @@ class JobRuntime:
         async with sm() as session:
             rows = (
                 await session.execute(
-                    select(Job.id, Job.payload_json).where(
-                        Job.status.in_(("queued", "running"))
-                    )
+                    select(Job.id, Job.payload_json).where(Job.status.in_(("queued", "running")))
                 )
             ).all()
 
@@ -509,10 +509,10 @@ class JobRuntime:
         sm = get_sessionmaker()
         async with sm() as session:
             rows = (
-                await session.execute(
-                    select(Job.id).where(Job.status.in_(("queued", "running")))
-                )
-            ).scalars().all()
+                (await session.execute(select(Job.id).where(Job.status.in_(("queued", "running")))))
+                .scalars()
+                .all()
+            )
 
         cancelled = 0
         for job_id in rows:
@@ -566,7 +566,7 @@ class JobRuntime:
                 if await self._maybe_defer(job_id, sm):
                     continue
                 await self._run_one(job_id, sm)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.exception("job_runtime.unexpected_error", job_id=item, error=str(exc))
             finally:
                 self._queue.task_done()
@@ -675,7 +675,7 @@ class JobRuntime:
                 {"id": job_id, "user_id": handle_user_id, "reason": "running"},
             )
             return
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logging.exception("Job handler failed for %s", job_id)
             async with sm() as session:
                 await session.execute(

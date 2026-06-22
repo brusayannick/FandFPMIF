@@ -8,6 +8,7 @@ unverifiable bearer.
 These tests set DEMO_MODE/DEMO_ADMIN explicitly (os.environ overrides the repo
 .env) so they're deterministic regardless of the developer's local .env.
 """
+
 from __future__ import annotations
 
 import os

@@ -105,7 +105,7 @@ async def scan_watch(
     result = ScanResult()
     try:
         files = await asyncio.to_thread(list_source, watch.source_path)
-    except Exception as exc:  # noqa: BLE001 — unreachable source / IO error
+    except Exception as exc:
         watch.status = "error"
         watch.last_error = str(exc)[:500]
         watch.last_scanned_at = _utcnow()
@@ -136,7 +136,7 @@ async def scan_watch(
         try:
             await _import_one(watch, sf, existing, session=session, runtime=runtime)
             result.imported += 1
-        except Exception as exc:  # noqa: BLE001 — per-file failure, keep scanning
+        except Exception as exc:
             result.failed += 1
             _record_failure(watch, sf, existing, error=str(exc)[:500], session=session)
             log.warning("watch.import_failed", watch_id=watch.id, file=sf.name, error=str(exc))

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
 import { api, rawFetch } from "@/lib/api";
 import type {
@@ -130,54 +130,6 @@ export function useDiscoveryBpmn(
       ),
     enabled: Boolean(logId),
     staleTime: STALE_TIME,
-  });
-}
-
-export function useUploadBpmn(logId: string) {
-  const qc = useQueryClient();
-  return useMutation<BpmnData, Error, File>({
-    mutationFn: async (file: File) => {
-      const form = new FormData();
-      form.append("file", file);
-      return api<BpmnData>(discoveryUrl("/bpmn/upload", logId), {
-        method: "POST",
-        body: form,
-      });
-    },
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["modules", "discovery", "bpmn", logId],
-      });
-    },
-  });
-}
-
-export function useSaveBpmn(logId: string) {
-  const qc = useQueryClient();
-  return useMutation<BpmnData, Error, string>({
-    mutationFn: (xml: string) =>
-      api<BpmnData>(discoveryUrl("/bpmn", logId), {
-        method: "PUT",
-        json: { xml },
-      }),
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["modules", "discovery", "bpmn", logId],
-      });
-    },
-  });
-}
-
-export function useResetBpmn(logId: string) {
-  const qc = useQueryClient();
-  return useMutation<{ status: string }, Error, void>({
-    mutationFn: () =>
-      api<{ status: string }>(discoveryUrl("/bpmn", logId), { method: "DELETE" }),
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["modules", "discovery", "bpmn", logId],
-      });
-    },
   });
 }
 

@@ -35,9 +35,7 @@ def quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def validate_filters(
-    filters: list[dict[str, Any]], column_names: set[str]
-) -> list[dict[str, Any]]:
+def validate_filters(filters: list[dict[str, Any]], column_names: set[str]) -> list[dict[str, Any]]:
     """Validate shape/op/field of each entry, raising HTTP 422 on problems.
 
     Returns the same list so callers can use it inline.
@@ -55,9 +53,7 @@ def validate_filters(
         if field not in column_names:
             raise HTTPException(status_code=422, detail=f"Unknown filter field: {field!r}.")
         if op == "in" and not isinstance(entry.get("value"), list):
-            raise HTTPException(
-                status_code=422, detail="filter op 'in' requires a list value."
-            )
+            raise HTTPException(status_code=422, detail="filter op 'in' requires a list value.")
     return filters
 
 

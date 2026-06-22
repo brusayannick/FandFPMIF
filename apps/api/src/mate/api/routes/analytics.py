@@ -93,11 +93,7 @@ async def _save_config(
     # ``onboarding_mode`` is server policy, not user state — never persist it.
     data = cfg.model_dump(mode="json", exclude={"onboarding_mode"})
     if row is None:
-        session.add(
-            UserSetting(
-                user_id=user_id, key=ANALYTICS_CONFIG_KEY, value_json=data
-            )
-        )
+        session.add(UserSetting(user_id=user_id, key=ANALYTICS_CONFIG_KEY, value_json=data))
     else:
         row.value_json = data
     await session.commit()
@@ -105,9 +101,7 @@ async def _save_config(
 
 
 @router.get("/config", response_model=AnalyticsConfigPayload)
-async def get_config(
-    session: SessionDep, user: CurrentUserDep
-) -> AnalyticsConfigPayload:
+async def get_config(session: SessionDep, user: CurrentUserDep) -> AnalyticsConfigPayload:
     row = await session.get(UserSetting, (user.id, ANALYTICS_CONFIG_KEY))
     cfg = _load_config(row)
     # Persist the lazily-generated seed so the anon id is stable across calls.
@@ -121,9 +115,7 @@ async def put_config(
     payload: AnalyticsConfigPayload, session: SessionDep, user: CurrentUserDep
 ) -> AnalyticsConfigPayload:
     if payload.enabled and payload.opted_in_at is None:
-        payload = payload.model_copy(
-            update={"opted_in_at": datetime.now(UTC).replace(tzinfo=None)}
-        )
+        payload = payload.model_copy(update={"opted_in_at": datetime.now(UTC).replace(tzinfo=None)})
     saved = await _save_config(session, payload, user.id)
     return _effective(saved)
 
@@ -174,7 +166,7 @@ async def record_server_event(
             )
         )
         await session.commit()
-    except Exception:  # noqa: BLE001 — tracking must never surface to callers
+    except Exception:
         log.warning("server_event.record_failed", event_name=event_name, exc_info=True)
         with contextlib.suppress(Exception):
             await session.rollback()
@@ -215,9 +207,7 @@ class IngestPayload(BaseModel):
 
 
 @router.post("/sync", status_code=status.HTTP_202_ACCEPTED)
-async def ingest_events(
-    request: Request, session: SessionDep, user: CurrentUserDep
-) -> Response:
+async def ingest_events(request: Request, session: SessionDep, user: CurrentUserDep) -> Response:
     """Append a batch of events.
 
     Accepts ``application/json`` and ``text/plain`` (so ``navigator.sendBeacon``
@@ -243,9 +233,7 @@ async def ingest_events(
     if not payload.events:
         return Response(status_code=status.HTTP_202_ACCEPTED)
     if len(payload.events) > MAX_BATCH_EVENTS:
-        raise HTTPException(
-            status_code=413, detail=f"Batch exceeds {MAX_BATCH_EVENTS} events"
-        )
+        raise HTTPException(status_code=413, detail=f"Batch exceeds {MAX_BATCH_EVENTS} events")
 
     # Reject events claiming a different anon id than the configured seed —
     # prevents replay from clients with stale state after a wipe.
@@ -326,9 +314,7 @@ class AnalyticsSummary(BaseModel):
 
 
 @router.get("/summary", response_model=AnalyticsSummary)
-async def get_summary(
-    session: SessionDep, user: CurrentUserDep
-) -> AnalyticsSummary:
+async def get_summary(session: SessionDep, user: CurrentUserDep) -> AnalyticsSummary:
     cfg_row = await session.get(UserSetting, (user.id, ANALYTICS_CONFIG_KEY))
     cfg = _effective(_load_config(cfg_row))
 
@@ -359,14 +345,10 @@ async def get_summary(
     ) or 0
 
     oldest = await session.scalar(
-        select(func.min(AnalyticsEvent.occurred_at)).where(
-            AnalyticsEvent.user_id == user.id
-        )
+        select(func.min(AnalyticsEvent.occurred_at)).where(AnalyticsEvent.user_id == user.id)
     )
     newest = await session.scalar(
-        select(func.max(AnalyticsEvent.occurred_at)).where(
-            AnalyticsEvent.user_id == user.id
-        )
+        select(func.max(AnalyticsEvent.occurred_at)).where(AnalyticsEvent.user_id == user.id)
     )
 
     by_type_rows = (
@@ -396,9 +378,7 @@ class WipeResponse(BaseModel):
 
 
 @router.delete("/sync", response_model=WipeResponse)
-async def wipe_events(
-    session: SessionDep, user: CurrentUserDep
-) -> WipeResponse:
+async def wipe_events(session: SessionDep, user: CurrentUserDep) -> WipeResponse:
     events_deleted = (
         await session.scalar(
             select(func.count())
@@ -413,12 +393,8 @@ async def wipe_events(
             .where(AnalyticsSession.user_id == user.id)
         )
     ) or 0
-    await session.execute(
-        delete(AnalyticsEvent).where(AnalyticsEvent.user_id == user.id)
-    )
-    await session.execute(
-        delete(AnalyticsSession).where(AnalyticsSession.user_id == user.id)
-    )
+    await session.execute(delete(AnalyticsEvent).where(AnalyticsEvent.user_id == user.id))
+    await session.execute(delete(AnalyticsSession).where(AnalyticsSession.user_id == user.id))
 
     cfg_row = await session.get(UserSetting, (user.id, ANALYTICS_CONFIG_KEY))
     cfg = _load_config(cfg_row)
@@ -432,53 +408,59 @@ async def wipe_events(
     )
 
 
+def event_to_dict(ev: AnalyticsEvent) -> dict[str, Any]:
+    """Flatten one ``AnalyticsEvent`` row into a JSON-serialisable dict.
+
+    The single source of truth for the export row shape — reused by the per-user
+    NDJSON dump here and the admin cross-user NDJSON/CSV exports
+    (``routes/admin.py``) so the two never drift. ``user_id`` is included because
+    admin exports span users; the per-user export simply emits its own id.
+    """
+    return {
+        "id": ev.id,
+        "user_id": ev.user_id,
+        "session_id": ev.session_id,
+        "anon_user_id": ev.anon_user_id,
+        "source": ev.source,
+        "event_type": ev.event_type,
+        "event_name": ev.event_name,
+        "duration_ms": ev.duration_ms,
+        "path": ev.path,
+        "referrer": ev.referrer,
+        "properties": ev.properties,
+        "viewport_w": ev.viewport_w,
+        "viewport_h": ev.viewport_h,
+        "ua_class": ev.ua_class,
+        "locale": ev.locale,
+        "tz": ev.tz,
+        "occurred_at": ev.occurred_at.isoformat(),
+        "server_received_at": ev.server_received_at.isoformat(),
+    }
+
+
 @router.get("/export")
-async def export_events(
-    session: SessionDep, user: CurrentUserDep
-) -> StreamingResponse:
+async def export_events(session: SessionDep, user: CurrentUserDep) -> StreamingResponse:
     """NDJSON dump of every event row, oldest first."""
     rows = (
-        await session.execute(
-            select(AnalyticsEvent)
-            .where(AnalyticsEvent.user_id == user.id)
-            .order_by(AnalyticsEvent.occurred_at.asc())
+        (
+            await session.execute(
+                select(AnalyticsEvent)
+                .where(AnalyticsEvent.user_id == user.id)
+                .order_by(AnalyticsEvent.occurred_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     def _gen() -> Any:
         for r in rows:
-            yield (
-                json.dumps(
-                    {
-                        "id": r.id,
-                        "session_id": r.session_id,
-                        "anon_user_id": r.anon_user_id,
-                        "source": r.source,
-                        "event_type": r.event_type,
-                        "event_name": r.event_name,
-                        "duration_ms": r.duration_ms,
-                        "path": r.path,
-                        "referrer": r.referrer,
-                        "properties": r.properties,
-                        "viewport_w": r.viewport_w,
-                        "viewport_h": r.viewport_h,
-                        "ua_class": r.ua_class,
-                        "locale": r.locale,
-                        "tz": r.tz,
-                        "occurred_at": r.occurred_at.isoformat(),
-                        "server_received_at": r.server_received_at.isoformat(),
-                    },
-                    default=str,
-                )
-                + "\n"
-            )
+            yield json.dumps(event_to_dict(r), default=str) + "\n"
 
     return StreamingResponse(
         _gen(),
         media_type="application/x-ndjson",
-        headers={
-            "Content-Disposition": 'attachment; filename="analytics-export.ndjson"'
-        },
+        headers={"Content-Disposition": 'attachment; filename="analytics-export.ndjson"'},
     )
 
 
@@ -494,10 +476,10 @@ async def prune_expired(session: SessionDep) -> int:
     daily sweeper task in ``main.py``; safe to invoke ad-hoc from tests too.
     """
     cfg_rows = (
-        await session.execute(
-            select(UserSetting).where(UserSetting.key == ANALYTICS_CONFIG_KEY)
-        )
-    ).scalars().all()
+        (await session.execute(select(UserSetting).where(UserSetting.key == ANALYTICS_CONFIG_KEY)))
+        .scalars()
+        .all()
+    )
     total_removed = 0
     now = datetime.now(UTC).replace(tzinfo=None)
     for cfg_row in cfg_rows:

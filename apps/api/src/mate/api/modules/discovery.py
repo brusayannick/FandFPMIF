@@ -75,9 +75,7 @@ def discover(*roots: Path) -> list[DiscoveredModule]:
             try:
                 manifest = Manifest.load_yaml(manifest_path)
             except ModuleManifestError as exc:
-                log.error(
-                    "modules.discovery.manifest_invalid", folder=str(entry), error=str(exc)
-                )
+                log.error("modules.discovery.manifest_invalid", folder=str(entry), error=str(exc))
                 raise
             if manifest.id in seen_ids:
                 # Roots are scanned defaults-first, so the first-seen copy wins
@@ -126,7 +124,7 @@ def discover_entry_points() -> list[DiscoveredModule]:
     out: list[DiscoveredModule] = []
     try:
         eps = importlib_metadata.entry_points(group=ENTRY_POINT_GROUP)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.warning("modules.discovery.entry_points_failed", error=str(exc))
         return out
 
@@ -178,9 +176,7 @@ def discover_entry_points() -> list[DiscoveredModule]:
             )
             continue
         seen_ids[manifest.id] = package_name
-        out.append(
-            DiscoveredModule(folder=folder, manifest=manifest, source="entry_point")
-        )
+        out.append(DiscoveredModule(folder=folder, manifest=manifest, source="entry_point"))
     return out
 
 

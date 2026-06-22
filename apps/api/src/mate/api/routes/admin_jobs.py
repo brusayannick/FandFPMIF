@@ -163,9 +163,7 @@ async def list_jobs(
     ).all()
 
     # Batch-resolve event-log names for the page (most jobs carry none).
-    log_ids = {
-        lid for job, _ in rows if (lid := _payload_log_id(job.payload_json)) is not None
-    }
+    log_ids = {lid for job, _ in rows if (lid := _payload_log_id(job.payload_json)) is not None}
     log_names: dict[str, str] = {}
     if log_ids:
         log_names = {
@@ -289,9 +287,7 @@ async def cancel_all(
     for job_id in ids:
         if await runtime.cancel(job_id):
             cancelled += 1
-    log.info(
-        "admin_job_cancel_all", admin_id=user.id, scope=body.user_id, cancelled=cancelled
-    )
+    log.info("admin_job_cancel_all", admin_id=user.id, scope=body.user_id, cancelled=cancelled)
     return {"cancelled": cancelled}
 
 

@@ -57,6 +57,7 @@ apps/web/.env.local
 
 # Generated TypeScript types
 packages/shared-types/generated/
+tasks.md
 
 # IDE / OS
 .vscode/

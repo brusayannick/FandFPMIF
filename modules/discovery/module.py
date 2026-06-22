@@ -14,20 +14,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from pathlib import Path
 from typing import Any
 
-from fastapi import Body, HTTPException, UploadFile
+from fastapi import HTTPException
 from fastapi.responses import Response
 
 from mate.sdk import Module, ModuleContext, job, on_event, route
-
-# ILP miner builds a linear program whose memory scales super-linearly in
-# the number of distinct activities and traces. Past these caps pm4py
-# routinely OOM-kills the container (exit 137), which kills every other
-# in-flight request too. We'd rather fail fast with a 413.
-_ILP_MAX_ACTIVITIES = 30
-_ILP_MAX_CASES = 5_000
 
 from .serializers import (
     serialize_bpmn,
@@ -38,13 +30,12 @@ from .serializers import (
     serialize_process_tree,
 )
 
-# Cache keys for the BPMN tab. ``bpmn_user_edit`` and ``bpmn_uploaded`` take
-# precedence over the auto-derived ``bpmn_inductive`` / ``bpmn_imf__*`` keys
-# in the GET /bpmn route, so a user's edits (or an uploaded model) survive
-# tab switches but are wiped when the underlying log is re-imported (the
-# ``log.imported`` precompute clears them).
-_BPMN_USER_EDIT_KEY = "bpmn_user_edit"
-_BPMN_UPLOADED_KEY = "bpmn_uploaded"
+# ILP miner builds a linear program whose memory scales super-linearly in
+# the number of distinct activities and traces. Past these caps pm4py
+# routinely OOM-kills the container (exit 137), which kills every other
+# in-flight request too. We'd rather fail fast with a 413.
+_ILP_MAX_ACTIVITIES = 30
+_ILP_MAX_CASES = 5_000
 
 _HEURISTICS_DEFAULTS: dict[str, float] = {
     "dependency_threshold": 0.5,
@@ -88,24 +79,6 @@ def _heuristics_cache_key(thresholds: dict[str, float]) -> str:
     return f"heuristics_net__{h}"
 
 
-def _cache_is_fresh(ctx: ModuleContext, key: str) -> bool:
-    """Return True if a cached result is newer than the events.parquet."""
-    cache_root = Path(ctx.cache.dir) if hasattr(ctx.cache, "dir") else None  # type: ignore[attr-defined]
-    if cache_root is None:
-        return False
-    candidate = cache_root / f"{key}.json"
-    if not candidate.exists():
-        return False
-    try:
-        events_path = ctx.event_log.events_path  # type: ignore[attr-defined]
-    except AttributeError:
-        return False
-    try:
-        return candidate.stat().st_mtime >= events_path.stat().st_mtime
-    except FileNotFoundError:
-        return False
-
-
 async def _cached_or_compute(
     ctx: ModuleContext,
     key: str,
@@ -113,12 +86,17 @@ async def _cached_or_compute(
     *,
     min_version: int = 0,
 ) -> dict[str, Any]:
-    """Return cached result if mtime-fresh AND `result["version"] >= min_version`.
+    """Return the cached result if present AND `result["version"] >= min_version`.
 
-    The version gate lets a callsite invalidate snapshots from before a
-    serializer-shape bump without having to rename the cache key.
+    Uses only the sanctioned cache Protocol (`exists`/`get`/`set`). The result
+    cache is keyed per `(log_id, module_id)` and the platform invalidates it
+    automatically on re-import and on config change (see `modules/README.md`,
+    §"ctx.cache": "Caches are invalidated automatically when the log changes
+    (re-import) or when the module config changes."), so no manual freshness
+    check is needed. The `min_version` gate lets a callsite invalidate snapshots
+    from before a serializer-shape bump without renaming the cache key.
     """
-    if _cache_is_fresh(ctx, key):
+    if await ctx.cache.exists(key):
         cached = await ctx.cache.get(key)
         if cached is not None:
             cached_version = cached.get("version", 0) if isinstance(cached, dict) else 0
@@ -162,13 +140,9 @@ def _filter_variants_coverage(renamed: Any, coverage: float) -> Any:
     ``coverage``, dropping the long tail. This mirrors the semantics of the
     ``pm4py.filter_variants_percentage`` helper that was removed in pm4py 2.7.
     """
-    ordered = renamed.sort_values(
-        ["case:concept:name", "time:timestamp"], kind="mergesort"
-    )
+    ordered = renamed.sort_values(["case:concept:name", "time:timestamp"], kind="mergesort")
     # One variant (ordered activity tuple) per case.
-    variant_per_case = ordered.groupby("case:concept:name", sort=False)[
-        "concept:name"
-    ].agg(tuple)
+    variant_per_case = ordered.groupby("case:concept:name", sort=False)["concept:name"].agg(tuple)
     counts = variant_per_case.value_counts()  # variant -> n cases, descending
     total = counts.sum()
     if total == 0:
@@ -176,9 +150,7 @@ def _filter_variants_coverage(renamed: Any, coverage: float) -> Any:
     # Keep variants up to and including the one that crosses the threshold.
     prev_cumulative = counts.cumsum().shift(fill_value=0) / total
     kept_variants = set(counts.index[prev_cumulative < coverage])
-    kept_cases = variant_per_case[
-        variant_per_case.map(lambda v: v in kept_variants)
-    ].index
+    kept_cases = variant_per_case[variant_per_case.map(lambda v: v in kept_variants)].index
     return renamed[renamed["case:concept:name"].isin(kept_cases)]
 
 
@@ -191,9 +163,7 @@ def _activity_mean_trace_position(renamed: Any) -> dict[str, float]:
     tend to happen" sort key — lets the DFG canvas order within-layer nodes
     by real temporal execution rather than by frequency.
     """
-    sorted_df = renamed.sort_values(
-        ["case:concept:name", "time:timestamp"], kind="mergesort"
-    )
+    sorted_df = renamed.sort_values(["case:concept:name", "time:timestamp"], kind="mergesort")
     grouped = sorted_df.groupby("case:concept:name", sort=False)
     # Per-event 0-based index inside its case, and case length.
     cum_index = grouped.cumcount()
@@ -204,9 +174,7 @@ def _activity_mean_trace_position(renamed: Any) -> dict[str, float]:
 
     sums: dict[str, float] = {}
     counts: dict[str, int] = {}
-    for activity, pos in zip(
-        sorted_df["concept:name"].tolist(), positions.tolist(), strict=False
-    ):
+    for activity, pos in zip(sorted_df["concept:name"].tolist(), positions.tolist(), strict=False):
         if pos is None or (isinstance(pos, float) and pos != pos):
             continue
         key = str(activity)
@@ -222,9 +190,7 @@ def _edge_mean_durations(renamed: Any) -> dict[tuple[str, str], float]:
     LEAD across (activity, timestamp), and grouping the resulting deltas.
     Used by the DFG view's "Edge label: Duration" mode.
     """
-    sorted_df = renamed.sort_values(
-        ["case:concept:name", "time:timestamp"], kind="mergesort"
-    )
+    sorted_df = renamed.sort_values(["case:concept:name", "time:timestamp"], kind="mergesort")
     grouped = sorted_df.groupby("case:concept:name", sort=False)
     next_act = grouped["concept:name"].shift(-1)
     next_ts = grouped["time:timestamp"].shift(-1)
@@ -393,9 +359,7 @@ class DiscoveryModule(Module):
             import pm4py
 
             renamed = _rename_pm4py(df)
-            tree = pm4py.discover_process_tree_inductive(
-                renamed, noise_threshold=noise_threshold
-            )
+            tree = pm4py.discover_process_tree_inductive(renamed, noise_threshold=noise_threshold)
             return serialize_process_tree(tree)
 
         return await asyncio.to_thread(_run)
@@ -447,9 +411,7 @@ class DiscoveryModule(Module):
             import pm4py
 
             renamed = _rename_pm4py(df)
-            bpmn_graph = pm4py.discover_bpmn_inductive(
-                renamed, noise_threshold=noise_threshold
-            )
+            bpmn_graph = pm4py.discover_bpmn_inductive(renamed, noise_threshold=noise_threshold)
             return serialize_bpmn(bpmn_graph)
 
         return await asyncio.to_thread(_run)
@@ -475,9 +437,7 @@ class DiscoveryModule(Module):
     # -- routes ---------------------------------------------------------------
 
     @route.get("/dfg")
-    async def dfg(
-        self, ctx: ModuleContext, *, variant_pct: float | None = None
-    ) -> dict[str, Any]:
+    async def dfg(self, ctx: ModuleContext, *, variant_pct: float | None = None) -> dict[str, Any]:
         if variant_pct is not None:
             vp = max(0.0, min(1.0, float(variant_pct)))
             key = f"dfg_variants_{vp:.2f}"
@@ -486,9 +446,7 @@ class DiscoveryModule(Module):
             )
         # min_version=3: mean_trace_position was added in v3; force-recompute
         # older caches that don't have it (v2 added durations).
-        return await _cached_or_compute(
-            ctx, "dfg", lambda: self._compute_dfg(ctx), min_version=3
-        )
+        return await _cached_or_compute(ctx, "dfg", lambda: self._compute_dfg(ctx), min_version=3)
 
     @route.get("/petri-net/alpha")
     async def petri_alpha(self, ctx: ModuleContext) -> dict[str, Any]:
@@ -536,9 +494,7 @@ class DiscoveryModule(Module):
 
     @route.get("/petri-net/ilp")
     async def petri_ilp(self, ctx: ModuleContext) -> dict[str, Any]:
-        return await _cached_or_compute(
-            ctx, "petri_net_ilp", lambda: self._compute_petri_ilp(ctx)
-        )
+        return await _cached_or_compute(ctx, "petri_net_ilp", lambda: self._compute_petri_ilp(ctx))
 
     @route.get("/petri-net/imf")
     async def petri_imf(
@@ -586,9 +542,7 @@ class DiscoveryModule(Module):
 
     @route.get("/prefix-tree")
     async def prefix_tree(self, ctx: ModuleContext) -> dict[str, Any]:
-        return await _cached_or_compute(
-            ctx, "prefix_tree", lambda: self._compute_prefix_tree(ctx)
-        )
+        return await _cached_or_compute(ctx, "prefix_tree", lambda: self._compute_prefix_tree(ctx))
 
     # -- BPMN -----------------------------------------------------------------
 
@@ -599,16 +553,13 @@ class DiscoveryModule(Module):
         algo: str = "inductive",
         noise_threshold: float | None = None,
     ) -> dict[str, Any]:
-        """Resolve the BPMN payload the UI should show right now.
+        """Resolve the algorithm-derived (cached) BPMN payload.
 
-        Priority: user-edited > uploaded > algorithm-derived (cached).
+        The BPMN view is read-only — there is no user-edited or uploaded model
+        to take precedence. The plain Inductive Miner is used by default;
+        ``algo == "imf"`` re-mines with the Infrequent variant at
+        ``noise_threshold`` to structurally prune the least-used behaviour.
         """
-        for key in (_BPMN_USER_EDIT_KEY, _BPMN_UPLOADED_KEY):
-            if await ctx.cache.exists(key):
-                cached = await ctx.cache.get(key)
-                if isinstance(cached, dict) and cached.get("xml"):
-                    return cached
-
         if algo == "imf":
             nt = float(noise_threshold) if noise_threshold is not None else 0.2
             key = f"bpmn_imf__{nt:.3f}"
@@ -631,88 +582,6 @@ class DiscoveryModule(Module):
             ctx, algo=algo or "inductive", noise_threshold=noise_threshold
         )
 
-    @route.post("/bpmn/upload")
-    async def bpmn_upload(self, ctx: ModuleContext, file: UploadFile) -> dict[str, Any]:
-        if not file.filename or not file.filename.lower().endswith(".bpmn"):
-            raise HTTPException(status_code=422, detail="Expected a .bpmn file.")
-
-        raw = await file.read()
-        try:
-            xml = raw.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise HTTPException(
-                status_code=422, detail=f"BPMN file is not UTF-8: {exc}"
-            ) from exc
-
-        # Validate by parsing through pm4py. We don't keep the parsed graph —
-        # the XML is what we store and what bpmn-js renders.
-        import tempfile
-        from pathlib import Path
-
-        with tempfile.NamedTemporaryFile(suffix=".bpmn", delete=False) as fh:
-            tmp = Path(fh.name)
-        try:
-            tmp.write_bytes(raw)
-
-            def _validate() -> None:
-                import pm4py
-
-                pm4py.read_bpmn(str(tmp))
-
-            try:
-                await asyncio.to_thread(_validate)
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=422, detail=f"Invalid BPMN XML: {exc}"
-                ) from exc
-        finally:
-            tmp.unlink(missing_ok=True)
-
-        payload = {"kind": "bpmn", "version": 1, "xml": xml}
-        # Uploading a fresh model supersedes any prior user edits.
-        await ctx.cache.delete(_BPMN_USER_EDIT_KEY)
-        await ctx.cache.set(_BPMN_UPLOADED_KEY, payload)
-        return payload
-
-    @route.put("/bpmn")
-    async def bpmn_save(
-        self,
-        ctx: ModuleContext,
-        xml: str = Body(..., embed=True),
-    ) -> dict[str, Any]:
-        import tempfile
-        from pathlib import Path
-
-        with tempfile.NamedTemporaryFile(suffix=".bpmn", delete=False) as fh:
-            tmp = Path(fh.name)
-        try:
-            tmp.write_text(xml, encoding="utf-8")
-
-            def _validate() -> None:
-                import pm4py
-
-                pm4py.read_bpmn(str(tmp))
-
-            try:
-                await asyncio.to_thread(_validate)
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=422, detail=f"Invalid BPMN XML: {exc}"
-                ) from exc
-        finally:
-            tmp.unlink(missing_ok=True)
-
-        payload = {"kind": "bpmn", "version": 1, "xml": xml}
-        await ctx.cache.set(_BPMN_USER_EDIT_KEY, payload)
-        return payload
-
-    @route.delete("/bpmn")
-    async def bpmn_reset(self, ctx: ModuleContext) -> dict[str, str]:
-        """Drop any user edits / uploaded model so the next GET re-derives."""
-        await ctx.cache.delete(_BPMN_USER_EDIT_KEY)
-        await ctx.cache.delete(_BPMN_UPLOADED_KEY)
-        return {"status": "reset"}
-
     @route.get("/bpmn/download")
     async def bpmn_download(self, ctx: ModuleContext) -> Response:
         payload = await self._resolve_active_bpmn(ctx)
@@ -730,18 +599,20 @@ class DiscoveryModule(Module):
     async def precompute(self, ctx: ModuleContext, payload: dict[str, Any]) -> None:
         thresholds = _heuristics_thresholds(ctx.config)
         default_nt = 0.2
-        # The events.parquet has been replaced; any previously saved BPMN
-        # edits / uploads no longer correspond to the active log.
-        await ctx.cache.delete(_BPMN_USER_EDIT_KEY)
-        await ctx.cache.delete(_BPMN_UPLOADED_KEY)
         stages: list[tuple[str, Any]] = [
             ("dfg", lambda: self._compute_dfg(ctx)),
             ("petri_net_alpha", lambda: self._compute_petri_alpha(ctx)),
             ("petri_net_alpha_plus", lambda: self._compute_petri_alpha_plus(ctx)),
             ("petri_net_inductive", lambda: self._compute_petri_inductive(ctx)),
-            (f"petri_net_imf__{default_nt:.3f}", lambda: self._compute_petri_imf(ctx, noise_threshold=default_nt)),
+            (
+                f"petri_net_imf__{default_nt:.3f}",
+                lambda: self._compute_petri_imf(ctx, noise_threshold=default_nt),
+            ),
             ("process_tree", lambda: self._compute_process_tree(ctx)),
-            (f"process_tree_imf__{default_nt:.3f}", lambda: self._compute_process_tree_imf(ctx, noise_threshold=default_nt)),
+            (
+                f"process_tree_imf__{default_nt:.3f}",
+                lambda: self._compute_process_tree_imf(ctx, noise_threshold=default_nt),
+            ),
             ("prefix_tree", lambda: self._compute_prefix_tree(ctx)),
             ("bpmn_inductive", lambda: self._compute_bpmn_inductive(ctx)),
             (

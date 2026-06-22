@@ -17,7 +17,6 @@ import duckdb
 from mate.api.ingest.storage import log_paths
 from mate.api.modules.event_filters import quote_ident as _quote_ident
 from mate.api.modules.event_filters import render_filter_sql
-from mate.api.storage import sync as storage_sync
 from mate.api.schemas.event_log_data import (
     ColumnQuality,
     ColumnRole,
@@ -25,6 +24,7 @@ from mate.api.schemas.event_log_data import (
     ColumnType,
     DataQuality,
 )
+from mate.api.storage import sync as storage_sync
 
 CANONICAL_ROLES: dict[str, ColumnRole] = {
     "case_id": "case_id",
@@ -67,7 +67,7 @@ class EventLogAccess:
         self._paths = log_paths(log_id, user_id)
         self._conn: duckdb.DuckDBPyConnection | None = None
 
-    async def __aenter__(self) -> "EventLogAccess":
+    async def __aenter__(self) -> EventLogAccess:
         # In S3 mode, pull the log dir from the bucket if the local cache is cold
         # (fresh VM / wiped data dir). No-op in local mode and on a warm cache.
         await storage_sync.hydrate_log(self.user_id, self.log_id)
@@ -81,7 +81,7 @@ class EventLogAccess:
         if self._conn is not None:
             try:
                 self._conn.close()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             self._conn = None
 
@@ -136,7 +136,6 @@ class EventLogAccess:
         df = await self.pandas()
 
         def _to_event_log() -> Any:
-            import pm4py
             import pm4py.utils as pmu
 
             renamed = df.rename(
@@ -190,22 +189,17 @@ class EventLogAccess:
         where = ""
         if self._active_filter:
             col_names = {
-                d[0]
-                for d in self._conn.execute("SELECT * FROM events_src LIMIT 0").description
+                d[0] for d in self._conn.execute("SELECT * FROM events_src LIMIT 0").description
             }
             where = render_filter_sql(self._active_filter, col_names)
-        self._conn.execute(
-            f"CREATE OR REPLACE VIEW events AS SELECT * FROM events_src{where}"
-        )
+        self._conn.execute(f"CREATE OR REPLACE VIEW events AS SELECT * FROM events_src{where}")
         if self._paths.cases.exists():
             cases_path = str(self._paths.cases).replace("'", "''")
             self._conn.execute(
                 f"CREATE OR REPLACE VIEW cases AS SELECT * FROM read_parquet('{cases_path}')"
             )
 
-    async def column_specs(
-        self, overrides: dict[str, Any] | None = None
-    ) -> list[ColumnSpec]:
+    async def column_specs(self, overrides: dict[str, Any] | None = None) -> list[ColumnSpec]:
         """Inspect events.parquet's schema (and a small distinct sample) to
         emit `ColumnSpec`s for every column in the events table. The
         per-column override JSON from `EventLog.column_overrides` can rename
@@ -248,9 +242,7 @@ class EventLogAccess:
 
         return await asyncio.to_thread(_inspect)
 
-    async def data_quality(
-        self, specs: list[ColumnSpec] | None = None
-    ) -> DataQuality:
+    async def data_quality(self, specs: list[ColumnSpec] | None = None) -> DataQuality:
         """Per-column null + distinct counts for Settings → Data quality."""
         if specs is None:
             specs = await self.column_specs()

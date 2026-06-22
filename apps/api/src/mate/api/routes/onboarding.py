@@ -37,9 +37,7 @@ def _load(row: UserSetting | None) -> OnboardingState:
 
 
 @router.get("", response_model=OnboardingState)
-async def get_onboarding(
-    session: SessionDep, user: CurrentUserDep
-) -> OnboardingState:
+async def get_onboarding(session: SessionDep, user: CurrentUserDep) -> OnboardingState:
     # No row → not completed yet, so a new user gets the overlay.
     row = await session.get(UserSetting, (user.id, ONBOARDING_KEY))
     return _load(row)
@@ -52,9 +50,7 @@ async def put_onboarding(
     row = await session.get(UserSetting, (user.id, ONBOARDING_KEY))
     data = payload.model_dump(mode="json")
     if row is None:
-        session.add(
-            UserSetting(user_id=user.id, key=ONBOARDING_KEY, value_json=data)
-        )
+        session.add(UserSetting(user_id=user.id, key=ONBOARDING_KEY, value_json=data))
     else:
         row.value_json = data
     await session.commit()

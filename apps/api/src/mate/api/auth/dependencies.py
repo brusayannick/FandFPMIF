@@ -12,16 +12,16 @@ On the first sighting of a `sub`, the corresponding ``users`` row is created
 (or its ``last_seen_at`` bumped). A process-local set caches seen IDs so the
 upsert runs at most once per process per user.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Annotated
 
 import jwt
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing_extensions import Annotated
 
 from mate.api.auth.jwks import get_signing_key
 from mate.api.config import get_settings
@@ -50,7 +50,7 @@ _seen_user_ids: set[str] = set()
 # sentinel as the session access token for the demo provider; when demo_mode is
 # on we accept it verbatim (no JWKS) and resolve the fixed demo user below. The
 # string is intentionally not a JWT so it can never collide with a real token.
-DEMO_ACCESS_TOKEN = "demo-access-token"  # noqa: S105 - sentinel, not a credential
+DEMO_ACCESS_TOKEN = "demo-access-token"
 DEMO_USER = CurrentUser(
     id="demo-user",
     email="demo@mate.local",
@@ -96,7 +96,7 @@ async def _decode_token(token: str) -> dict[str, object]:
 
     try:
         key = await get_signing_key(kid)
-    except Exception as exc:  # noqa: BLE001 - any JWKS failure → 401
+    except Exception as exc:
         raise _UNAUTH from exc
 
     try:
@@ -152,14 +152,10 @@ async def _jit_sync_user(session: AsyncSession, user: CurrentUser) -> None:
     get_settings().ensure_user_dirs(user.id)
 
 
-async def get_current_user_from_token(
-    token: str, session: AsyncSession
-) -> CurrentUser:
+async def get_current_user_from_token(token: str, session: AsyncSession) -> CurrentUser:
     settings = get_settings()
     if settings.demo_mode and token == DEMO_ACCESS_TOKEN:
-        user = (
-            replace(DEMO_USER, roles=("admin",)) if settings.demo_admin else DEMO_USER
-        )
+        user = replace(DEMO_USER, roles=("admin",)) if settings.demo_admin else DEMO_USER
         await _jit_sync_user(session, user)
         return user
     claims = await _decode_token(token)
@@ -177,9 +173,7 @@ async def get_current_user_from_token(
     return user
 
 
-async def get_current_user(
-    request: Request, session: SessionDep
-) -> CurrentUser:
+async def get_current_user(request: Request, session: SessionDep) -> CurrentUser:
     token = _extract_bearer(request.headers.get("authorization"))
     user = await get_current_user_from_token(token, session)
     # Expose the resolved id on the ASGI scope state so the usage-tracking

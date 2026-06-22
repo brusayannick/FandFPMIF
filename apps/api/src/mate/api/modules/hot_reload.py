@@ -45,8 +45,8 @@ class _ModuleEventHandler(FileSystemEventHandler):
             return
         # The event path is somewhere under modules/<id>/...
         try:
-            relative = Path(event.src_path).resolve().relative_to(
-                self._loader.modules_dir.resolve()
+            relative = (
+                Path(event.src_path).resolve().relative_to(self._loader.modules_dir.resolve())
             )
         except (ValueError, OSError):
             return
@@ -90,7 +90,7 @@ class _ModuleEventHandler(FileSystemEventHandler):
             try:
                 await self._loader.unload_one(module_id)
                 log.info("modules.hot_reload.unloaded", module_id=module_id)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("modules.hot_reload.unload_failed", module_id=module_id)
             return
         try:
@@ -101,7 +101,7 @@ class _ModuleEventHandler(FileSystemEventHandler):
         try:
             await self._loader.load_one(folder, manifest)
             log.info("modules.hot_reload.reloaded", module_id=module_id)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("modules.hot_reload.reload_failed", module_id=module_id)
 
 
@@ -131,7 +131,7 @@ class HotReload:
         try:
             self._observer.stop()
             self._observer.join(timeout=5.0)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("modules.hot_reload.stop_failed")
         self._observer = None
 

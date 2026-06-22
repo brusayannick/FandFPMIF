@@ -47,7 +47,7 @@ _TRACE_KEY_MAP: dict[str, str] = {
 ProgressCallback = Callable[[int], None]
 
 
-def _iter_attribute_pairs(elem: "etree._Element") -> Iterator[tuple[str, Any]]:
+def _iter_attribute_pairs(elem: etree._Element) -> Iterator[tuple[str, Any]]:
     """Yield (key, value) for each `<string|date|int|float|boolean>` attribute child."""
     for child in elem:
         tag = etree.QName(child).localname

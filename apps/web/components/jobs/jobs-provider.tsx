@@ -43,71 +43,86 @@ export function JobsProvider() {
   }, [setAll]);
 
   useEffect(() => {
-    const sub = subscribeBus<Record<string, unknown>>(["job.*", "log.imported"], (env) => {
-      apply(env.topic, env.payload);
+    const sub = subscribeBus<Record<string, unknown>>(
+      ["job.*", "log.imported", "log.ready"],
+      (env) => {
+        apply(env.topic, env.payload);
 
-      const id = (env.payload.id as string | undefined) ?? "";
-      const title = (env.payload.title as string | undefined) ?? id;
+        const id = (env.payload.id as string | undefined) ?? "";
+        const title = (env.payload.title as string | undefined) ?? id;
 
-      if (env.topic === "log.imported") {
-        const fixedCols = env.payload.fixed_columns as string[] | undefined;
-        if (fixedCols && fixedCols.length > 0 && !muted) {
-          toast.info(
-            fixedCols.length === 1
-              ? "1 column was automatically fixed during import"
-              : `${fixedCols.length} columns were automatically fixed during import`,
-            { description: `Mixed-type values coerced to null: ${fixedCols.join(", ")}` },
-          );
+        if (env.topic === "log.imported") {
+          const fixedCols = env.payload.fixed_columns as string[] | undefined;
+          if (fixedCols && fixedCols.length > 0 && !muted) {
+            toast.info(
+              fixedCols.length === 1
+                ? "1 column was automatically fixed during import"
+                : `${fixedCols.length} columns were automatically fixed during import`,
+              { description: `Mixed-type values coerced to null: ${fixedCols.join(", ")}` },
+            );
+          }
+          return;
         }
-        return;
-      }
 
-      if (env.topic === "job.completed") {
-        // Refresh anything keyed off the api state. Event-log imports flip a
-        // log row from `importing` → `ready`, so the /processes table needs
-        // to refetch.
-        qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
-        const type = (env.payload.type as string | undefined) ?? "";
-        if (type === "event_log.import") {
-          const job = useJobsStore.getState().byId.get(id);
-          const logId = (job?.payload_json as { log_id?: string } | undefined)?.log_id;
-          if (!muted) {
-            toast.success(`Imported - ${title}`, {
-              action: logId
-                ? {
-                    label: "Open",
-                    onClick: () => router.push(`/processes/${logId}`),
-                  }
-                : undefined,
+        if (env.topic === "log.ready") {
+          // The log is now openable — it either had no subscribing modules
+          // (`processing` skipped) or every one finished precomputing. This is
+          // the success signal, moved off the import job's `job.completed`
+          // because that only marks the *parse* done, not module readiness.
+          qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
+          const logId = env.payload.log_id as string | undefined;
+          if (!muted && logId) {
+            const name =
+              Array.from(useJobsStore.getState().byId.values()).find(
+                (j) =>
+                  j.type === "event_log.import" &&
+                  (j.payload_json as { log_id?: string } | undefined)?.log_id === logId,
+              )?.title ?? logId;
+            toast.success(`Imported - ${name}`, {
+              action: {
+                label: "Open",
+                onClick: () => router.push(`/processes/${logId}`),
+              },
             });
           }
-        } else if (!muted) {
-          toast.success(`Completed - ${title}`);
+          return;
         }
-        return;
-      }
 
-      if (env.topic === "job.failed") {
-        // `job.failed` payload has no `title`; look it up from the store
-        // (populated when `job.queued` arrived) so we show the job name, not the UUID.
-        const storedTitle = useJobsStore.getState().byId.get(id)?.title ?? title;
-        const error = (env.payload.error as string | undefined) ?? "";
-        toastError(`Failed - ${storedTitle}`, {
-          description: error || undefined,
-          duration: Number.POSITIVE_INFINITY,
-          action: {
-            label: "Details",
-            onClick: () => useJobsStore.getState().setDrawerOpen(true),
-          },
-        });
-        return;
-      }
+        if (env.topic === "job.completed") {
+          // Refresh anything keyed off the api state. Event-log imports flip a
+          // log row from `importing` → `processing`/`ready`, so the /processes
+          // table needs to refetch. The "Imported" success toast itself fires on
+          // `log.ready` (above), once modules have finished.
+          qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
+          const type = (env.payload.type as string | undefined) ?? "";
+          if (type !== "event_log.import" && !muted) {
+            toast.success(`Completed - ${title}`);
+          }
+          return;
+        }
 
-      if (env.topic === "job.cancelled" && !muted) {
-        toast.warning(`Cancelled - ${title}`);
-        return;
-      }
-    });
+        if (env.topic === "job.failed") {
+          // `job.failed` payload has no `title`; look it up from the store
+          // (populated when `job.queued` arrived) so we show the job name, not the UUID.
+          const storedTitle = useJobsStore.getState().byId.get(id)?.title ?? title;
+          const error = (env.payload.error as string | undefined) ?? "";
+          toastError(`Failed - ${storedTitle}`, {
+            description: error || undefined,
+            duration: Number.POSITIVE_INFINITY,
+            action: {
+              label: "Details",
+              onClick: () => useJobsStore.getState().setDrawerOpen(true),
+            },
+          });
+          return;
+        }
+
+        if (env.topic === "job.cancelled" && !muted) {
+          toast.warning(`Cancelled - ${title}`);
+          return;
+        }
+      },
+    );
 
     return () => sub.close();
   }, [apply, muted, qc, router]);

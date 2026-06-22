@@ -46,12 +46,7 @@ async def list_jobs(
     since: Annotated[datetime | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[JobDetail]:
-    stmt = (
-        select(Job)
-        .where(Job.user_id == user.id)
-        .order_by(Job.created_at.desc())
-        .limit(limit)
-    )
+    stmt = select(Job).where(Job.user_id == user.id).order_by(Job.created_at.desc()).limit(limit)
     if status_filter:
         stmt = stmt.where(Job.status == status_filter)
     if type_filter:
@@ -63,17 +58,13 @@ async def list_jobs(
 
 
 @router.get("/{job_id}", response_model=JobDetail)
-async def get_job(
-    job_id: str, session: SessionDep, user: CurrentUserDep
-) -> JobDetail:
+async def get_job(job_id: str, session: SessionDep, user: CurrentUserDep) -> JobDetail:
     row = await get_owned_job(session, job_id, user.id)
     return JobDetail.model_validate(row)
 
 
 @router.post("/{job_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
-async def cancel_job(
-    job_id: str, session: SessionDep, user: CurrentUserDep
-) -> None:
+async def cancel_job(job_id: str, session: SessionDep, user: CurrentUserDep) -> None:
     await get_owned_job(session, job_id, user.id)
     runtime = get_job_runtime()
     ok = await runtime.cancel(job_id)
@@ -85,18 +76,20 @@ async def cancel_job(
 
 
 @router.post("/cancel-all")
-async def cancel_all_jobs(
-    session: SessionDep, user: CurrentUserDep
-) -> dict[str, int]:
+async def cancel_all_jobs(session: SessionDep, user: CurrentUserDep) -> dict[str, int]:
     """Cancel every queued and running job owned by the user."""
     ids = (
-        await session.execute(
-            select(Job.id).where(
-                Job.user_id == user.id,
-                Job.status.in_(("queued", "running")),
+        (
+            await session.execute(
+                select(Job.id).where(
+                    Job.user_id == user.id,
+                    Job.status.in_(("queued", "running")),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     runtime = get_job_runtime()
     cancelled = 0
     for job_id in ids:
@@ -106,9 +99,7 @@ async def cancel_all_jobs(
 
 
 @router.post("/{job_id}/retry")
-async def retry_job(
-    job_id: str, session: SessionDep, user: CurrentUserDep
-) -> dict[str, str]:
+async def retry_job(job_id: str, session: SessionDep, user: CurrentUserDep) -> dict[str, str]:
     await get_owned_job(session, job_id, user.id)
     runtime = get_job_runtime()
     new_id = await runtime.retry(job_id)
@@ -153,9 +144,7 @@ def _sse(envelope: dict[str, Any]) -> str:
 
 
 @router.get("/{job_id}/stream")
-async def stream_job(
-    job_id: str, session: SessionDep, user: CurrentUserDep
-) -> StreamingResponse:
+async def stream_job(job_id: str, session: SessionDep, user: CurrentUserDep) -> StreamingResponse:
     """High-frequency per-job progress (toast inline bar + drawer focused row).
 
     Subscribes to `job.progress` / `job.started` / `job.completed` / etc. and

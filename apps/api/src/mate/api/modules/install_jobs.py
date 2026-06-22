@@ -57,7 +57,7 @@ async def _record_owner(user_id: str, module_id: str, source: str) -> None:
         await session.commit()
 
 
-def register_module_install_handlers(runtime: JobRuntime, loader: "ModuleLoader") -> None:
+def register_module_install_handlers(runtime: JobRuntime, loader: ModuleLoader) -> None:
     """Wire the three install job types onto the runtime.
 
     Called from `main.py` lifespan after the loader and runtime are built.
@@ -79,7 +79,7 @@ def register_module_install_handlers(runtime: JobRuntime, loader: "ModuleLoader"
 # ---------------------------------------------------------------------------
 
 
-def _install_from_upload(loader: "ModuleLoader"):
+def _install_from_upload(loader: ModuleLoader):
     async def handler(handle: JobHandle) -> None:
         archive_path = Path(handle.payload["archive_path"])
         original_name = handle.payload.get("original_name", archive_path.name)
@@ -89,9 +89,7 @@ def _install_from_upload(loader: "ModuleLoader"):
             try:
                 await asyncio.to_thread(_extract_archive, archive_path, staging)
                 await handle.progress(35, 100, stage="validating", message="Validating manifest")
-                folder, manifest = await _stage_validated_upload(
-                    loader, handle.user_id, staging
-                )
+                folder, manifest = await _stage_validated_upload(loader, handle.user_id, staging)
                 await handle.progress(60, 100, stage="installing", message="Resolving dependencies")
                 await loader.load_one(folder, manifest)
                 await _record_owner(handle.user_id, manifest.id, "upload")
@@ -110,7 +108,7 @@ def _install_from_upload(loader: "ModuleLoader"):
     return handler
 
 
-def _install_from_git(loader: "ModuleLoader"):
+def _install_from_git(loader: ModuleLoader):
     async def handler(handle: JobHandle) -> None:
         url: str = handle.payload["url"]
         ref: str | None = handle.payload.get("ref")
@@ -135,9 +133,7 @@ def _install_from_git(loader: "ModuleLoader"):
             # The clone leaves a .git directory we don't want — strip it.
             shutil.rmtree(staging / ".git", ignore_errors=True)
             await handle.progress(35, 100, stage="validating", message="Validating manifest")
-            folder, manifest = await _stage_validated_upload(
-                loader, handle.user_id, staging
-            )
+            folder, manifest = await _stage_validated_upload(loader, handle.user_id, staging)
             await handle.progress(60, 100, stage="installing", message="Resolving dependencies")
             await loader.load_one(folder, manifest)
             await _record_owner(handle.user_id, manifest.id, "git")
@@ -159,7 +155,7 @@ def _install_from_git(loader: "ModuleLoader"):
     return handler
 
 
-def _install_from_registry(loader: "ModuleLoader"):
+def _install_from_registry(loader: ModuleLoader):
     async def handler(handle: JobHandle) -> None:
         source: str = handle.payload["source"]
         pkg: str = handle.payload["id"]
@@ -315,7 +311,7 @@ def _read_staged_manifest(staging: Path) -> tuple[Path, Manifest]:
 
 
 async def _stage_validated_upload(
-    loader: "ModuleLoader", user_id: str, staging: Path
+    loader: ModuleLoader, user_id: str, staging: Path
 ) -> tuple[Path, Manifest]:
     """Validate a staged upload, then move it into the uploads root.
 
@@ -334,8 +330,7 @@ async def _stage_validated_upload(
     async with sm() as session:
         if await module_owned_by_other(session, user_id, manifest.id):
             raise ModuleManifestError(
-                f"Module id {manifest.id!r} is already in use by another user. "
-                "Choose a unique id."
+                f"Module id {manifest.id!r} is already in use by another user. Choose a unique id."
             )
     target = loader.uploaded_modules_dir / manifest.id
     if target.exists():
@@ -350,10 +345,7 @@ async def _stage_validated_upload(
 def _resolve_archive_root(staging: Path) -> Path:
     """If the archive contained one wrapper directory, descend into it."""
     # `__MACOSX` is metadata cruft macOS adds to zips alongside the real folder.
-    entries = [
-        p for p in staging.iterdir()
-        if not p.name.startswith(".") and p.name != "__MACOSX"
-    ]
+    entries = [p for p in staging.iterdir() if not p.name.startswith(".") and p.name != "__MACOSX"]
     if len(entries) == 1 and entries[0].is_dir() and not (staging / "manifest.yaml").exists():
         return entries[0]
     return staging

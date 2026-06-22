@@ -28,6 +28,14 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+# RPC messages are newline-framed JSON read via StreamReader.readline(), whose
+# asyncio default buffer limit is 64 KiB. Handler return values, ctx.cache.set
+# payloads and duckdb_fetch rows routinely exceed that (a single >64 KiB line
+# raises LimitOverrunError and tears the connection down, killing the worker), so
+# raise it well beyond. DataFrames still cross via a Parquet file, not the
+# socket, so this only bounds JSON metadata.
+RPC_STREAM_LIMIT = 256 * 1024 * 1024  # 256 MiB
+
 
 def _import_module(folder: Path):
     """Import ``<folder>/module.py`` as a package so relative imports work."""
@@ -106,7 +114,7 @@ class _ProxyContext:
     process-mining jobs work the same as in_process.
     """
 
-    def __init__(self, conn: "WireConnection", token: str, ctx_meta: dict[str, Any]):
+    def __init__(self, conn: WireConnection, token: str, ctx_meta: dict[str, Any]):
         self._conn = conn
         self._token = token
         self.log_id: str = ctx_meta.get("log_id", "")
@@ -122,7 +130,7 @@ class _ProxyContext:
 
 
 class _EventLogProxy:
-    def __init__(self, conn: "WireConnection", token: str):
+    def __init__(self, conn: WireConnection, token: str):
         self._conn = conn
         self._token = token
 
@@ -179,7 +187,7 @@ class _EventLogProxy:
 
 
 class _BusProxy:
-    def __init__(self, conn: "WireConnection", token: str):
+    def __init__(self, conn: WireConnection, token: str):
         self._conn = conn
         self._token = token
 
@@ -194,7 +202,7 @@ class _BusProxy:
 
 
 class _RegistryProxy:
-    def __init__(self, conn: "WireConnection", token: str, capabilities: list[str] | None = None):
+    def __init__(self, conn: WireConnection, token: str, capabilities: list[str] | None = None):
         self._conn = conn
         self._token = token
         # The host snapshots the available capability names into ctx_meta at
@@ -213,7 +221,7 @@ class _RegistryProxy:
 
 
 class _CacheProxy:
-    def __init__(self, conn: "WireConnection", token: str):
+    def __init__(self, conn: WireConnection, token: str):
         self._conn = conn
         self._token = token
 
@@ -251,7 +259,7 @@ class _ConfigProxy:
 
 
 class _ProgressProxy:
-    def __init__(self, conn: "WireConnection", token: str):
+    def __init__(self, conn: WireConnection, token: str):
         self._conn = conn
         self._token = token
 
@@ -278,12 +286,12 @@ class _ProgressProxy:
 class _LoggerProxy:
     """Minimal structlog-compatible logger that forwards to the host."""
 
-    def __init__(self, conn: "WireConnection", token: str, bound: dict[str, Any] | None = None):
+    def __init__(self, conn: WireConnection, token: str, bound: dict[str, Any] | None = None):
         self._conn = conn
         self._token = token
         self._bound = dict(bound or {})
 
-    def bind(self, **kwargs: Any) -> "_LoggerProxy":
+    def bind(self, **kwargs: Any) -> _LoggerProxy:
         merged = {**self._bound, **kwargs}
         return _LoggerProxy(self._conn, self._token, merged)
 
@@ -373,7 +381,7 @@ class WireConnection:
             if inspect.isawaitable(result):
                 result = await result
             await self._write({"id": rid, "result": result})
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             await self._write(
                 {
                     "id": rid,
@@ -386,7 +394,7 @@ class WireConnection:
 
 
 async def _amain(socket_path: str, module_folder: str) -> int:
-    reader, writer = await asyncio.open_unix_connection(socket_path)
+    reader, writer = await asyncio.open_unix_connection(socket_path, limit=RPC_STREAM_LIMIT)
     conn = WireConnection(reader, writer)
 
     mod = _import_module(Path(module_folder))
@@ -414,7 +422,7 @@ async def _amain(socket_path: str, module_folder: str) -> int:
     writer.close()
     try:
         await writer.wait_closed()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return 0
 

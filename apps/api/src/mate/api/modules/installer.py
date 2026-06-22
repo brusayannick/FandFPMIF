@@ -210,7 +210,12 @@ async def install_module(folder: Path, manifest: Manifest, *, force: bool = Fals
             sys.version_info.major,
             sys.version_info.minor,
         )
-        if site.exists() and venv_python.exists() and version_ok:
+        # A subprocess venv must also actually carry the SDK: an interrupted
+        # prior build can leave the hash + a venv missing `mate.sdk`, which makes
+        # the worker crash on import and never signal ready (the loader then
+        # skips the module). Rebuild instead of skipping into a broken worker.
+        sdk_ok = not is_subprocess or (site / "mate" / "sdk").exists()
+        if site.exists() and venv_python.exists() and version_ok and sdk_ok:
             log.debug("modules.installer.skip_unchanged", module_id=manifest.id)
             return site
 

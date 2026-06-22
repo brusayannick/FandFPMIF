@@ -39,10 +39,11 @@ from mate.api.middleware import UsageTrackingMiddleware
 from mate.api.modules import CapabilityRegistry, ModuleLoader, set_module_loader
 from mate.api.modules.hot_reload import HotReload, sweep_stale_workdirs
 from mate.api.modules.install_jobs import register_module_install_handlers
+from mate.api.modules.processing import ModuleProcessingCoordinator, set_coordinator
 from mate.api.routes import v1
 from mate.api.routes.analytics import prune_expired, record_server_event
-from mate.api.storage import get_storage_settings
 from mate.api.schemas.common import HealthResponse
+from mate.api.storage import get_storage_settings
 
 # Daily — re-evaluated every loop iteration against the current
 # `analytics.config.retention_days` setting.
@@ -66,7 +67,7 @@ async def _analytics_retention_loop() -> None:
                     log.info("analytics.retention.pruned", events=pruned)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.warning("analytics.retention.failed", error=str(exc))
 
 
@@ -95,9 +96,7 @@ async def _job_event_recorder_loop(bus: EventBus) -> None:
                         continue
                     duration_ms: int | None = None
                     if job.started_at and job.finished_at:
-                        duration_ms = int(
-                            (job.finished_at - job.started_at).total_seconds() * 1000
-                        )
+                        duration_ms = int((job.finished_at - job.started_at).total_seconds() * 1000)
                     await record_server_event(
                         session,
                         user_id=user_id,
@@ -113,8 +112,28 @@ async def _job_event_recorder_loop(bus: EventBus) -> None:
                     )
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.warning("usage.jobs.record_failed", error=str(exc))
+
+
+async def _module_processing_loop(bus: EventBus, coordinator: ModuleProcessingCoordinator) -> None:
+    """Un-gate a ``processing`` log once its module precompute jobs finish.
+
+    Subscribes to the terminal ``job.*`` topics and, for each finished job that
+    is a child of an ``event_log.import`` job, re-checks whether the bound log's
+    expected modules have all reached a terminal state — flipping it to ``ready``
+    when they have. Failures are swallowed so the bus keeps draining (a missed
+    tick is recovered by the boot reconcile on the next restart).
+    """
+    proc_log = structlog.get_logger("modules.processing")
+    async with bus.subscribe(("job.completed", "job.failed", "job.cancelled")) as stream:
+        async for envelope in stream:
+            try:
+                await coordinator.on_terminal_job(envelope.payload)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                proc_log.warning("modules.processing.terminal_job_failed", error=str(exc))
 
 
 # How often the watched-folder poller wakes; per-watch cadence is enforced on
@@ -175,11 +194,11 @@ async def _watched_folder_poll_loop(runtime: JobRuntime) -> None:
                         await scan_watch(fresh, session=session, runtime=runtime)
                 except asyncio.CancelledError:
                     raise
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     poll_log.warning("watch.poll_scan_failed", watch_id=watch.id, error=str(exc))
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             poll_log.warning("watch.poll_failed", error=str(exc))
 
 
@@ -259,6 +278,19 @@ async def lifespan(app: FastAPI):
         # loader; this catches the ones that abort the entire load.
         structlog.get_logger("modules.loader").exception("modules.load_all_failed")
 
+    # Holds a freshly imported log disabled (`status="processing"`) until every
+    # subscribing module finishes precomputing against it. Wired after the loader
+    # loads so its event-subscriber index is populated, and exposed on app state
+    # + a module-level singleton so the ingest handler can freeze each log's
+    # expected-module set at import time.
+    coordinator = ModuleProcessingCoordinator(loader, bus, get_sessionmaker())
+    app.state.module_processing_coordinator = coordinator
+    set_coordinator(coordinator)
+    # Re-derive completion for any log left `processing` by a previous process
+    # (jobs that finished while the API was down won't re-emit their events).
+    async with get_sessionmaker()() as session:
+        await coordinator.reconcile_boot(session)
+
     # Sweep any `ff-mod-*` temp dirs older than 24h that earlier crashes left
     # behind (the per-invocation cleanup in `_invoke_handler` handles the
     # happy path; this catches SIGKILL/restart leaks).
@@ -280,18 +312,20 @@ async def lifespan(app: FastAPI):
     retention_task = asyncio.create_task(_analytics_retention_loop())
     job_event_task = asyncio.create_task(_job_event_recorder_loop(bus))
     watch_poll_task = asyncio.create_task(_watched_folder_poll_loop(runtime))
+    processing_task = asyncio.create_task(_module_processing_loop(bus, coordinator))
 
     try:
         yield
     finally:
-        for task in (retention_task, job_event_task, watch_poll_task):
+        for task in (retention_task, job_event_task, watch_poll_task, processing_task):
             task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            except (asyncio.CancelledError, Exception):
                 pass
         if hot_reload is not None:
             hot_reload.stop()
+        set_coordinator(None)
         await loader.unload_all()
         set_module_loader(None)
         await runtime.stop()

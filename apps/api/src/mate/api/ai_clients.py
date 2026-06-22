@@ -41,7 +41,7 @@ async def build_chat_model(
     temperature: float = 0.0,
     max_tokens: int | None = None,
     timeout: float = 90.0,
-) -> "BaseChatModel":
+) -> BaseChatModel:
     """Return a LangChain chat model for ``(provider, model)``.
 
     Raises 422 if no API key is stored for ``provider``.
@@ -86,7 +86,7 @@ async def build_embeddings(
     user_id: str,
     *,
     dimensions: int | None = None,
-) -> "Embeddings":
+) -> Embeddings:
     """Return a LangChain embeddings client for ``(provider, model)``.
 
     Anthropic has no native embeddings endpoint — picking it here is a config

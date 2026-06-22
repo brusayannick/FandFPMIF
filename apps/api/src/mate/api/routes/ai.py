@@ -58,16 +58,13 @@ log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/ai", tags=["ai"])
 
 LITELLM_PRICING_URL = (
-    "https://raw.githubusercontent.com/BerriAI/litellm/main/"
-    "model_prices_and_context_window.json"
+    "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 )
 _PRICING_TTL_SECONDS = 3600
 
 
 @router.get("/config", response_model=AiConfigPayload)
-async def get_config(
-    session: SessionDep, user: CurrentUserDep
-) -> AiConfigPayload:
+async def get_config(session: SessionDep, user: CurrentUserDep) -> AiConfigPayload:
     row = await session.get(UserSetting, (user.id, AI_CONFIG_KEY))
     return _load_config(row)
 
@@ -81,9 +78,7 @@ async def put_config(
     row = await session.get(UserSetting, (user.id, AI_CONFIG_KEY))
     data = payload.model_dump()
     if row is None:
-        session.add(
-            UserSetting(user_id=user.id, key=AI_CONFIG_KEY, value_json=data)
-        )
+        session.add(UserSetting(user_id=user.id, key=AI_CONFIG_KEY, value_json=data))
     else:
         row.value_json = data
     await session.commit()
@@ -197,9 +192,7 @@ async def fetch_models(
             )
     except httpx.HTTPError as exc:
         log.warning("ai.models.proxy_failed", provider=provider, error=str(exc))
-        raise HTTPException(
-            status_code=502, detail=f"Provider request failed: {exc}"
-        ) from exc
+        raise HTTPException(status_code=502, detail=f"Provider request failed: {exc}") from exc
 
 
 def _parse_json(response: httpx.Response, provider: str, url: str | None = None) -> Any:
@@ -216,9 +209,7 @@ def _parse_json(response: httpx.Response, provider: str, url: str | None = None)
         raise HTTPException(status_code=502, detail=error_detail)
 
 
-def _raise_provider_error(
-    provider: str, response: httpx.Response, url: str | None = None
-) -> None:
+def _raise_provider_error(provider: str, response: httpx.Response, url: str | None = None) -> None:
     if response.is_success:
         return
     # Forward the upstream status so the frontend can distinguish auth (401),
@@ -228,7 +219,9 @@ def _raise_provider_error(
         body = response.json()
     except ValueError:
         body = response.text
-    detail = body if isinstance(body, str) else (body.get("error") if isinstance(body, dict) else body)
+    detail = (
+        body if isinstance(body, str) else (body.get("error") if isinstance(body, dict) else body)
+    )
     error_detail: dict[str, Any] = {"provider": provider, "upstream": detail}
     if url:
         error_detail["url"] = url
@@ -421,7 +414,11 @@ async def _build_context_block(context: ChatContext | None, user_id: str) -> str
         except Exception:
             continue
         try:
-            data = await fn(ctx) if asyncio.iscoroutinefunction(fn) else await asyncio.to_thread(fn, ctx)
+            data = (
+                await fn(ctx)
+                if asyncio.iscoroutinefunction(fn)
+                else await asyncio.to_thread(fn, ctx)
+            )
         except Exception:
             data = None
         finally:
@@ -565,9 +562,7 @@ async def _stream_chat(
             async for chunk in _stream_anthropic(cfg, messages):
                 yield chunk
         else:
-            base_url = (
-                "https://api.openai.com/v1" if provider == "openai" else (p.base_url or "")
-            )
+            base_url = "https://api.openai.com/v1" if provider == "openai" else (p.base_url or "")
             async for chunk in _stream_openai_compat(cfg, messages, base_url, p.api_key):
                 yield chunk
     except httpx.HTTPError as exc:
@@ -589,16 +584,19 @@ async def _stream_anthropic(
         body["system"] = cfg.system_prompt
 
     timeout = httpx.Timeout(120.0, connect=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
-        "POST",
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": p.api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json=body,
-    ) as r:
+    async with (
+        httpx.AsyncClient(timeout=timeout) as client,
+        client.stream(
+            "POST",
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": p.api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json=body,
+        ) as r,
+    ):
         if not r.is_success:
             raw = await r.aread()
             yield _sse({"error": f"Anthropic {r.status_code}: {raw.decode()[:300]}"})
@@ -630,12 +628,15 @@ async def _stream_openai_compat(
 
     timeout = httpx.Timeout(120.0, connect=10.0)
     url = f"{base_url.rstrip('/')}/chat/completions"
-    async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
-        "POST",
-        url,
-        headers={"Authorization": f"Bearer {api_key}", "content-type": "application/json"},
-        json={"model": cfg.selected_model, "messages": msgs, "stream": True},
-    ) as r:
+    async with (
+        httpx.AsyncClient(timeout=timeout) as client,
+        client.stream(
+            "POST",
+            url,
+            headers={"Authorization": f"Bearer {api_key}", "content-type": "application/json"},
+            json={"model": cfg.selected_model, "messages": msgs, "stream": True},
+        ) as r,
+    ):
         if not r.is_success:
             raw = await r.aread()
             yield _sse({"error": f"{r.status_code}: {raw.decode()[:300]}"})

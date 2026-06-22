@@ -24,9 +24,7 @@ async def record_install(
     """Idempotently mark *module_id* as installed for *user_id*."""
     row = await session.get(ModuleInstall, (user_id, module_id))
     if row is None:
-        session.add(
-            ModuleInstall(user_id=user_id, module_id=module_id, source=source)
-        )
+        session.add(ModuleInstall(user_id=user_id, module_id=module_id, source=source))
     elif source is not None:
         row.source = source
 
@@ -38,15 +36,11 @@ async def user_module_ids(session: AsyncSession, user_id: str) -> set[str]:
     return {module_id for (module_id,) in rows.all()}
 
 
-async def user_owns_module(
-    session: AsyncSession, user_id: str, module_id: str
-) -> bool:
+async def user_owns_module(session: AsyncSession, user_id: str, module_id: str) -> bool:
     return await session.get(ModuleInstall, (user_id, module_id)) is not None
 
 
-async def module_owned_by_other(
-    session: AsyncSession, user_id: str, module_id: str
-) -> bool:
+async def module_owned_by_other(session: AsyncSession, user_id: str, module_id: str) -> bool:
     """True if *module_id* is installed by any user other than *user_id*.
 
     Used to reject an upload whose id collides with another user's custom
@@ -89,9 +83,7 @@ async def seed_default_modules(
     await session.execute(stmt.on_conflict_do_nothing())
 
 
-async def remove_install(
-    session: AsyncSession, user_id: str, module_id: str
-) -> None:
+async def remove_install(session: AsyncSession, user_id: str, module_id: str) -> None:
     await session.execute(
         delete(ModuleInstall).where(
             ModuleInstall.user_id == user_id,
@@ -103,8 +95,6 @@ async def remove_install(
 async def owner_count(session: AsyncSession, module_id: str) -> int:
     """How many users still have *module_id* installed."""
     result = await session.execute(
-        select(func.count())
-        .select_from(ModuleInstall)
-        .where(ModuleInstall.module_id == module_id)
+        select(func.count()).select_from(ModuleInstall).where(ModuleInstall.module_id == module_id)
     )
     return int(result.scalar_one())

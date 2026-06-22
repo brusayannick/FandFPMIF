@@ -736,8 +736,13 @@ function LogRow({
 
   const router = useRouter();
   const importing = row.status === "importing";
+  // Parsed but held until every subscribing module finishes precomputing. Shares
+  // the importing visuals (dimmed row + indeterminate bar) but with its own
+  // label; opening stays gated on `ready`.
+  const processing = row.status === "processing";
   const failed = row.status === "failed";
   const ready = row.status === "ready";
+  const busy = importing || processing;
 
   const del = useDeleteEventLog();
   const rename = useRenameEventLog();
@@ -821,7 +826,7 @@ function LogRow({
             className={cn(
               "grid grid-cols-[1fr_70px_90px_80px_180px_120px_60px_40px] gap-2 items-center px-4 py-2 text-sm hover:bg-accent/50",
               ready && "cursor-pointer",
-              importing && "opacity-60",
+              busy && "opacity-60",
               sortable.isDragging && "opacity-30",
             )}
             onClick={(e) => {
@@ -831,9 +836,14 @@ function LogRow({
           >
             <div className="min-w-0" style={{ paddingLeft: depth * 16 + 24 }}>
               <div className="truncate font-medium">{row.name}</div>
-              {importing && (
+              {busy && (
                 <div className="mt-1 max-w-xs">
                   <Progress value={undefined} className="h-1" />
+                  {processing && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Preparing modules…
+                    </div>
+                  )}
                 </div>
               )}
               {failed && (
@@ -884,7 +894,7 @@ function LogRow({
             </div>
             <div data-row-stop onClick={(e) => e.stopPropagation()}>
               <LogActionsDropdown
-                disabled={importing}
+                disabled={busy}
                 ready={ready}
                 hasSourceFormat={Boolean(row.source_format)}
                 folders={folders}
@@ -901,7 +911,7 @@ function LogRow({
         </ContextMenuTrigger>
 
         <ContextMenuContent>
-          <ContextMenuItem disabled={importing} onSelect={() => setRenameOpen(true)}>
+          <ContextMenuItem disabled={busy} onSelect={() => setRenameOpen(true)}>
             <Pencil className="mr-2 h-3.5 w-3.5" />
             Rename
           </ContextMenuItem>
@@ -910,14 +920,14 @@ function LogRow({
             Duplicate
           </ContextMenuItem>
           <ContextMenuItem
-            disabled={importing || !row.source_format}
+            disabled={busy || !row.source_format}
             onSelect={() => setReimportOpen(true)}
           >
             <RefreshCcw className="mr-2 h-3.5 w-3.5" />
             Re-run import
           </ContextMenuItem>
           <ContextMenuSub>
-            <ContextMenuSubTrigger disabled={importing}>
+            <ContextMenuSubTrigger disabled={busy}>
               <FolderClosed className="mr-2 h-3.5 w-3.5" />
               Move to
             </ContextMenuSubTrigger>

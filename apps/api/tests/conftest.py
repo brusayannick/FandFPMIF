@@ -40,9 +40,7 @@ def session_data_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]
 @pytest.fixture(scope="session", autouse=True)
 def _configure_env(session_data_dir: Path) -> Iterator[None]:
     os.environ["DATA_DIR"] = str(session_data_dir)
-    os.environ["DATABASE_URL"] = (
-        f"sqlite+aiosqlite:///{session_data_dir}/metadata.db"
-    )
+    os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{session_data_dir}/metadata.db"
     os.environ["WORKER_CONCURRENCY"] = "1"
     # Default modules dir: an empty subdir so unrelated tests don't see the fixture mod.
     empty_modules = session_data_dir / "modules-empty"
@@ -58,16 +56,14 @@ def _configure_env(session_data_dir: Path) -> Iterator[None]:
 
     from mate.api.db.models import Base, User
 
-    sync_url = (
-        os.environ["DATABASE_URL"]
-        .replace("+aiosqlite", "")
-    )
+    sync_url = os.environ["DATABASE_URL"].replace("+aiosqlite", "")
     engine = create_engine(sync_url, future=True)
     Base.metadata.create_all(engine)
     # Seed the test user so route handlers don't need to JIT-create one (the
     # JIT path goes through JWT validation, which we stub out below).
+    from datetime import UTC, datetime
+
     from sqlalchemy.orm import Session
-    from datetime import datetime, UTC
 
     with Session(engine) as s:
         if s.get(User, TEST_USER_ID) is None:
@@ -147,9 +143,7 @@ async def _seed_module_installs_for_test_user() -> None:
 
 
 @contextlib.asynccontextmanager
-async def _sample_mod_client(
-    tmp_path: Path, *, seed: bool
-) -> AsyncIterator[AsyncClient]:
+async def _sample_mod_client(tmp_path: Path, *, seed: bool) -> AsyncIterator[AsyncClient]:
     """Spin up the app with the `sample_mod` fixture as a default module.
 
     Copies the fixture into a tmp dir and points MODULES_DIR at it for the

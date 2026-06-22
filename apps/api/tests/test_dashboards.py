@@ -207,13 +207,9 @@ async def test_dashboard_rejects_mismatched_log_model(client: AsyncClient) -> No
 
     # Create unbound, then a mismatched bind via PATCH is also rejected.
     dash_id = (
-        await client.post(
-            "/api/v1/dashboards", json={"name": "OC2", "log_model": "object_centric"}
-        )
+        await client.post("/api/v1/dashboards", json={"name": "OC2", "log_model": "object_centric"})
     ).json()["id"]
-    resp = await client.patch(
-        f"/api/v1/dashboards/{dash_id}", json={"event_log_id": log_id}
-    )
+    resp = await client.patch(f"/api/v1/dashboards/{dash_id}", json={"event_log_id": log_id})
     assert resp.status_code == 400, resp.text
 
 

@@ -36,9 +36,7 @@ def _setting_key(key: str) -> str:
 
 
 @router.get("/{key}")
-async def get_preference(
-    key: str, session: SessionDep, user: CurrentUserDep
-) -> dict[str, Any]:
+async def get_preference(key: str, session: SessionDep, user: CurrentUserDep) -> dict[str, Any]:
     row = await session.get(UserSetting, (user.id, _setting_key(key)))
     if row is None or not isinstance(row.value_json, dict):
         # No saved blob → empty; the client falls back to store defaults.
@@ -56,9 +54,7 @@ async def put_preference(
     setting_key = _setting_key(key)
     row = await session.get(UserSetting, (user.id, setting_key))
     if row is None:
-        session.add(
-            UserSetting(user_id=user.id, key=setting_key, value_json=payload)
-        )
+        session.add(UserSetting(user_id=user.id, key=setting_key, value_json=payload))
     else:
         row.value_json = payload
     await session.commit()

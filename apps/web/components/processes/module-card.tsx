@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Loader2 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,7 +20,6 @@ interface ModuleCardProps {
 }
 
 export function ModuleCard({ module, logId }: ModuleCardProps) {
-  const router = useRouter();
   const status = module.availability?.status ?? "available";
   const reasons = module.availability?.reasons ?? [];
 
@@ -38,27 +37,15 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
     ? ["Disabled in Settings → Modules. Enable it to open the module page."]
     : reasons;
 
-  const onClick = () => {
-    if (!isAvailable && !isDegraded) return;
-    router.push(`/processes/${logId}/modules/${module.id}`);
-  };
+  // A real <Link> (not router.push) so navigation flows through an <a>: that
+  // lets the global RouteProgress capture-listener fire the top loading bar,
+  // enables cmd/ctrl-click, and matches the rest of the app's nav. Non-openable
+  // cards render as a plain, non-interactive Card.
+  const navigable = isAvailable || isDegraded;
+  const href = `/processes/${logId}/modules/${module.id}`;
 
   const card = (
     <Card
-      role="link"
-      tabIndex={isUnavailable || isDisabled || isJobRunning ? -1 : 0}
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (
-          (e.key === "Enter" || e.key === " ") &&
-          !isUnavailable &&
-          !isDisabled &&
-          !isJobRunning
-        ) {
-          e.preventDefault();
-          onClick();
-        }
-      }}
       className={cn(
         // Tile-style card: drop the default outer py/gap so CardContent's
         // p-4 fully owns the card's padding.
@@ -115,11 +102,22 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
     </Card>
   );
 
-  if (tooltipReasons.length === 0) return card;
+  const content = navigable ? (
+    <Link
+      href={href}
+      className="block h-full rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      {card}
+    </Link>
+  ) : (
+    card
+  );
+
+  if (tooltipReasons.length === 0) return content;
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{card}</TooltipTrigger>
+      <TooltipTrigger asChild>{content}</TooltipTrigger>
       <TooltipContent side="bottom" className="max-w-sm">
         <ul className="list-disc pl-4 text-xs">
           {tooltipReasons.map((r, i) => (

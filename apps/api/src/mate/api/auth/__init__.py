@@ -23,9 +23,9 @@ __all__ = [
     "CurrentUserDep",
     "get_current_user",
     "get_current_user_from_token",
-    "require_admin",
     "get_owned_event_log",
     "get_owned_folder",
     "get_owned_job",
     "get_owned_watched_folder",
+    "require_admin",
 ]

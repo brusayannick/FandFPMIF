@@ -1,7 +1,7 @@
 """Pydantic v2 schemas for the /event-logs API surface.
 
 Mirrors INSTRUCTIONS.md §6 and §3.2 — `id` is a UUID v7 string, status is one
-of {importing, ready, failed}.
+of {importing, processing, ready, failed}.
 """
 
 from __future__ import annotations
@@ -11,7 +11,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-EventLogStatus = Literal["importing", "ready", "failed"]
+# `importing` = parsing the source; `processing` = parsed, modules precomputing
+# (the log is disabled until they finish); `ready` = openable; `failed` = error.
+EventLogStatus = Literal["importing", "processing", "ready", "failed"]
 SourceFormat = Literal["xes", "xes.gz", "csv", "xml", "json", "ocel"]
 # The single case-centric vs object-centric isolation switch. A log is exactly
 # one model; the two code paths never mix.

@@ -73,6 +73,11 @@ async def test_csv_round_trip(client: AsyncClient) -> None:
     detail = await _wait_until_ready(client, log_id)
     assert detail["source_format"] == "csv"
     assert detail["events_count"] == 9
+    # The default test client loads no modules, so nothing subscribes to
+    # `log.imported` — the import must skip the `processing` gate and resolve
+    # straight to `ready`. (See test_module_processing.py for the
+    # subscriber-installed → `processing` path.)
+    assert detail["status"] == "ready"
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ Adds the ``system_settings`` table — the singleton, admin-controlled analogue 
 General → Jobs), persisted so a live change survives a restart. Guarded on the
 live schema in the same idempotent style as the squashed baseline.
 """
+
 from __future__ import annotations
 
 import sqlalchemy as sa

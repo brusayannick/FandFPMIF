@@ -75,7 +75,9 @@ async def test_runtime_run_in_process_uses_worker_pid() -> None:
         await rt.stop()
 
 
-async def _wait(client: AsyncClient, log_id: str, target: str = "ready", timeout: float = 5.0) -> dict:
+async def _wait(
+    client: AsyncClient, log_id: str, target: str = "ready", timeout: float = 5.0
+) -> dict:
     deadline = asyncio.get_event_loop().time() + timeout
     last: dict = {}
     while asyncio.get_event_loop().time() < deadline:

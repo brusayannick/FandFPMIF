@@ -10,6 +10,7 @@ and refresh the whole bundle on:
 A single ``asyncio.Lock`` serialises concurrent fetches so the API doesn't
 thunder Keycloak on a cold cache or after a backend restart.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -73,26 +74,17 @@ async def get_signing_key(kid: str) -> Any:
     now = time.monotonic()
 
     # Fast path: known kid + cache fresh.
-    if (
-        kid in _cache.keys
-        and (now - _cache.fetched_at) < settings.keycloak_jwks_ttl_seconds
-    ):
+    if kid in _cache.keys and (now - _cache.fetched_at) < settings.keycloak_jwks_ttl_seconds:
         return _cache.keys[kid]
 
     async with _lock:
         # Re-check after grabbing the lock (another caller may have refreshed).
         now = time.monotonic()
-        if (
-            kid in _cache.keys
-            and (now - _cache.fetched_at) < settings.keycloak_jwks_ttl_seconds
-        ):
+        if kid in _cache.keys and (now - _cache.fetched_at) < settings.keycloak_jwks_ttl_seconds:
             return _cache.keys[kid]
 
         # Bounded back-off so a Keycloak outage doesn't drive a retry storm.
-        if (
-            _cache.last_failure_at
-            and (now - _cache.last_failure_at) < _FAILURE_BACKOFF_SECONDS
-        ):
+        if _cache.last_failure_at and (now - _cache.last_failure_at) < _FAILURE_BACKOFF_SECONDS:
             raise RuntimeError("JWKS fetch recently failed; backing off")
 
         try:

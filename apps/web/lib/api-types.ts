@@ -6,7 +6,7 @@
  * block on having the backend up during build.
  */
 
-export type EventLogStatus = "importing" | "ready" | "failed";
+export type EventLogStatus = "importing" | "processing" | "ready" | "failed";
 
 /** Case-centric (XES/CSV/XML) vs object-centric (OCEL). The two are fully
  * isolated — drives the detail-page tabs, header counts, and which endpoints /
@@ -452,4 +452,59 @@ export interface ScanResponse {
   imported: number;
   skipped: number;
   failed: number;
+}
+
+// ── Admin behaviour-event export (GET /admin/export/*) ───────────────────────
+
+/** Backend ``EventSource`` literal on AnalyticsEvent rows. */
+export type EventSource = "client" | "server";
+
+/** XES trace (case) notion for the event-log export. */
+export type ExportCaseNotion = "session" | "user";
+
+/** Output format for the behaviour export. */
+export type ExportFormat = "xes" | "ndjson" | "csv";
+
+/** Optional filters shared by every /admin/export/* route. Empty/undefined
+ * fields add no predicate (the export then spans everything). Mirrors the
+ * backend ``_event_filters`` params. */
+export interface ExportFilters {
+  user_id?: string | null;
+  source?: EventSource | null;
+  event_type?: string | null;
+  event_name?: string | null;
+  path_prefix?: string | null;
+  /** ISO-8601; half-open [start, end) window on occurred_at. */
+  start?: string | null;
+  end?: string | null;
+  session_id?: string | null;
+}
+
+export interface ExportTypeCount {
+  label: string;
+  count: number;
+}
+
+/** GET /admin/export/preview — counts + span for the current filter set. */
+export interface ExportPreview {
+  matched_events: number;
+  matched_sessions: number;
+  distinct_users: number;
+  date_min: string | null;
+  date_max: string | null;
+  event_types: ExportTypeCount[];
+}
+
+export interface ExportUserOption {
+  id: string;
+  email: string | null;
+  preferred_username: string | null;
+}
+
+/** GET /admin/export/facets — dropdown options for the filter UI. */
+export interface ExportFacets {
+  users: ExportUserOption[];
+  event_types: string[];
+  event_names: ExportTypeCount[];
+  paths: ExportTypeCount[];
 }

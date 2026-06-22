@@ -1,10 +1,14 @@
 """/api/v1/admin — cross-user operations gated by the Keycloak ``admin`` role.
 
-Two capabilities, both deliberately admin-only (they read every user's data —
+Capabilities here are deliberately admin-only (they read every user's data —
 emails, usernames, behaviour-tracking events, process metadata):
 
 * download a consistent snapshot of the whole metadata SQLite database;
-* download all analytics events as an XES event log for process mining.
+* download analytics events (filtered) as XES / NDJSON / CSV for process mining;
+* preview + facet the behaviour-event set to drive the export filter UI.
+
+The event-bus ``user_id`` tenant-isolation invariant does not apply: these are
+deliberately cross-user, admin-gated REST reads (mirrors ``admin_insights.py``).
 
 See ``apps/web/app/(platform)/admin/export`` for the UI.
 """
@@ -12,11 +16,13 @@ See ``apps/web/app/(platform)/admin/export`` for the UI.
 from __future__ import annotations
 
 import contextlib
+import csv
+import io
 import json
 import os
 import sqlite3
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -27,9 +33,10 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy import case as sa_case
-from sqlalchemy import func, select
 from sqlalchemy.engine import make_url
+from sqlalchemy.sql import Select
 from starlette.background import BackgroundTask
 
 from mate.api.auth import ADMIN_ROLE, AdminUserDep, CurrentUserDep
@@ -37,9 +44,91 @@ from mate.api.config import get_settings
 from mate.api.db.engine import get_sessionmaker
 from mate.api.db.models import AnalyticsEvent, User
 from mate.api.db.session import SessionDep
+from mate.api.routes.analytics import event_to_dict
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+EventSource = Literal["client", "server"]
+
+
+# --------------------------------------------------------------------------
+# Shared behaviour-event filter
+# --------------------------------------------------------------------------
+
+
+def _event_filters(
+    *,
+    user_id: str | None = None,
+    source: EventSource | None = None,
+    event_type: str | None = None,
+    event_name: str | None = None,
+    path_prefix: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    session_id: str | None = None,
+) -> list[ColumnElement[bool]]:
+    """Build SQLAlchemy predicates for the ``AnalyticsEvent`` export filters.
+
+    Every param is optional; an absent param adds no predicate. ``start``/``end``
+    form a half-open ``[start, end)`` window on ``occurred_at`` (stored naive-UTC,
+    so callers pass naive-UTC). ``path_prefix`` matches the path head
+    case-insensitively. Mirrors the filter style in ``admin_insights.py``.
+    """
+    filters: list[ColumnElement[bool]] = []
+    if user_id:
+        filters.append(AnalyticsEvent.user_id == user_id)
+    if source:
+        filters.append(AnalyticsEvent.source == source)
+    if event_type:
+        filters.append(AnalyticsEvent.event_type == event_type)
+    if event_name:
+        filters.append(AnalyticsEvent.event_name == event_name)
+    if path_prefix:
+        filters.append(AnalyticsEvent.path.ilike(f"{path_prefix}%"))
+    if start is not None:
+        filters.append(AnalyticsEvent.occurred_at >= _naive(start))
+    if end is not None:
+        filters.append(AnalyticsEvent.occurred_at < _naive(end))
+    if session_id:
+        filters.append(AnalyticsEvent.session_id == session_id)
+    return filters
+
+
+def _naive(dt: datetime) -> datetime:
+    """Coerce an aware datetime to naive-UTC (the column's storage form)."""
+    if dt.tzinfo is not None:
+        return dt.astimezone(UTC).replace(tzinfo=None)
+    return dt
+
+
+def _filtered(stmt: Select[Any], filters: Sequence[ColumnElement[bool]]) -> Select[Any]:
+    return stmt.where(*filters) if filters else stmt
+
+
+def _log_filters(
+    *,
+    user_id: str | None,
+    source: str | None,
+    event_type: str | None,
+    event_name: str | None,
+    path_prefix: str | None,
+    start: datetime | None,
+    end: datetime | None,
+    session_id: str | None,
+) -> dict[str, Any]:
+    """Compact dict of the active (non-None) filters for the audit log line."""
+    raw = {
+        "user_id": user_id,
+        "source": source,
+        "event_type": event_type,
+        "event_name": event_name,
+        "path_prefix": path_prefix,
+        "start": start.isoformat() if start else None,
+        "end": end.isoformat() if end else None,
+        "session_id": session_id,
+    }
+    return {k: v for k, v in raw.items() if v is not None}
 
 
 def _db_path() -> Path:
@@ -106,9 +195,7 @@ async def export_info(user: CurrentUserDep, session: SessionDep) -> ExportInfo:
         return ExportInfo(is_admin=False)
 
     user_count = await session.scalar(select(func.count()).select_from(User)) or 0
-    event_count = (
-        await session.scalar(select(func.count()).select_from(AnalyticsEvent)) or 0
-    )
+    event_count = await session.scalar(select(func.count()).select_from(AnalyticsEvent)) or 0
     src = _db_path()
     size = src.stat().st_size if src.exists() else None
     return ExportInfo(
@@ -128,9 +215,7 @@ async def export_metadata_db(user: AdminUserDep) -> FileResponse:
     """
     src = _db_path()
     if not src.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Database file not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Database file not found")
 
     snapshot = await run_in_threadpool(_snapshot_db, src)
     log.info("admin_db_export", admin_id=user.id, bytes=snapshot.stat().st_size)
@@ -171,7 +256,7 @@ def _xes_attr(key: str, value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, bool):
-        return f"<boolean key={_xes_q(key)} value=\"{'true' if value else 'false'}\"/>"
+        return f'<boolean key={_xes_q(key)} value="{"true" if value else "false"}"/>'
     if isinstance(value, int):
         return f'<int key={_xes_q(key)} value="{value}"/>'
     if isinstance(value, float):
@@ -235,24 +320,46 @@ def _event_xml(ev: AnalyticsEvent) -> str:
 async def export_event_log_xes(
     user: AdminUserDep,
     case: Literal["session", "user"] = "session",
+    user_id: str | None = None,
+    source: EventSource | None = None,
+    event_type: str | None = None,
+    event_name: str | None = None,
+    path_prefix: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    session_id: str | None = None,
 ) -> StreamingResponse:
-    """Stream every analytics event (all users) as an XES event log.
+    """Stream the (filtered) analytics events across all users as an XES log.
 
-    The trace (case) is the browser session by default, or the user with
-    ``?case=user``; server-side events (no browser session) fall back to the
-    user as their case. Activity is the event name, the timestamp is when it
-    occurred, and every column plus the per-event ``properties`` is emitted as
-    an XES attribute. The stream is ordered by case then time so traces are
-    contiguous, and a fresh DB session is held open for the whole download.
+    Admin-only and deliberately cross-user. The trace (case) is the browser
+    session by default, or the user with ``?case=user``; server-side events (no
+    browser session) fall back to the user as their case. Activity is the event
+    name, the timestamp is when it occurred, and every column plus the per-event
+    ``properties`` is emitted as an XES attribute. The optional filter params
+    (``user_id``/``source``/``event_type``/``event_name``/``path_prefix``/
+    ``start``/``end``/``session_id``) narrow the event set. The stream is ordered
+    by case then time so traces are contiguous, and a fresh DB session is held
+    open for the whole download.
     """
-    if case == "user":
-        case_key = AnalyticsEvent.user_id
-    else:
-        case_key = sa_case(
+    case_key = (
+        AnalyticsEvent.user_id
+        if case == "user"
+        else sa_case(
             (AnalyticsEvent.source == "server", AnalyticsEvent.user_id),
             else_=AnalyticsEvent.session_id,
         )
-    stmt = select(AnalyticsEvent, case_key.label("case_key")).order_by(
+    )
+    filters = _event_filters(
+        user_id=user_id,
+        source=source,
+        event_type=event_type,
+        event_name=event_name,
+        path_prefix=path_prefix,
+        start=start,
+        end=end,
+        session_id=session_id,
+    )
+    stmt = _filtered(select(AnalyticsEvent, case_key.label("case_key")), filters).order_by(
         case_key, AnalyticsEvent.occurred_at, AnalyticsEvent.id
     )
 
@@ -275,10 +382,351 @@ async def export_event_log_xes(
                 yield "  </trace>\n"
         yield "</log>\n"
 
-    log.info("admin_xes_export", admin_id=user.id, case=case)
+    log.info(
+        "admin_xes_export",
+        admin_id=user.id,
+        case=case,
+        filters=_log_filters(
+            user_id=user_id,
+            source=source,
+            event_type=event_type,
+            event_name=event_name,
+            path_prefix=path_prefix,
+            start=start,
+            end=end,
+            session_id=session_id,
+        ),
+    )
     ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return StreamingResponse(
         _stream(),
         media_type="application/xml",
         headers={"Content-Disposition": f'attachment; filename="events-{ts}.xes"'},
+    )
+
+
+# --------------------------------------------------------------------------
+# NDJSON / CSV event export (filtered)
+# --------------------------------------------------------------------------
+
+# Column order for the CSV export. ``properties`` is the variable per-event dict;
+# it's flattened to a single JSON-string column so the header stays fixed.
+_CSV_COLUMNS = (
+    "id",
+    "user_id",
+    "session_id",
+    "anon_user_id",
+    "source",
+    "event_type",
+    "event_name",
+    "duration_ms",
+    "path",
+    "referrer",
+    "viewport_w",
+    "viewport_h",
+    "ua_class",
+    "locale",
+    "tz",
+    "occurred_at",
+    "server_received_at",
+    "properties",
+)
+
+
+def _ordered_filtered_stmt(filters: Sequence[ColumnElement[bool]]) -> Select[Any]:
+    """Select all matching events, oldest first, with a stable id tiebreak."""
+    return _filtered(select(AnalyticsEvent), filters).order_by(
+        AnalyticsEvent.occurred_at.asc(), AnalyticsEvent.id.asc()
+    )
+
+
+@router.get("/export/events.ndjson")
+async def export_events_ndjson(
+    user: AdminUserDep,
+    user_id: str | None = None,
+    source: EventSource | None = None,
+    event_type: str | None = None,
+    event_name: str | None = None,
+    path_prefix: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    session_id: str | None = None,
+) -> StreamingResponse:
+    """Stream the filtered analytics events as NDJSON (one JSON object per line).
+
+    Admin-only, deliberately cross-user. Row shape comes from the shared
+    ``event_to_dict`` builder so it matches the per-user ``/usage/export`` dump.
+    A fresh DB session is held open for the whole stream.
+    """
+    filters = _event_filters(
+        user_id=user_id,
+        source=source,
+        event_type=event_type,
+        event_name=event_name,
+        path_prefix=path_prefix,
+        start=start,
+        end=end,
+        session_id=session_id,
+    )
+    stmt = _ordered_filtered_stmt(filters)
+
+    async def _stream() -> AsyncIterator[str]:
+        sm = get_sessionmaker()
+        async with sm() as session:
+            result = await session.stream(stmt)
+            async for (ev,) in result:
+                yield json.dumps(event_to_dict(ev), default=str) + "\n"
+
+    log.info(
+        "admin_ndjson_export",
+        admin_id=user.id,
+        filters=_log_filters(
+            user_id=user_id,
+            source=source,
+            event_type=event_type,
+            event_name=event_name,
+            path_prefix=path_prefix,
+            start=start,
+            end=end,
+            session_id=session_id,
+        ),
+    )
+    ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    return StreamingResponse(
+        _stream(),
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": f'attachment; filename="events-{ts}.ndjson"'},
+    )
+
+
+@router.get("/export/events.csv")
+async def export_events_csv(
+    user: AdminUserDep,
+    user_id: str | None = None,
+    source: EventSource | None = None,
+    event_type: str | None = None,
+    event_name: str | None = None,
+    path_prefix: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    session_id: str | None = None,
+) -> StreamingResponse:
+    """Stream the filtered analytics events as CSV.
+
+    Admin-only, deliberately cross-user. Uses ``csv.writer`` against an in-memory
+    buffer that's drained per row so the response streams; ``properties`` is
+    flattened to a single JSON-string column. Same filters as the NDJSON/XES
+    exports.
+    """
+    filters = _event_filters(
+        user_id=user_id,
+        source=source,
+        event_type=event_type,
+        event_name=event_name,
+        path_prefix=path_prefix,
+        start=start,
+        end=end,
+        session_id=session_id,
+    )
+    stmt = _ordered_filtered_stmt(filters)
+
+    def _row(ev: AnalyticsEvent) -> list[str]:
+        d = event_to_dict(ev)
+        out: list[str] = []
+        for col in _CSV_COLUMNS:
+            value = d.get(col)
+            if col == "properties":
+                out.append("" if value is None else json.dumps(value, default=str))
+            else:
+                out.append("" if value is None else str(value))
+        return out
+
+    async def _stream() -> AsyncIterator[str]:
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(_CSV_COLUMNS)
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+        sm = get_sessionmaker()
+        async with sm() as session:
+            result = await session.stream(stmt)
+            async for (ev,) in result:
+                writer.writerow(_row(ev))
+                yield buf.getvalue()
+                buf.seek(0)
+                buf.truncate(0)
+
+    log.info(
+        "admin_csv_export",
+        admin_id=user.id,
+        filters=_log_filters(
+            user_id=user_id,
+            source=source,
+            event_type=event_type,
+            event_name=event_name,
+            path_prefix=path_prefix,
+            start=start,
+            end=end,
+            session_id=session_id,
+        ),
+    )
+    ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    return StreamingResponse(
+        _stream(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="events-{ts}.csv"'},
+    )
+
+
+# --------------------------------------------------------------------------
+# Export preview + facets (drive the filter UI)
+# --------------------------------------------------------------------------
+
+
+class ExportTypeCount(BaseModel):
+    label: str
+    count: int
+
+
+class ExportPreview(BaseModel):
+    matched_events: int
+    matched_sessions: int
+    distinct_users: int
+    date_min: datetime | None
+    date_max: datetime | None
+    event_types: list[ExportTypeCount]
+
+
+@router.get("/export/preview", response_model=ExportPreview)
+async def export_preview(
+    user: AdminUserDep,
+    session: SessionDep,
+    user_id: str | None = None,
+    source: EventSource | None = None,
+    event_type: str | None = None,
+    event_name: str | None = None,
+    path_prefix: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    session_id: str | None = None,
+) -> ExportPreview:
+    """Counts + span for the current filter set, to preview an export.
+
+    Admin-only, deliberately cross-user. Pure aggregation — no rows leave the
+    server. ``matched_sessions`` counts the distinct session ids in the matched
+    events (so it tracks the filter, unlike the all-time sessions table).
+    """
+    filters = _event_filters(
+        user_id=user_id,
+        source=source,
+        event_type=event_type,
+        event_name=event_name,
+        path_prefix=path_prefix,
+        start=start,
+        end=end,
+        session_id=session_id,
+    )
+
+    matched_events = int(
+        await session.scalar(_filtered(select(func.count()).select_from(AnalyticsEvent), filters))
+        or 0
+    )
+    matched_sessions = int(
+        await session.scalar(
+            _filtered(select(func.count(func.distinct(AnalyticsEvent.session_id))), filters)
+        )
+        or 0
+    )
+    distinct_users = int(
+        await session.scalar(
+            _filtered(select(func.count(func.distinct(AnalyticsEvent.user_id))), filters)
+        )
+        or 0
+    )
+    date_min = await session.scalar(
+        _filtered(select(func.min(AnalyticsEvent.occurred_at)), filters)
+    )
+    date_max = await session.scalar(
+        _filtered(select(func.max(AnalyticsEvent.occurred_at)), filters)
+    )
+    type_rows = (
+        await session.execute(
+            _filtered(select(AnalyticsEvent.event_type, func.count()), filters)
+            .group_by(AnalyticsEvent.event_type)
+            .order_by(func.count().desc())
+        )
+    ).all()
+
+    return ExportPreview(
+        matched_events=matched_events,
+        matched_sessions=matched_sessions,
+        distinct_users=distinct_users,
+        date_min=date_min,
+        date_max=date_max,
+        event_types=[ExportTypeCount(label=str(t), count=int(c)) for t, c in type_rows],
+    )
+
+
+class ExportUserOption(BaseModel):
+    id: str
+    email: str | None
+    preferred_username: str | None
+
+
+class ExportFacets(BaseModel):
+    users: list[ExportUserOption]
+    event_types: list[str]
+    event_names: list[ExportTypeCount]
+    paths: list[ExportTypeCount]
+
+
+@router.get("/export/facets", response_model=ExportFacets)
+async def export_facets(user: AdminUserDep, session: SessionDep) -> ExportFacets:
+    """Dropdown options for the export filter UI.
+
+    Admin-only, deliberately cross-user. Returns the users that have any
+    behaviour events, the distinct event types, and the top event names / paths
+    by frequency (capped) so the filter selects stay bounded.
+    """
+    user_rows = (
+        await session.execute(
+            select(User.id, User.email, User.preferred_username)
+            .where(User.id.in_(select(func.distinct(AnalyticsEvent.user_id))))
+            .order_by(User.preferred_username, User.email, User.id)
+        )
+    ).all()
+    type_rows = (
+        await session.execute(
+            select(AnalyticsEvent.event_type)
+            .group_by(AnalyticsEvent.event_type)
+            .order_by(AnalyticsEvent.event_type)
+        )
+    ).all()
+    name_rows = (
+        await session.execute(
+            select(AnalyticsEvent.event_name, func.count())
+            .group_by(AnalyticsEvent.event_name)
+            .order_by(func.count().desc())
+            .limit(50)
+        )
+    ).all()
+    path_rows = (
+        await session.execute(
+            select(AnalyticsEvent.path, func.count())
+            .where(AnalyticsEvent.path.is_not(None))
+            .group_by(AnalyticsEvent.path)
+            .order_by(func.count().desc())
+            .limit(50)
+        )
+    ).all()
+
+    return ExportFacets(
+        users=[
+            ExportUserOption(id=str(uid), email=email, preferred_username=username)
+            for uid, email, username in user_rows
+        ],
+        event_types=[str(t) for (t,) in type_rows],
+        event_names=[ExportTypeCount(label=str(n), count=int(c)) for n, c in name_rows],
+        paths=[ExportTypeCount(label=str(p), count=int(c)) for p, c in path_rows],
     )

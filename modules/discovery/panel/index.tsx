@@ -1,17 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowUp,
   Download,
-  Lock,
   RotateCcw,
-  Save,
   Search,
   Settings2,
-  Unlock,
-  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -72,9 +68,6 @@ import {
   useDiscoveryPrefixTree,
   useDiscoveryProcessTree,
   useDiscoveryProcessTreeImf,
-  useResetBpmn,
-  useSaveBpmn,
-  useUploadBpmn,
   type BpmnAlgo,
   type HeuristicsThresholds,
 } from "./queries";
@@ -820,19 +813,11 @@ function BpmnTab({ logId }: { logId: string }) {
   const dfgQuery = useDiscoveryDfg(logId);
   const freq = useMemo(() => buildFrequencyMaps(dfgQuery.data), [dfgQuery.data]);
 
-  const uploadMut = useUploadBpmn(logId);
-  const saveMut = useSaveBpmn(logId);
-  const resetMut = useResetBpmn(logId);
-
   const [decor, setDecor] = useState<BpmnDecor>({
     heatmap: true,
     freqLabels: true,
-    dimRare: false,
-    dimLevel: 0.15,
   });
   const patchDecor = (p: Partial<BpmnDecor>) => setDecor((d) => ({ ...d, ...p }));
-
-  const [locked, setLocked] = useState(true);
 
   const [searchText, setSearchText] = useState("");
   const [search, setSearch] = useState<{ q: string; nonce: number }>({ q: "", nonce: 0 });
@@ -840,15 +825,6 @@ function BpmnTab({ logId }: { logId: string }) {
     const q = searchText.trim();
     if (q) setSearch({ q, nonce: Date.now() });
   };
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  // Track the latest XML emitted by the modeler so the Save button can PUT
-  // it back. Reset whenever the underlying query payload changes (frequency
-  // filter / upload / reset).
-  const [dirtyXml, setDirtyXml] = useState<string | null>(null);
-  useEffect(() => {
-    setDirtyXml(null);
-  }, [dataUpdatedAt]);
 
   return (
     <>
@@ -861,17 +837,6 @@ function BpmnTab({ logId }: { logId: string }) {
         </FilterField>
         <FilterField label="Labels">
           <Switch checked={decor.freqLabels} onCheckedChange={(v) => patchDecor({ freqLabels: v })} />
-        </FilterField>
-        <FilterField label="Dim rare">
-          <Switch checked={decor.dimRare} onCheckedChange={(v) => patchDecor({ dimRare: v })} />
-          {decor.dimRare && (
-            <CommitSlider
-              value={decor.dimLevel}
-              onCommit={(v) => patchDecor({ dimLevel: v })}
-              max={0.5}
-              width="w-28"
-            />
-          )}
         </FilterField>
         <FilterField label="Find">
           <div className="flex items-center gap-1">
@@ -892,37 +857,6 @@ function BpmnTab({ logId }: { logId: string }) {
 
         <div className="ml-auto flex items-center gap-2">
           <Button
-            variant={locked ? "outline" : "default"}
-            size="sm"
-            className="cursor-pointer gap-1.5"
-            onClick={() => setLocked((v) => !v)}
-            title={locked ? "Unlock to edit the diagram" : "Lock (view only)"}
-          >
-            {locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
-            {locked ? "View" : "Edit"}
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".bpmn,application/bpmn+xml,application/xml,text/xml"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) uploadMut.mutate(file);
-              e.target.value = "";
-            }}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            className="cursor-pointer gap-1.5"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadMut.isPending}
-          >
-            <Upload className="h-3.5 w-3.5" />
-            Upload .bpmn
-          </Button>
-          <Button
             variant="outline"
             size="sm"
             className="cursor-pointer gap-1.5"
@@ -936,27 +870,6 @@ function BpmnTab({ logId }: { logId: string }) {
             <Download className="h-3.5 w-3.5" />
             Download
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="cursor-pointer gap-1.5"
-            onClick={() => resetMut.mutate()}
-            disabled={resetMut.isPending}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Re-derive
-          </Button>
-          <Button
-            size="sm"
-            className="cursor-pointer gap-1.5"
-            onClick={() => {
-              if (dirtyXml) saveMut.mutate(dirtyXml);
-            }}
-            disabled={!dirtyXml || saveMut.isPending}
-          >
-            <Save className="h-3.5 w-3.5" />
-            {saveMut.isPending ? "Saving…" : "Save edits"}
-          </Button>
         </div>
       </FilterBar>
 
@@ -967,14 +880,12 @@ function BpmnTab({ logId }: { logId: string }) {
       ) : (
         <CanvasFrame>
           {/* Re-mount when the backend payload identity changes so we
-              import fresh XML (frequency filter / upload / reset). */}
+              import fresh XML (e.g. frequency-filter re-mine). */}
           <BpmnCanvas
             key={dataUpdatedAt}
             xml={data.xml}
-            onChange={setDirtyXml}
             freq={freq}
             decor={decor}
-            locked={locked}
             searchQuery={search.q}
             searchNonce={search.nonce}
             onSearchResult={(found) => {

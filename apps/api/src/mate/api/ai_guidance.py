@@ -124,9 +124,7 @@ async def structured_completion(
     if provider == "anthropic":
         return await _anthropic_tool_use(cfg, full_system, user_text, schema, tool_name)
 
-    base_url = (
-        "https://api.openai.com/v1" if provider == "openai" else (p.base_url or "")
-    )
+    base_url = "https://api.openai.com/v1" if provider == "openai" else (p.base_url or "")
     if not base_url:
         raise GuidanceError(f"{provider!r} requires a base URL.")
     # UniGPT / LibreChat-style proxies and most self-hosted OpenAI-compatible
@@ -176,9 +174,7 @@ async def stream_interpretation(
             yield chunk
         return
 
-    base_url = (
-        "https://api.openai.com/v1" if provider == "openai" else (p.base_url or "")
-    )
+    base_url = "https://api.openai.com/v1" if provider == "openai" else (p.base_url or "")
     async for chunk in _openai_compat_stream_text(cfg, full_system, user_text, base_url, p.api_key):
         yield chunk
 
@@ -243,16 +239,19 @@ async def _anthropic_stream_text(
         "stream": True,
     }
     timeout = httpx.Timeout(120.0, connect=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
-        "POST",
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": p.api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json=body,
-    ) as r:
+    async with (
+        httpx.AsyncClient(timeout=timeout) as client,
+        client.stream(
+            "POST",
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": p.api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json=body,
+        ) as r,
+    ):
         if not r.is_success:
             raw = await r.aread()
             raise GuidanceError(f"Anthropic {r.status_code}: {raw.decode()[:300]}")
@@ -396,12 +395,15 @@ async def _openai_compat_stream_text(
     ]
     url = f"{base_url.rstrip('/')}/chat/completions"
     timeout = httpx.Timeout(120.0, connect=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
-        "POST",
-        url,
-        headers={"Authorization": f"Bearer {api_key}", "content-type": "application/json"},
-        json={"model": cfg.selected_model, "messages": msgs, "stream": True},
-    ) as r:
+    async with (
+        httpx.AsyncClient(timeout=timeout) as client,
+        client.stream(
+            "POST",
+            url,
+            headers={"Authorization": f"Bearer {api_key}", "content-type": "application/json"},
+            json={"model": cfg.selected_model, "messages": msgs, "stream": True},
+        ) as r,
+    ):
         if not r.is_success:
             raw = await r.aread()
             raise GuidanceError(f"{r.status_code}: {raw.decode()[:300]}")

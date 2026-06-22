@@ -184,6 +184,8 @@ export interface DashboardDetail {
   settings: CanvasSettings;
   created_at: string;
   updated_at: string;
+  /** False when the board was opened via a share — render it read-only. */
+  is_owner: boolean;
 }
 
 /** One configurable field on a card, in the module `config_schema` dialect. */

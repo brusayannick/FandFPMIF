@@ -24,7 +24,7 @@ from typing import Any
 
 import structlog
 
-from mate.api.modules.subprocess_worker import WireConnection
+from mate.api.modules.subprocess_worker import RPC_STREAM_LIMIT, WireConnection
 from mate.sdk.decorators import (
     _ATTR_JOB,
     _ATTR_ON_EVENT,
@@ -56,7 +56,7 @@ class SubprocessModule:
     """
 
     def __init__(
-        self, manifest_id: str, handlers_meta: list[dict[str, Any]], bridge: "SubprocessBridge"
+        self, manifest_id: str, handlers_meta: list[dict[str, Any]], bridge: SubprocessBridge
     ) -> None:
         self.id = manifest_id
         self._bridge = bridge
@@ -115,7 +115,13 @@ class SubprocessModule:
         any positional payload + kwargs) to the worker over the bridge."""
         bridge = self._bridge
 
-        async def stub(_self, ctx, *args, **kwargs):  # `_self` ignored; we're bound
+        # The stub is stored on the *instance* dict (see `_install_stubs`), so
+        # attribute access returns it **unbound** — Python does not strip a
+        # leading `self`. Its first parameter must therefore be `ctx`, matching
+        # what the loader's `_extra_handler_params` drops. A leading `_self` here
+        # shifts everything by one, leaking `ctx` into the forwarded request
+        # params and raising "got multiple values for argument 'ctx'" on call.
+        async def stub(ctx, *args, **kwargs):
             return await bridge.call_handler(attr, ctx, args, kwargs)
 
         stub.__name__ = attr
@@ -143,7 +149,7 @@ class SubprocessBridge:
         # list), then hand back a SubprocessModule whose stubs the loader binds
         # like any in_process module — @route, @job and @on_event all work.
         self._server = await asyncio.start_unix_server(
-            self._on_connect, path=str(self._socket_path)
+            self._on_connect, path=str(self._socket_path), limit=RPC_STREAM_LIMIT
         )
         os.chmod(self._socket_path, 0o600)
 
@@ -171,7 +177,7 @@ class SubprocessBridge:
 
         try:
             await asyncio.wait_for(self._ready_evt.wait(), timeout=30.0)
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             await self.stop()
             raise SubprocessHostError(
                 f"Subprocess module {self.manifest.id!r} did not signal ready in 30s."
@@ -183,13 +189,13 @@ class SubprocessBridge:
         if self._conn is not None:
             try:
                 await asyncio.wait_for(self._conn.send_request("shutdown", {}), timeout=2.0)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         if self._proc is not None and self._proc.returncode is None:
             try:
                 self._proc.terminate()
                 await asyncio.wait_for(self._proc.wait(), timeout=5.0)
-            except (asyncio.TimeoutError, ProcessLookupError):
+            except (TimeoutError, ProcessLookupError):
                 self._proc.kill()
         if self._server is not None:
             self._server.close()

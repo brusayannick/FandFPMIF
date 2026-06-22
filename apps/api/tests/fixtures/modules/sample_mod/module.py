@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from mate.sdk import Module, ModuleContext, on_event, route
 
-
 _received: list[dict] = []
 _last_called_path: list[str] = []
 

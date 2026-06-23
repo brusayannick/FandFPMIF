@@ -70,4 +70,8 @@ HEALTHCHECK --interval=10s --timeout=3s --retries=5 --start-period=5s \
   CMD wget -q --spider http://localhost:3000/processes || exit 1
 
 # Bundle all installed modules, then hand off to Next's standalone server.
-CMD ["sh", "-c", "node /opt/ff-bundler/bundle-modules.mjs && node /app/apps/web/server.js"]
+# Use `;` not `&&`: a single module that fails to bundle must NOT block the web
+# server from booting (that turned one bad panel into a container crash-loop).
+# The bundler logs failures loudly; only the affected module's panel is lost,
+# the platform still comes up.
+CMD ["sh", "-c", "node /opt/ff-bundler/bundle-modules.mjs; node /app/apps/web/server.js"]

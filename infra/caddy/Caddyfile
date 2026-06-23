@@ -28,6 +28,17 @@
 	@kc path /auth/*
 	reverse_proxy @kc keycloak:8080
 
+	# Force revalidation of the Next.js HTML/RSC documents and the Auth.js
+	# session route (/api/auth/*) so a fresh visit never renders a stale app
+	# shell carrying an expired token — the "first load 401s, hard-refresh
+	# fixes it" symptom. Scoped to EXCLUDE the api/health/keycloak upstreams
+	# (incl. SSE under /api/v1/*) and the hashed, immutable build assets under
+	# /_next/static + /_next/image, which must stay cacheable.
+	@webDoc {
+		not path /api/v1/* /health /auth/* /_next/static/* /_next/image*
+	}
+	header @webDoc Cache-Control "no-store"
+
 	# Everything else — the Next.js app, its static assets, and Auth.js
 	# routes at /api/auth/*.
 	reverse_proxy web:3000

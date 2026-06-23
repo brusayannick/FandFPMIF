@@ -174,6 +174,17 @@ async function bundleModule(folder) {
 
 async function main() {
   const folders = [...iterModuleFolders()];
+  if (!WATCH) {
+    // Surface the resolve fallbacks + whether the bundled (non-externalised)
+    // bpmn deps are actually present in this image. If bpmn-js shows NOT FOUND
+    // here, the runner image was built without them (stale/cached build) — the
+    // discovery panel will then fail to bundle.
+    const bpmnProbe = NODE_PATHS.map((p) => join(p, "bpmn-js")).find((p) => existsSync(p));
+    console.log(
+      `[bundle-modules] nodePaths=${JSON.stringify(NODE_PATHS)} ` +
+        `bpmn-js=${bpmnProbe ?? "NOT FOUND — discovery panel will fail to bundle"}`,
+    );
+  }
   const allTasks = [];
   for (const folder of folders) {
     try {

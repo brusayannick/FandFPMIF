@@ -4,11 +4,11 @@ Three sources, each implemented as a `@job`-style handler on the platform's
 `JobRuntime` so progress flows to the bottom-left dock and the jobs drawer
 just like an event-log import:
 
-- ``module.install.upload`` — operator uploaded a zip / tar.gz from the UI
+- ``module.install.upload`` - operator uploaded a zip / tar.gz from the UI
   (or `POST /api/v1/modules/install`). The route writes the bytes to a
   staging tmpdir and submits a job carrying the file path.
-- ``module.install.git`` — clone a git URL (optionally pinned to a ref).
-- ``module.install.registry`` — install from PyPI by name. After
+- ``module.install.git`` - clone a git URL (optionally pinned to a ref).
+- ``module.install.registry`` - install from PyPI by name. After
   ``uv pip install`` it resolves the new module via its `mate.modules`
   entry point. The ``source: "npm"`` variant raises ``NotImplementedError``
   by design: an npm-only package ships no Python entry point for the loader
@@ -61,7 +61,7 @@ def register_module_install_handlers(runtime: JobRuntime, loader: ModuleLoader) 
     """Wire the three install job types onto the runtime.
 
     Called from `main.py` lifespan after the loader and runtime are built.
-    Idempotent — re-registration of the same type would raise, so we skip
+    Idempotent - re-registration of the same type would raise, so we skip
     silently if a type is already registered (helpful for hot-reload tests).
     """
     for type_, handler in (
@@ -130,7 +130,7 @@ def _install_from_git(loader: ModuleLoader):
                     f"git clone failed (exit {proc.returncode}): "
                     f"{out.decode('utf-8', errors='replace')[:500]}"
                 )
-            # The clone leaves a .git directory we don't want — strip it.
+            # The clone leaves a .git directory we don't want - strip it.
             shutil.rmtree(staging / ".git", ignore_errors=True)
             await handle.progress(35, 100, stage="validating", message="Validating manifest")
             folder, manifest = await _stage_validated_upload(loader, handle.user_id, staging)
@@ -163,7 +163,7 @@ def _install_from_registry(loader: ModuleLoader):
 
         if source != "pypi":
             # The npm path would mean a JS-only module without a Python
-            # entry point — the loader has no place to bind it today, so
+            # entry point - the loader has no place to bind it today, so
             # surface that clearly rather than silently no-op.
             raise NotImplementedError(
                 f"Installing from {source!r} is not supported yet. Use PyPI or the Upload / Git tabs."
@@ -289,7 +289,7 @@ def _safe_extract_tar(tf: tarfile.TarFile, dest: Path) -> None:
             target.relative_to(dest_resolved)
         except ValueError as exc:
             raise ValueError(f"Refusing tar path traversal: {member.name!r}") from exc
-    # `filter="data"` strips device files, absolute paths, and the like —
+    # `filter="data"` strips device files, absolute paths, and the like -
     # available since Python 3.12, which is our minimum.
     tf.extractall(dest, filter="data")
 
@@ -316,7 +316,7 @@ async def _stage_validated_upload(
     """Validate a staged upload, then move it into the uploads root.
 
     Rejects (before touching disk) an id that collides with a built-in default
-    — uploads must never overwrite repo code — or one already owned by another
+    - uploads must never overwrite repo code - or one already owned by another
     user, since module code is shared in-process under a single id. Re-uploading
     an id the same user already owns replaces it (hot-reload).
     """
@@ -334,7 +334,7 @@ async def _stage_validated_upload(
             )
     target = loader.uploaded_modules_dir / manifest.id
     if target.exists():
-        # Replace prior install — keeps the operator's expectations simple
+        # Replace prior install - keeps the operator's expectations simple
         # ("re-uploading the same id updates it"). The loader will hot-reload.
         shutil.rmtree(target, ignore_errors=True)
     target.parent.mkdir(parents=True, exist_ok=True)

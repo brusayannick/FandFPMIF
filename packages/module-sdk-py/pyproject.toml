@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mate-sdk"
-version = "0.1.0"
-description = "Module SDK for Mate — public API for module authors."
+version = "0.2.0"
+description = "Module SDK for Mate – public API for module authors."
 requires-python = ">=3.12"
 readme = "README.md"
 license = { text = "MIT" }

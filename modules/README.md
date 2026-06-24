@@ -10,9 +10,9 @@ A module is a self-contained folder under `modules/<folder>/`. The platform disc
 
 A module is **not**:
 
-- A patch to the platform — you never edit `apps/api` or `apps/web` to ship a module.
-- A long-running service — the platform owns the FastAPI process, the asyncio event loop, the job queue, and the WebSocket fan-out. Your code runs inside them.
-- A privileged citizen — the same SDK is used by core, third-party, and user modules. There are no internal hooks reserved for first-party code.
+- A patch to the platform – you never edit `apps/api` or `apps/web` to ship a module.
+- A long-running service – the platform owns the FastAPI process, the asyncio event loop, the job queue, and the WebSocket fan-out. Your code runs inside them.
+- A privileged citizen – the same SDK is used by core, third-party, and user modules. There are no internal hooks reserved for first-party code.
 
 To remove a module: delete the folder. Everything it added (its venv, its bundled JS, its lockfile) lives inside the folder.
 
@@ -22,11 +22,11 @@ To remove a module: delete the folder. Everything it added (its venv, its bundle
 
 ```
 modules/<folder>/
-├── manifest.yaml           # required — registration, requirements, deps, frontend
-├── module.py               # required — entry point: subclass of Module
-├── pyproject.toml          # optional — synthesised from manifest if absent
-├── package.json            # optional — synthesised from manifest if absent
-├── events.py               # recommended — Pydantic schemas for emitted events
+├── manifest.yaml           # required – registration, requirements, deps, frontend
+├── module.py               # required – entry point: subclass of Module
+├── pyproject.toml          # optional – synthesised from manifest if absent
+├── package.json            # optional – synthesised from manifest if absent
+├── events.py               # recommended – Pydantic schemas for emitted events
 ├── tests/                  # pytest tests for your handlers
 ├── panel/
 │   └── index.tsx           # frontend module page entry (see manifest.frontend.panel)
@@ -35,7 +35,7 @@ modules/<folder>/
 ├── .venv/                  # auto-created; gitignored
 ├── .dist/                  # auto-bundled JS; gitignored
 ├── node_modules/           # gitignored
-└── uv.lock                 # committed — pins your Python deps
+└── uv.lock                 # committed – pins your Python deps
 ```
 
 `<folder>` is arbitrary on disk; the manifest's `id` is authoritative.
@@ -54,19 +54,19 @@ category: foundation                # foundation | attribute | external_input | 
 description: One-line summary shown on the module card.
 author: You
 license: MIT
-keywords: [my topic, synonym, domain term]   # optional — helps MATE AI route chat
+keywords: [my topic, synonym, domain term]   # optional – helps MATE AI route chat
                                              # messages to this module. Omit and the
                                              # platform derives them from name/description.
 
 requirements:
   event_log:                        # checked against the log's detected schema
-    log_model: case_centric         # case_centric (default) | object_centric — see below
+    log_model: case_centric         # case_centric (default) | object_centric – see below
     required_columns: [case_id, activity, timestamp]
     optional_columns: [resource, end_timestamp]
     min_events: 100
     min_cases: 5
-  modules: []                       # hard deps — must be loaded
-  optional_modules:                 # soft deps — used if present
+  modules: []                       # hard deps – must be loaded
+  optional_modules:                 # soft deps – used if present
     - id: discovery
       reason: Activity labels are taken from discovery if available.
 
@@ -79,7 +79,7 @@ consumes:                           # bus topics / capabilities you depend on
 dependencies:
   python:
     requires-python: ">=3.12"       # validation gate for in_process (see §8); selector for subprocess
-    packages:                       # private to this module — installed into .venv
+    packages:                       # private to this module – installed into .venv
       - "scikit-learn>=1.5"
     inherit:                        # reuse the platform's already-installed copy
       - pm4py
@@ -106,28 +106,28 @@ permissions:
 Rules the manifest validator enforces:
 
 - `id` is lowercase snake_case and globally unique across all modules.
-- A package cannot appear in both `dependencies.python.packages` and `dependencies.python.inherit` — pick one.
+- A package cannot appear in both `dependencies.python.packages` and `dependencies.python.inherit` – pick one.
 - Hard-dep cycles in `requirements.modules` abort startup.
 - Two modules declaring the same `id` is a startup error.
 
-`inherit` exists so process-mining modules don't reinstall pandas/numpy/pm4py per module — those weigh hundreds of MB. Anything not inherited is fully isolated to your `.venv`.
+`inherit` exists so process-mining modules don't reinstall pandas/numpy/pm4py per module – those weigh hundreds of MB. Anything not inherited is fully isolated to your `.venv`.
 
-### `log_model` — case-centric vs object-centric (declare it!)
+### `log_model` – case-centric vs object-centric (declare it!)
 
 Every module declares which **log model** it operates on via `requirements.event_log.log_model`:
 
 | Value | Log shape | Reads from |
 |---|---|---|
-| `case_centric` (default) | Classic event log — one `case_id` per trace, flat `activity`/`timestamp` events. | `ctx.event_log` |
-| `object_centric` | OCEL — events relate to many objects of different types; no single case notion. | `ctx.object_log` |
+| `case_centric` (default) | Classic event log – one `case_id` per trace, flat `activity`/`timestamp` events. | `ctx.event_log` |
+| `object_centric` | OCEL – events relate to many objects of different types; no single case notion. | `ctx.object_log` |
 
-This is the **single isolation switch** between the two worlds. The platform makes a module available *only* on logs whose model matches: a `case_centric` module never appears for an OCEL log, and an `object_centric` module never appears for a case-centric log ([`availability.py`](../apps/api/src/mate/api/modules/availability.py) checks this first and short-circuits, so the column/count checks below only run when the model already matches). Because of that gate, the loader binds exactly one of `ctx.event_log` / `ctx.object_log` — reach for the one your declared model implies.
+This is the **single isolation switch** between the two worlds. The platform makes a module available *only* on logs whose model matches: a `case_centric` module never appears for an OCEL log, and an `object_centric` module never appears for a case-centric log ([`availability.py`](../apps/api/src/mate/api/modules/availability.py) checks this first and short-circuits, so the column/count checks below only run when the model already matches). Because of that gate, the loader binds exactly one of `ctx.event_log` / `ctx.object_log` – reach for the one your declared model implies.
 
-The field **defaults to `case_centric`**, so a classic process-mining module works without declaring it — but declare it explicitly anyway (every bundled module does) so the model a module targets is visible on its manifest at a glance. `required_columns`, `optional_columns`, `min_events`, and `min_cases` apply to the case-centric event table; for `object_centric` modules gate on `min_events` (and the OCEL counts surfaced on the log) rather than case-centric columns.
+The field **defaults to `case_centric`**, so a classic process-mining module works without declaring it – but declare it explicitly anyway (every bundled module does) so the model a module targets is visible on its manifest at a glance. `required_columns`, `optional_columns`, `min_events`, and `min_cases` apply to the case-centric event table; for `object_centric` modules gate on `min_events` (and the OCEL counts surfaced on the log) rather than case-centric columns.
 
 ---
 
-## 4. `module.py` — the entry point
+## 4. `module.py` – the entry point
 
 ```python
 from mate.sdk import Module, ModuleContext, on_event, route, job
@@ -150,7 +150,7 @@ class MyModule(Module):
         await self._compute(ctx)
 
     @route.post("/recompute")
-    @job(progress=True, title="My Module — recompute")
+    @job(progress=True, title="My Module – recompute")
     async def recompute(self, ctx: ModuleContext) -> dict:
         await ctx.progress.update(0.0, "Loading log")
         async with ctx.event_log as log:
@@ -164,9 +164,9 @@ class MyModule(Module):
 
 Rules:
 
-- One subclass of `Module` per module file. The loader instantiates it exactly once per process — never instantiate it yourself.
+- One subclass of `Module` per module file. The loader instantiates it exactly once per process – never instantiate it yourself.
 - The class attribute `id` must equal `manifest.yaml::id`.
-- Decorators only attach metadata. There is no `register(...)` call — the manifest is the registration.
+- Decorators only attach metadata. There is no `register(...)` call – the manifest is the registration.
 - Handlers may be `async def` or plain `def`. Sync handlers are auto-wrapped so they cannot block the event loop:
   - `@route.*` rides FastAPI's built-in `run_in_threadpool`.
   - `@on_event` and `@job` are wrapped by the SDK with `asyncio.to_thread` ([`decorators.py`](../packages/module-sdk-py/src/mate/sdk/decorators.py)).
@@ -185,7 +185,7 @@ Path parameters and request bodies use FastAPI semantics. Pydantic models for re
 
 ### `@on_event(topic)`
 
-Subscribes to a bus topic. Topics are dotted strings; wildcards are not supported on the subscriber side — subscribe to the exact topic you care about.
+Subscribes to a bus topic. Topics are dotted strings; wildcards are not supported on the subscriber side – subscribe to the exact topic you care about.
 
 Built-in platform topics include `log.imported`, `log.deleted`, and `job.queued|started|progress|completed|failed|cancelled`. Module-emitted topics are namespaced by module id (`my_module.something`).
 
@@ -206,9 +206,9 @@ When `@job` wraps a route, the route returns `{ "job_id": "..." }` immediately a
 
 ---
 
-## 5. `ModuleContext` — what every handler receives
+## 5. `ModuleContext` – what every handler receives
 
-Defined in [`packages/module-sdk-py/src/mate/sdk/context.py`](../packages/module-sdk-py/src/mate/sdk/context.py). All fields are typed Protocols — depend on the Protocol, not the implementation.
+Defined in [`packages/module-sdk-py/src/mate/sdk/context.py`](../packages/module-sdk-py/src/mate/sdk/context.py). All fields are typed Protocols – depend on the Protocol, not the implementation.
 
 ```python
 @dataclass
@@ -237,9 +237,9 @@ async with ctx.event_log as log:
     df = await log.pandas()         # or .polars(), .pm4py()
 ```
 
-Prefer DuckDB for aggregations (millions of rows in milliseconds). Use pandas/polars when you need DataFrame semantics. Use `pm4py` only when an algorithm needs the pm4py event log object — it's the heaviest.
+Prefer DuckDB for aggregations (millions of rows in milliseconds). Use pandas/polars when you need DataFrame semantics. Use `pm4py` only when an algorithm needs the pm4py event log object – it's the heaviest.
 
-### `ctx.open_event_log(log_id)` — reading a *second* log
+### `ctx.open_event_log(log_id)` – reading a *second* log
 
 `ctx.event_log` is bound to the one log the invocation is scoped to. When a module genuinely needs another log too (comparison, benchmarking), `ctx.open_event_log(other_log_id)` returns a second `EventLogAccess` with the **same** interface:
 
@@ -249,7 +249,7 @@ async with ctx.event_log as base, await ctx.open_event_log(other_id) as other:
     other_df = await other.pandas()
 ```
 
-It is the only sanctioned cross-log accessor and it **enforces tenant isolation**: the target must be a case-centric log owned by the same user, else it raises (a log belonging to another user is reported as "not found" — never confirmed). The view honours the target log's own committed Events-tab filter, exactly like the primary one. Don't reach into `mate.api.*` internals to open a log yourself — that bypasses the ownership check.
+It is the only sanctioned cross-log accessor and it **enforces tenant isolation**: the target must be a case-centric log owned by the same user, else it raises (a log belonging to another user is reported as "not found" – never confirmed). The view honours the target log's own committed Events-tab filter, exactly like the primary one. Don't reach into `mate.api.*` internals to open a log yourself – that bypasses the ownership check.
 
 ### `ctx.cache`
 
@@ -269,7 +269,7 @@ User-set configuration, validated against your `config_schema`. Read with `ctx.c
 
 ### `ctx.progress`
 
-Inside a `@job(progress=True)` handler, emit progress to the dock + drawer + WebSocket stream. Pick whichever style fits — all three render a live bar, none requires you to know the total up front:
+Inside a `@job(progress=True)` handler, emit progress to the dock + drawer + WebSocket stream. Pick whichever style fits – all three render a live bar, none requires you to know the total up front:
 
 ```python
 # 1. Fraction (0.0–1.0, no total) → determinate percentage bar.
@@ -283,7 +283,19 @@ await ctx.progress.update(current=4200, total=10000, stage="replay")
 await ctx.progress.update(current=processed_so_far)
 ```
 
-A `float` `current` in `[0, 1]` with no `total` is read as a fraction (mapped to 0–100); an `int` `current` is always a running counter (`update(current=1)` is "1 processed", not "100%"). For long jobs, **always emit *something* live** — never leave the bar silent for minutes.
+A `float` `current` in `[0, 1]` with no `total` is read as a fraction (mapped to 0–100); an `int` `current` is always a running counter (`update(current=1)` is "1 processed", not "100%"). Progress is **optional and never enforced** — omit it and the job still runs, just with an indeterminate "Working…" bar (and a stall hint if it stays silent past ~3 min). But for long jobs you *should* **emit *something* live** – never leave the bar silent for minutes.
+
+### Precompute ordering (running after another module)
+
+A module precomputes on import by stacking `@on_event("log.imported")` (or `ocel.imported`) + `@job`; all such jobs for one import run **in parallel**. To run *after* another module, subscribe to its reserved `<module_id>.completed` event — the platform auto-emits it when that module's precompute job succeeds, so the producer does nothing special:
+
+```python
+@on_event("discovery.completed")   # runs only after `discovery` precompute succeeds
+@job(progress=True, title="My overlay")
+async def precompute(self, ctx, payload): ...
+```
+
+Declare the edge so it validates and shows up in the jobs UI: `consumes: [discovery.completed]` (+ `optional_modules: [discovery]`). The log stays in `processing` until the **whole** chain finishes; if an upstream fails the platform **skips** your job instead of stranding the log. A `@on_event` *without* `@job` (e.g. a cheap cache refresh) is fire-and-forget and never gates a log.
 
 ### `ctx.workdir`
 
@@ -299,7 +311,7 @@ A `structlog.BoundLogger` already bound with `module_id` and `log_id`. Use it; `
 
 Two patterns. Both are typed.
 
-### (a) Event bus — fire-and-forget, fan-out
+### (a) Event bus – fire-and-forget, fan-out
 
 ```python
 # emitter
@@ -310,11 +322,11 @@ await ctx.bus.emit("my_module.kpi.computed", {"log_id": ctx.log_id, "kpis": kpis
 async def react(self, ctx: ModuleContext, payload: dict) -> None: ...
 ```
 
-Topics you emit must be listed in your manifest's `provides:` (or be one of the platform's built-in topics). Topics you subscribe to must be listed in your `consumes:`. The platform validates this at startup, so missing-dep bugs surface at boot — not at runtime.
+Topics you emit must be listed in your manifest's `provides:` (or be one of the platform's built-in topics). Topics you subscribe to must be listed in your `consumes:`. The platform validates this at startup, so missing-dep bugs surface at boot – not at runtime.
 
 Define payload shapes as Pydantic models in your `events.py` and use them on both sides. The bus rejects untyped emits.
 
-### (b) Capability registry — typed RPC for synchronous queries
+### (b) Capability registry – typed RPC for synchronous queries
 
 When you need a result back from another module, use the registry instead of round-tripping through the bus:
 
@@ -335,7 +347,7 @@ Rule of thumb:
 
 ## 7. Frontend
 
-The platform loads each module's frontend bundle from `modules/<folder>/.dist/` — your panel and widgets are bundled with esbuild at platform startup, not as part of the Next.js build. You don't import anything from `apps/web`.
+The platform loads each module's frontend bundle from `modules/<folder>/.dist/` – your panel and widgets are bundled with esbuild at platform startup, not as part of the Next.js build. You don't import anything from `apps/web`.
 
 ### Panel
 
@@ -369,7 +381,7 @@ return <ThroughputChart logId={logId} config={{}} />;
 
 ### Talking to your backend
 
-Use the platform fetch helper — it injects the auth/session correctly and respects the API base URL:
+Use the platform fetch helper – it injects the auth/session correctly and respects the API base URL:
 
 ```tsx
 import { api } from "@mate/module-sdk-ts";
@@ -391,16 +403,16 @@ useEvents(["my_module.kpi.computed"], (env) => { ... });
 
 The platform creates and owns `modules/<folder>/.venv`:
 
-- On every boot, the platform hashes your `dependencies` block. If unchanged, it skips reinstalling — boots are near-instant. (For `in_process` modules the hash also folds in the platform's Python version, so a venv built under a different Python — e.g. a host-mode 3.13 venv bind-mounted into a 3.12 container — rebuilds automatically instead of crashing on import.)
+- On every boot, the platform hashes your `dependencies` block. If unchanged, it skips reinstalling – boots are near-instant. (For `in_process` modules the hash also folds in the platform's Python version, so a venv built under a different Python – e.g. a host-mode 3.13 venv bind-mounted into a 3.12 container – rebuilds automatically instead of crashing on import.)
 - Your code resolves imports against `.venv/site-packages` first, then stdlib, then the platform's `inherit` set, then the SDK. Other modules' dependencies are not visible.
 
-**Python version (important).** `in_process` modules (the default) are imported into the *platform's own interpreter*, so their venv is always built on **exactly that Python** — currently 3.12. Your manifest's `requires-python` is a **validation gate**, not an interpreter selector: if the platform's Python doesn't satisfy it, the module fails to load with a clear, actionable message. You therefore **never hand-pin `<3.13`** to dodge ABI mismatches — the platform pins the interpreter for you. Declare `requires-python` only when your dependencies genuinely can't run on a newer Python (e.g. a C-extension with no wheels for it); the gate then turns that into a fast, clear failure instead of a cryptic wheel-build error.
+**Python version (important).** `in_process` modules (the default) are imported into the *platform's own interpreter*, so their venv is always built on **exactly that Python** – currently 3.12. Your manifest's `requires-python` is a **validation gate**, not an interpreter selector: if the platform's Python doesn't satisfy it, the module fails to load with a clear, actionable message. You therefore **never hand-pin `<3.13`** to dodge ABI mismatches – the platform pins the interpreter for you. Declare `requires-python` only when your dependencies genuinely can't run on a newer Python (e.g. a C-extension with no wheels for it); the gate then turns that into a fast, clear failure instead of a cryptic wheel-build error.
 
-If you genuinely need a **different Python version** than the platform, set `isolation: subprocess`. The platform spawns a long-lived worker from your venv on its own interpreter (selected by `requires-python`; uv picks or auto-downloads it) and proxies handler calls over a Unix-socket JSON-RPC. The `ModuleContext` interface is unchanged — `@route`, `@job`, and `@on_event` all work, and `event_log.pandas()/polars()/pm4py()` stream the log to your process via a Parquet handoff. Caveats: each call adds 5–50 ms; `inherit` names are installed into your own venv (no shared interpreter to inherit from across a process boundary); job cancellation is best-effort; dynamic `@job(title=...)` callables fall back to a static label. Use subprocess only when you actually need a different Python or have a hard native-lib conflict (e.g. `numpy 1.x` while the platform ships `numpy 2.x`).
+If you genuinely need a **different Python version** than the platform, set `isolation: subprocess`. The platform spawns a long-lived worker from your venv on its own interpreter (selected by `requires-python`; uv picks or auto-downloads it) and proxies handler calls over a Unix-socket JSON-RPC. The `ModuleContext` interface is unchanged – `@route`, `@job`, and `@on_event` all work, and `event_log.pandas()/polars()/pm4py()` stream the log to your process via a Parquet handoff. Caveats: each call adds 5–50 ms; `inherit` names are installed into your own venv (no shared interpreter to inherit from across a process boundary); job cancellation is best-effort; dynamic `@job(title=...)` callables fall back to a static label. Use subprocess only when you actually need a different Python or have a hard native-lib conflict (e.g. `numpy 1.x` while the platform ships `numpy 2.x`).
 
 ### npm
 
-`pnpm install --dir modules/<folder>` runs at startup. Bundles land in `.dist/`. Same isolation story — your widgets bundle against your own `node_modules`.
+`pnpm install --dir modules/<folder>` runs at startup. Bundles land in `.dist/`. Same isolation story – your widgets bundle against your own `node_modules`.
 
 ### Don't touch
 
@@ -426,10 +438,10 @@ Commit `manifest.yaml`, `module.py`, your tests, your frontend sources, and `uv.
 3. **Materialise dependencies.** `uv sync` per module if its dep hash changed; same for the JS bundle.
 4. **Topological load.** Hard-dep order. Your module's `Module` subclass is instantiated once.
 5. **Mount.** Routes registered at `/api/v1/modules/{id}/*`, `@on_event` handlers subscribed, `@job` handlers registered with the queue.
-6. **Per-log gating.** When a log is opened, the platform re-evaluates `requirements.event_log` against that log's model and schema. The `log_model` gate runs first — a module whose declared model doesn't match the log is **unavailable** and hidden from the grid (case-centric and object-centric modules never cross). If the model matches, the column / `min_events` / `min_cases` checks decide **available** vs **unavailable**, with a tooltip explaining what's missing.
+6. **Per-log gating.** When a log is opened, the platform re-evaluates `requirements.event_log` against that log's model and schema. The `log_model` gate runs first – a module whose declared model doesn't match the log is **unavailable** and hidden from the grid (case-centric and object-centric modules never cross). If the model matches, the column / `min_events` / `min_cases` checks decide **available** vs **unavailable**, with a tooltip explaining what's missing.
 7. **Hot reload (dev).** Watchdog on `modules/` re-loads changed files without a platform restart. Manifest dep changes trigger an in-place `uv sync` for that module only.
 
-If a module fails to load (manifest error, install error, import error), the failure is reported on the per-module card and in `/settings/modules/{moduleId}` — the rest of the platform stays up.
+If a module fails to load (manifest error, install error, import error), the failure is reported on the per-module card and in `/settings/modules/{moduleId}` – the rest of the platform stays up.
 
 ---
 
@@ -467,11 +479,11 @@ The platform's CI also runs every module's tests against the platform's `inherit
 
 Three channels are supported by the *Settings → Modules → Import* flow:
 
-1. **Zip / tarball** — drop `modules/<folder>/` into a `.zip` or `.tar.gz`.
-2. **Git URL** — repo root must contain the module folder layout from §2.
-3. **PyPI / npm** — publish a Python package exposing the `mate.modules` entry point. The platform discovers it without copying files into `modules/`.
+1. **Zip / tarball** – drop `modules/<folder>/` into a `.zip` or `.tar.gz`.
+2. **Git URL** – repo root must contain the module folder layout from §2.
+3. **PyPI / npm** – publish a Python package exposing the `mate.modules` entry point. The platform discovers it without copying files into `modules/`.
 
-For the first two, the platform unpacks into `modules/<id>/`, runs `uv sync`, runs the JS bundle step, and mounts. Failures roll back cleanly — a half-installed folder is deleted.
+For the first two, the platform unpacks into `modules/<id>/`, runs `uv sync`, runs the JS bundle step, and mounts. Failures roll back cleanly – a half-installed folder is deleted.
 
 ---
 
@@ -484,11 +496,12 @@ Before submitting a module:
 - [ ] `id` matches between `manifest.yaml` and `module.py`.
 - [ ] Every emitted bus topic is in `provides:`; every subscribed topic is in `consumes:`.
 - [ ] Every `ctx.registry.call(...)` target is in `consumes:` or `optional_modules:`.
-- [ ] No imports from `apps/api/*` or `apps/web/*` — only `mate.sdk` and `@mate/module-sdk-ts`.
-- [ ] Long operations use `@job(progress=True)`.
-- [ ] Sync `def` handlers are fine — don't reach for `asyncio.run` or `loop.run_until_complete`. The SDK auto-wraps.
+- [ ] No imports from `apps/api/*` or `apps/web/*` – only `mate.sdk` and `@mate/module-sdk-ts`.
+- [ ] Long operations use `@job(progress=True)` (progress is optional but recommended for long jobs).
+- [ ] Precompute that must run after another module subscribes to its `<module_id>.completed` event (not a phantom topic nobody emits), and the job-backed `@on_event` is what gates the log — a `@on_event` without `@job` never holds `processing`.
+- [ ] Sync `def` handlers are fine – don't reach for `asyncio.run` or `loop.run_until_complete`. The SDK auto-wraps.
 - [ ] Tests run green against the platform's `inherit` versions.
 - [ ] No platform-level files modified (`apps/api/pyproject.toml`, `apps/web/package.json`, etc.).
 - [ ] `.venv/`, `.dist/`, `node_modules/` gitignored.
 
-If all of those hold, dropping the folder into `modules/` and restarting is enough — the module is live.
+If all of those hold, dropping the folder into `modules/` and restarting is enough – the module is live.

@@ -5,11 +5,11 @@ Implemented as a *pure ASGI* middleware rather than Starlette's
 which breaks the streaming AI endpoints (``/ai/chat``, ``/ai/guidance/.../stream``).
 The pure-ASGI form is transparent to streaming and, because ``await self.app(...)``
 only returns once the whole response (including a streamed body) has been sent,
-the measured duration covers the *entire* operation — e.g. a full AI completion.
+the measured duration covers the *entire* operation - e.g. a full AI completion.
 
 We only record a curated allowlist of meaningful, synchronous operations.
 Long-running work (imports, module runs, installs) goes through the job runtime
-and is captured separately as ``job`` events with their real runtime duration —
+and is captured separately as ``job`` events with their real runtime duration -
 see ``main._job_event_recorder_loop``.
 """
 
@@ -27,7 +27,7 @@ from mate.api.routes.analytics import record_server_event
 log = structlog.get_logger(__name__)
 
 # (HTTP method, path regex, operation name). Matched against the raw request
-# path (no query string). Keep this list to genuinely meaningful actions —
+# path (no query string). Keep this list to genuinely meaningful actions -
 # every match is one row kept for the user's full retention window.
 _BUSINESS_OPS: list[tuple[str, re.Pattern[str], str]] = [
     ("POST", re.compile(r"^/api/v1/ai/chat$"), "ai_chat"),

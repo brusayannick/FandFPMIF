@@ -22,7 +22,7 @@ async def _wait_until_ready(client: AsyncClient, log_id: str, timeout: float = 5
         if last["status"] == "failed":
             raise AssertionError(f"Import failed: {last.get('error')}")
         await asyncio.sleep(0.05)
-    raise AssertionError(f"Import did not finish in {timeout}s — last state: {last}")
+    raise AssertionError(f"Import did not finish in {timeout}s - last state: {last}")
 
 
 async def _seed_log(client: AsyncClient) -> str:
@@ -49,7 +49,7 @@ async def test_events_list_default_sort(client: AsyncClient) -> None:
     body = resp.json()
     assert body["total"] == 9
     assert len(body["rows"]) == 9
-    # sorted by (case_id, timestamp) — first row is case-1's first event
+    # sorted by (case_id, timestamp) - first row is case-1's first event
     assert body["rows"][0]["case_id"] == "case-1"
     assert body["rows"][0]["activity"] == "register order"
     # column specs include the canonical columns + resource
@@ -115,7 +115,7 @@ async def test_events_case_id_filter(client: AsyncClient) -> None:
     assert all(r["case_id"] == "case-2" for r in body["rows"])
 
 
-# ── events: editing — single, bulk, validation, re-sort ──────────────────────
+# ── events: editing - single, bulk, validation, re-sort ──────────────────────
 
 
 @pytest.mark.asyncio
@@ -162,7 +162,7 @@ async def test_patch_event_changing_activity_recomputes_variants(client: AsyncCl
     assert detail["variants_count"] == 2
 
     # case-2 currently does (register, check stock, cancel). Changing "cancel"
-    # to "ship" makes case-2 share the (register, check stock, ship) variant —
+    # to "ship" makes case-2 share the (register, check stock, ship) variant -
     # so total variants should drop from 2 to 1.
     rows = (await client.get(f"/api/v1/event-logs/{log_id}/events")).json()["rows"]
     cancel_row = next(i for i, r in enumerate(rows) if r["activity"] == "cancel")
@@ -259,7 +259,7 @@ async def test_variants_listing(client: AsyncClient) -> None:
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["total"] == 2
-    # Top variant (most cases) should be the (register, check stock, ship) one — 2 cases.
+    # Top variant (most cases) should be the (register, check stock, ship) one - 2 cases.
     top = body["rows"][0]
     assert top["rank"] == 1
     assert top["case_count"] == 2
@@ -315,7 +315,7 @@ async def test_time_bounds(client: AsyncClient) -> None:
     assert body["field"] == "timestamp"
     assert body["min_ts"] is not None
     assert body["max_ts"] is not None
-    # A real span — min strictly precedes max in the fixture.
+    # A real span - min strictly precedes max in the fixture.
     assert body["min_ts"] < body["max_ts"]
 
 
@@ -334,7 +334,7 @@ async def test_activities_listing(client: AsyncClient) -> None:
     assert by_act["check stock"] == 3
     assert by_act["ship"] == 2
     assert by_act["cancel"] == 1
-    # Sorted by count desc — first row should be one of the 3-counts.
+    # Sorted by count desc - first row should be one of the 3-counts.
     assert body["rows"][0]["count"] == 3
 
 
@@ -357,7 +357,7 @@ async def test_activity_labels_round_trip(client: AsyncClient) -> None:
     body = resp.json()
     assert body["column_overrides"]["activity_labels"]["register order"] == "Receive Order"
 
-    # Activities endpoint still returns raw names — renames are display-only.
+    # Activities endpoint still returns raw names - renames are display-only.
     activities = (await client.get(f"/api/v1/event-logs/{log_id}/activities")).json()
     raw_names = {r["activity"] for r in activities["rows"]}
     assert "register order" in raw_names

@@ -249,7 +249,7 @@ function SimilarityTab({
                     className="text-center text-xs tabular-nums"
                     style={i === j ? undefined : { background: cellBg(matrix[i][j]) }}
                   >
-                    {i === j ? <span className="text-muted-foreground">—</span> : fmt(matrix[i][j])}
+                    {i === j ? <span className="text-muted-foreground">–</span> : fmt(matrix[i][j])}
                   </TableCell>
                 ))}
               </TableRow>
@@ -401,7 +401,7 @@ function VariantsTab({
                           <span className="ml-1 opacity-50">({formatNumber(v.counts[i])})</span>
                         </span>
                       ) : (
-                        "—"
+                        "–"
                       )}
                     </TableCell>
                   );
@@ -496,7 +496,7 @@ function ActivityDeltasTab({
                   <TableCell key={id} className="text-right text-xs tabular-nums">
                     <span>{pct(row.freq_shares[i])}</span>
                     <span className="ml-1 text-muted-foreground">
-                      {row.avg_sojourn_s[i] > 0 ? formatDuration(row.avg_sojourn_s[i]) : "—"}
+                      {row.avg_sojourn_s[i] > 0 ? formatDuration(row.avg_sojourn_s[i]) : "–"}
                     </span>
                   </TableCell>
                 ))}

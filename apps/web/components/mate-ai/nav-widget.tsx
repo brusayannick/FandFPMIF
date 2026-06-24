@@ -28,7 +28,7 @@ const chipClass = cn(
 
 /**
  * Renders the navigation + settings suggestions returned by `/api/v1/ai/route`
- * as clickable chips below an assistant message. Both are purely additive — the
+ * as clickable chips below an assistant message. Both are purely additive – the
  * user can always ignore them, and settings only change on click.
  */
 export function NavWidget({
@@ -75,7 +75,7 @@ export function NavWidget({
                 </div>
                 {t.requires_log && !t.available && (
                   <div className="mt-0.5 text-[10px] text-sidebar-foreground/50">
-                    Open a process to view this module&apos;s panel — opens settings for now.
+                    Open a process to view this module&apos;s panel – opens settings for now.
                   </div>
                 )}
               </div>
@@ -104,7 +104,7 @@ export function NavWidget({
                   {done ? <Check className="h-3 w-3" /> : <SlidersHorizontal className="h-3 w-3" />}
                 </div>
                 <div className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-foreground">
-                  {done ? `${a.label} — applied` : a.label}
+                  {done ? `${a.label} – applied` : a.label}
                 </div>
               </button>
             );

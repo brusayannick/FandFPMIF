@@ -1,4 +1,4 @@
-"""Complexity over time — how EPA-based complexity KPIs evolve.
+"""Complexity over time - how EPA-based complexity KPIs evolve.
 
 Slices the event log along time (whole cases grouped by start time), runs the
 vendored complexity math (:mod:`complexity_core`) on each slice, and returns a
@@ -6,7 +6,7 @@ per-slice metric series the panel plots as a line (x = time, y = a chosen KPI).
 
 Routes
 ------
-GET ``/timeseries`` — slice + compute the series for a chosen mode/params
+GET ``/timeseries`` - slice + compute the series for a chosen mode/params
 (cached, offloaded to a worker thread).
 
 Precompute
@@ -106,7 +106,7 @@ class ComplexityOverTimeModule(Module):
     guidance_system_prompt = (
         "You are a process-mining analyst interpreting how structural and "
         "entropy-based complexity metrics evolve over the lifetime of a "
-        "process. Each point is a time slice — whole cases grouped by their "
+        "process. Each point is a time slice - whole cases grouped by their "
         "start time. Read the series for trends, spikes, and regime shifts in "
         "variant/sequence entropy, Pentland's process complexity, structure "
         "and affinity. Reference specific slice labels and values, and "
@@ -196,7 +196,7 @@ class ComplexityOverTimeModule(Module):
         return await _cached_or_compute(ctx, key, _compute)
 
     @on_event("log.imported")
-    @job(progress=True, title="Complexity over time — precompute")
+    @job(progress=True, title="Complexity over time - precompute")
     async def precompute(self, ctx: ModuleContext, payload: dict[str, Any]) -> None:
         await ctx.progress.update(0.0, "Loading log")
         k = _exponential_k(ctx)

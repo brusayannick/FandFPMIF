@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 // Cheap, Edge-safe auth gate: only checks that a session cookie is *present*.
-// We can't decode the session here — with the server-side store (Option 3) the
+// We can't decode the session here – with the server-side store (Option 3) the
 // token lives on disk, unreachable from the Edge runtime. Real validation
 // happens server-side: RSCs via `auth()` (Node runtime) and the API via JWKS.
 const PUBLIC_PATHS = ["/login", "/api/auth"];

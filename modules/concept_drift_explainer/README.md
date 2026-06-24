@@ -13,7 +13,7 @@ hypothesised causes. A chatbot lets analysts ask follow-up questions grounded
 in the same evidence state.
 
 This module keeps its AI config **fully isolated** from the platform's global
-**Settings → AI** — it owns its own OpenAI key and only ever talks to OpenAI.
+**Settings → AI** – it owns its own OpenAI key and only ever talks to OpenAI.
 
 ## Setup
 
@@ -37,7 +37,7 @@ meta-analysis) and DOCX report generation are not yet ported.
 ## Costs and guardrails
 
 - The pipeline auto-refreshes the drift list when cv4cdd finishes, but it
-  never auto-runs the LLM stages — explanation runs are user-driven.
+  never auto-runs the LLM stages – explanation runs are user-driven.
 - LLM responses are cached per `(prompt, model)` in the module's per-log
   result cache so re-runs of the same drift don't repeatedly hit the API.
 
@@ -46,5 +46,5 @@ meta-analysis) and DOCX report generation are not yet ported.
 The original repository lives at
 [github.com/janschaffner/concept_drift_explainer](https://github.com/janschaffner/concept_drift_explainer).
 The agents, prompts, and Pydantic schemas in this module are the same as the
-original — only the credential plumbing, on-disk document storage, and graph
+original – only the credential plumbing, on-disk document storage, and graph
 entry point have been adapted for the platform.

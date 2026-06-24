@@ -24,7 +24,7 @@ export interface CellEditorProps {
   value: unknown;
   editMode: boolean;
   /** Optional rename overlay applied to the displayed cell value. Editing
-   * still operates on the raw underlying value — the override is purely
+   * still operates on the raw underlying value – the override is purely
    * cosmetic (used by the activity rename overlay).
    */
   displayOverride?: string;
@@ -75,7 +75,7 @@ export function CellEditor({
               : undefined
         }
       >
-        {empty ? "—" : display}
+        {empty ? "–" : display}
       </button>
     );
   }
@@ -219,7 +219,7 @@ function toInputValue(value: unknown, column: ColumnSpec): string {
   if (column.type === "datetime") {
     const d = new Date(String(value));
     if (Number.isNaN(d.getTime())) return String(value);
-    // datetime-local expects YYYY-MM-DDTHH:MM:SS — strip tz.
+    // datetime-local expects YYYY-MM-DDTHH:MM:SS – strip tz.
     const pad = (n: number) => String(n).padStart(2, "0");
     return (
       `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
@@ -252,7 +252,7 @@ function parseDraft(draft: string, column: ColumnSpec): unknown {
 }
 
 function formatCell(value: unknown, column: ColumnSpec): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "–";
   if (column.type === "datetime") {
     const d = new Date(String(value));
     if (Number.isNaN(d.getTime())) return String(value);

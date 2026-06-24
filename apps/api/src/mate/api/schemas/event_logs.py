@@ -1,6 +1,6 @@
 """Pydantic v2 schemas for the /event-logs API surface.
 
-Mirrors INSTRUCTIONS.md §6 and §3.2 — `id` is a UUID v7 string, status is one
+Mirrors INSTRUCTIONS.md §6 and §3.2 - `id` is a UUID v7 string, status is one
 of {importing, processing, ready, failed}.
 """
 
@@ -86,7 +86,7 @@ class XmlProbeField(BaseModel):
 
 
 class XmlProbeResponse(BaseModel):
-    # "ocel": the file is object-centric and auto-routes server-side — the
+    # "ocel": the file is object-centric and auto-routes server-side - the
     # frontend skips the mapping wizard, same as for "xes".
     format_hint: Literal["generic", "xes", "ocel"] = "generic"
     event_element: str | None = None
@@ -131,10 +131,10 @@ class EventLogSummary(BaseModel):
     # set, header counts, and which API endpoints / modules apply.
     log_model: LogModel = "case_centric"
     events_count: int | None = None
-    # Case-centric counts — NULL for object-centric logs.
+    # Case-centric counts - NULL for object-centric logs.
     cases_count: int | None = None
     variants_count: int | None = None
-    # Object-centric counts — NULL for case-centric logs.
+    # Object-centric counts - NULL for case-centric logs.
     objects_count: int | None = None
     object_types_count: int | None = None
     relations_count: int | None = None
@@ -146,7 +146,7 @@ class EventLogSummary(BaseModel):
     created_at: datetime
     imported_at: datetime | None = None
     last_edited_at: datetime | None = None
-    # True when the importer had to guess a mandatory column — drives the
+    # True when the importer had to guess a mandatory column - drives the
     # "review column mapping" warning in the process overview.
     mapping_needs_review: bool = False
 

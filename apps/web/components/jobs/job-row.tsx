@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Copy, Loader2, RefreshCcw, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,11 +19,25 @@ import { StatusBadge } from "@/components/status-badge";
 import { useCancelJob, useRetryJob } from "@/lib/queries";
 import { formatDuration, formatRelative } from "@/lib/format";
 import { jobProgress } from "@/lib/job-progress";
-import { parseJobTitle, type LiveJob } from "@/lib/stores/jobs";
+import { jobStallSeconds, parseJobTitle, type LiveJob } from "@/lib/stores/jobs";
 import { cn } from "@/lib/cn";
 
 interface JobRowProps {
   job: LiveJob;
+}
+
+/**
+ * A re-render tick so the stall hint advances without a `job.progress` event.
+ * `null` disables the interval (a non-running job can never stall).
+ */
+function useNow(intervalMs: number | null): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (intervalMs === null) return;
+    const t = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(t);
+  }, [intervalMs]);
+  return now;
 }
 
 export function JobRow({ job }: JobRowProps) {
@@ -32,6 +46,9 @@ export function JobRow({ job }: JobRowProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   const { pct, label, rate, eta } = jobProgress(job);
+
+  const now = useNow(job.status === "running" ? 30_000 : null);
+  const stalledSec = jobStallSeconds(job, now);
 
   const isActive =
     job.status === "running" || job.status === "queued" || job.status === "paused";
@@ -137,6 +154,11 @@ export function JobRow({ job }: JobRowProps) {
                   : ""}
               </span>
             </div>
+            {stalledSec !== null && (
+              <div className="text-[11px] text-amber-600 dark:text-amber-500">
+                No progress for {formatDuration(stalledSec)}
+              </div>
+            )}
           </div>
         )}
       </Card>
@@ -255,7 +277,7 @@ function DetailGrid({ job }: { job: LiveJob }) {
     {
       label: "Module",
       value: (
-        <span className="truncate font-mono text-xs">{job.module_id ?? "—"}</span>
+        <span className="truncate font-mono text-xs">{job.module_id ?? "–"}</span>
       ),
     },
     { label: "Priority", value: <span className="tabular-nums">{job.priority}</span> },
@@ -263,7 +285,7 @@ function DetailGrid({ job }: { job: LiveJob }) {
       label: "Progress",
       value: (
         <span className="tabular-nums">
-          {pct === null && !job.progress_current ? "—" : label}
+          {pct === null && !job.progress_current ? "–" : label}
         </span>
       ),
     },
@@ -273,7 +295,7 @@ function DetailGrid({ job }: { job: LiveJob }) {
         <span className="tabular-nums">
           {rate && Number.isFinite(rate)
             ? `${Math.round(rate).toLocaleString()}/s · ETA ${formatDuration(eta)}`
-            : "—"}
+            : "–"}
         </span>
       ),
     },
@@ -283,16 +305,16 @@ function DetailGrid({ job }: { job: LiveJob }) {
     },
     {
       label: "Started",
-      value: <span>{job.started_at ? formatRelative(job.started_at) : "—"}</span>,
+      value: <span>{job.started_at ? formatRelative(job.started_at) : "–"}</span>,
     },
     {
       label: "Finished",
-      value: <span>{job.finished_at ? formatRelative(job.finished_at) : "—"}</span>,
+      value: <span>{job.finished_at ? formatRelative(job.finished_at) : "–"}</span>,
     },
     {
       label: "Parent",
       value: (
-        <span className="truncate font-mono text-xs">{job.parent_job_id ?? "—"}</span>
+        <span className="truncate font-mono text-xs">{job.parent_job_id ?? "–"}</span>
       ),
     },
   ];

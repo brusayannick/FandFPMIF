@@ -2,13 +2,13 @@
 #
 # Configure the "university" OIDC identity provider on a *running* Keycloak and
 # make logins skip Keycloak's own login form. Use this instead of editing the
-# realm-export JSON when Keycloak already has a populated DB — the JSON is only
+# realm-export JSON when Keycloak already has a populated DB – the JSON is only
 # imported on first boot (empty DB), so on a re-deploy it is ignored.
 #
-# What it does (all idempotent — safe to re-run):
+# What it does (all idempotent – safe to re-run):
 #   1. Creates/updates the `university` OIDC identity provider (trustEmail=on).
 #   2. Sets the browser flow's "Identity Provider Redirector" default provider
-#      to `university` — anyone hitting Keycloak directly is bounced to the IdP.
+#      to `university` – anyone hitting Keycloak directly is bounced to the IdP.
 #   3. Disables the "Review Profile" step in the "first broker login" flow so a
 #      new user is provisioned silently (no profile-confirmation page).
 #
@@ -33,20 +33,20 @@ set -euo pipefail
 KC_CONTAINER="${KC_CONTAINER:-mate-keycloak}"
 REALM="${REALM:-flows-funds}"
 # Alias MUST equal the segment in the registered broker redirect URI
-# (.../broker/keycloak-oidc/endpoint) — changing it would require re-registering
+# (.../broker/keycloak-oidc/endpoint) – changing it would require re-registering
 # the redirect URI with the university IT centre.
 IDP_ALIAS="${IDP_ALIAS:-keycloak-oidc}"
 IDP_DISPLAY="${IDP_DISPLAY:-University Login}"
 # Provider type. Use the GENERIC "oidc" ("OpenID Connect v1.0"), NOT
 # "keycloak-oidc": KeycloakOIDCIdentityProvider's constructor hardcodes
 # config.setAccessTokenJwt(true), so it parses the IdP's access token as a JWT
-# regardless of the isAccessTokenJWT config below — fatal for WWU, which issues
+# regardless of the isAccessTokenJWT config below – fatal for WWU, which issues
 # OPAQUE access tokens ("Failed to parse JWT header"). The generic oidc type
 # honours isAccessTokenJWT=false and reads identity from the userinfo endpoint.
-# The type is fixed at creation — Keycloak ignores it on update, so to switch an
+# The type is fixed at creation – Keycloak ignores it on update, so to switch an
 # existing IdP you must delete + recreate with the same alias.
 IDP_PROVIDER_ID="${IDP_PROVIDER_ID:-oidc}"
-# Internal admin endpoint. In prod Keycloak serves under /auth — set
+# Internal admin endpoint. In prod Keycloak serves under /auth – set
 # KC_SERVER=http://localhost:8080/auth then (KC_HTTP_RELATIVE_PATH=/auth).
 KC_SERVER="${KC_SERVER:-http://localhost:8080}"
 KC_ADMIN="${KEYCLOAK_ADMIN:-admin}"
@@ -55,7 +55,7 @@ KC_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
 # University OIDC client (required).
 UNIV_CLIENT_ID="${UNIV_CLIENT_ID:?set UNIV_CLIENT_ID (the OIDC client id the university issued you)}"
 UNIV_CLIENT_SECRET="${UNIV_CLIENT_SECRET:?set UNIV_CLIENT_SECRET}"
-# Endpoints — either set UNIV_DISCOVERY_URL (autofills) or these directly.
+# Endpoints – either set UNIV_DISCOVERY_URL (autofills) or these directly.
 UNIV_DISCOVERY_URL="${UNIV_DISCOVERY_URL:-}"
 UNIV_AUTH_URL="${UNIV_AUTH_URL:-}"
 UNIV_TOKEN_URL="${UNIV_TOKEN_URL:-}"
@@ -87,8 +87,8 @@ if [ -n "$UNIV_DISCOVERY_URL" ]; then
   UNIV_USERINFO_URL="${UNIV_USERINFO_URL:-$(printf '%s' "$disco" | jget userinfo_endpoint)}"
   UNIV_ISSUER="${UNIV_ISSUER:-$(printf '%s' "$disco" | jget issuer)}"
 fi
-: "${UNIV_AUTH_URL:?could not resolve authorization endpoint — set UNIV_AUTH_URL or UNIV_DISCOVERY_URL}"
-: "${UNIV_TOKEN_URL:?could not resolve token endpoint — set UNIV_TOKEN_URL or UNIV_DISCOVERY_URL}"
+: "${UNIV_AUTH_URL:?could not resolve authorization endpoint – set UNIV_AUTH_URL or UNIV_DISCOVERY_URL}"
+: "${UNIV_TOKEN_URL:?could not resolve token endpoint – set UNIV_TOKEN_URL or UNIV_DISCOVERY_URL}"
 
 # ── 1. Authenticate kcadm (stored in the container for subsequent calls) ─────
 echo "→ Authenticating kcadm against $KC_SERVER (realm master)"
@@ -165,7 +165,7 @@ for e in json.load(sys.stdin):
         print(e.get('authenticationConfig','')); break")"
 
 if [ -z "$redir_exec_id" ]; then
-  echo "  ! could not find the redirector execution in the browser flow — skipping." >&2
+  echo "  ! could not find the redirector execution in the browser flow – skipping." >&2
 elif [ -n "$redir_cfg_id" ]; then
   kc update "authentication/config/$redir_cfg_id" -r "$REALM" \
     -s "config.defaultProvider=$IDP_ALIAS"
@@ -189,7 +189,7 @@ if [ -n "$review_exec_id" ]; then
     -b "{\"id\":\"$review_exec_id\",\"requirement\":\"DISABLED\"}"
   echo "  Review Profile → DISABLED"
 else
-  echo "  ! 'Review Profile' execution not found — skipping." >&2
+  echo "  ! 'Review Profile' execution not found – skipping." >&2
 fi
 
 echo "✓ Done. Set KEYCLOAK_IDP_HINT=$IDP_ALIAS on the web service and restart it."

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, FileBox, Trash2 } from "lucide-react";
+import { ArrowLeft, FileBox, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { toastError } from "@/lib/toast";
@@ -14,10 +14,11 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Slider } from "@/components/ui/slider";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import {
+  ModuleConfigForm,
+  type ConfigSchema,
+} from "@/components/modules/module-config-form";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,6 +30,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { ApiError } from "@/lib/api";
 import { EmptyState } from "@/components/empty-state";
 import { PageContainer } from "@/components/page";
 import { ModuleLogsTail } from "@/components/settings/module-logs-tail";
@@ -54,21 +56,6 @@ import {
   type AiModelsManifest,
   type ModelStoreManifest,
 } from "@/lib/queries";
-
-interface PropSchema {
-  type?: string;
-  title?: string;
-  description?: string;
-  default?: unknown;
-  minimum?: number;
-  maximum?: number;
-  step?: number;
-  enum?: string[];
-  ui?: { widget?: string; group?: string };
-}
-interface ConfigSchema {
-  properties?: Record<string, PropSchema>;
-}
 
 interface AiConfigDraft {
   llm: AiModelSelection;
@@ -113,6 +100,10 @@ export default function ModuleDetailPage() {
   const uninstall = useUninstallModule();
   const update = useUpdateModuleConfig();
   const recreateIndex = useRecreateModuleIndex(moduleId);
+
+  // Admin-locked module config: every config surface (schema form, AI-model
+  // cards, enabled switch, Save) goes read-only and shows a banner.
+  const controlled = cfg?.controlled_by_admin ?? false;
 
   const schema = (manifest?.config_schema as ConfigSchema | undefined) ?? null;
   const properties = schema?.properties ?? {};
@@ -178,6 +169,7 @@ export default function ModuleDetailPage() {
   };
 
   const onToggleEnabled = async (val: boolean) => {
+    if (controlled) return;
     setEnabled(val);
     try {
       await update.mutateAsync({
@@ -186,13 +178,18 @@ export default function ModuleDetailPage() {
         enabled: val,
       });
       toast.success(val ? `${m?.name ?? moduleId} enabled` : `${m?.name ?? moduleId} disabled`);
-    } catch {
+    } catch (e) {
       setEnabled(!val);
-      toastError("Failed to update module");
+      toastError(
+        e instanceof ApiError && e.status === 403
+          ? "This module is controlled by your administrator."
+          : "Failed to update module",
+      );
     }
   };
 
   const onSaveConfig = async () => {
+    if (controlled) return;
     try {
       await update.mutateAsync({
         id: moduleId,
@@ -201,12 +198,17 @@ export default function ModuleDetailPage() {
       });
       toast.success("Configuration saved");
       if (selfHosted) setSavedApiKey(moduleAiDraft.api_key);
-    } catch {
-      toastError("Failed to save configuration");
+    } catch (e) {
+      toastError(
+        e instanceof ApiError && e.status === 403
+          ? "This module is controlled by your administrator."
+          : "Failed to save configuration",
+      );
     }
   };
 
   const onSelectModel = async (name: string) => {
+    if (controlled) return;
     const next = { ...draft, [modelConfigKey]: name };
     setDraft(next);
     await update.mutateAsync({
@@ -254,6 +256,16 @@ export default function ModuleDetailPage() {
         </Link>
       </Button>
 
+      {controlled && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            This module&apos;s configuration is controlled by your administrator
+            and is read-only. The shared settings below apply to your account.
+          </span>
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-4">
@@ -276,7 +288,7 @@ export default function ModuleDetailPage() {
                     id="module-enabled"
                     checked={enabled}
                     onCheckedChange={onToggleEnabled}
-                    disabled={update.isPending}
+                    disabled={update.isPending || controlled}
                   />
                 </>
               )}
@@ -285,8 +297,8 @@ export default function ModuleDetailPage() {
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           {m.description && <p className="text-muted-foreground">{m.description}</p>}
-          <Section label="Provides" items={m.provides.length ? m.provides : ["—"]} />
-          <Section label="Consumes" items={m.consumes.length ? m.consumes : ["—"]} />
+          <Section label="Provides" items={m.provides.length ? m.provides : ["–"]} />
+          <Section label="Consumes" items={m.consumes.length ? m.consumes : ["–"]} />
         </CardContent>
       </Card>
 
@@ -383,7 +395,7 @@ export default function ModuleDetailPage() {
               <Button
                 size="sm"
                 onClick={onSaveConfig}
-                disabled={update.isPending || cfgLoading}
+                disabled={update.isPending || cfgLoading || controlled}
                 className="cursor-pointer"
               >
                 Save AI models
@@ -418,23 +430,26 @@ export default function ModuleDetailPage() {
             ) : (
               <>
                 {hasSchema && (
-                  <ConfigForm
+                  <ModuleConfigForm
                     properties={properties}
                     values={draft}
                     onChange={(key, val) => setDraft((d) => ({ ...d, [key]: val }))}
+                    disabled={controlled}
                   />
                 )}
-                {hasSchema && <Separator />}
-                <div className="flex justify-end">
-                  <Button
-                    size="sm"
-                    onClick={onSaveConfig}
-                    disabled={update.isPending}
-                    className="cursor-pointer"
-                  >
-                    Save configuration
-                  </Button>
-                </div>
+                {hasSchema && !controlled && <Separator />}
+                {!controlled && (
+                  <div className="flex justify-end">
+                    <Button
+                      size="sm"
+                      onClick={onSaveConfig}
+                      disabled={update.isPending}
+                      className="cursor-pointer"
+                    >
+                      Save configuration
+                    </Button>
+                  </div>
+                )}
               </>
             )
           ) : (
@@ -497,115 +512,6 @@ export default function ModuleDetailPage() {
         </CardContent>
       </Card>
     </PageContainer>
-  );
-}
-
-function ConfigForm({
-  properties,
-  values,
-  onChange,
-}: {
-  properties: Record<string, PropSchema>;
-  values: Record<string, unknown>;
-  onChange: (key: string, value: unknown) => void;
-}) {
-  const groups = new Map<string, [string, PropSchema][]>();
-  for (const [key, prop] of Object.entries(properties)) {
-    const group = prop.ui?.group ?? "";
-    if (!groups.has(group)) groups.set(group, []);
-    groups.get(group)!.push([key, prop]);
-  }
-
-  return (
-    <div className="space-y-6">
-      {Array.from(groups.entries()).map(([group, fields]) => (
-        <div key={group} className="space-y-4">
-          {group && (
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {group}
-            </p>
-          )}
-          {fields.map(([key, prop]) => (
-            <ConfigField
-              key={key}
-              fieldKey={key}
-              prop={prop}
-              value={values[key] ?? prop.default ?? ""}
-              onChange={(v) => onChange(key, v)}
-            />
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ConfigField({
-  fieldKey,
-  prop,
-  value,
-  onChange,
-}: {
-  fieldKey: string;
-  prop: PropSchema;
-  value: unknown;
-  onChange: (v: unknown) => void;
-}) {
-  const widget = prop.ui?.widget;
-  const isSelect = widget === "select" || (prop.enum && prop.enum.length > 0);
-  const isSlider = widget === "slider" && prop.type === "number";
-
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={fieldKey} className="text-sm">
-        {prop.title ?? fieldKey}
-      </Label>
-      {prop.description && (
-        <p className="text-xs text-muted-foreground">{prop.description}</p>
-      )}
-
-      {isSelect && prop.enum ? (
-        <Select value={String(value)} onValueChange={(v) => onChange(v)}>
-          <SelectTrigger id={fieldKey} className="w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {prop.enum.map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {opt}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : isSlider ? (
-        <div className="flex max-w-xl items-center gap-3 pt-1">
-          <Slider
-            id={fieldKey}
-            min={prop.minimum ?? 0}
-            max={prop.maximum ?? 1}
-            step={prop.step ?? 0.01}
-            value={[Number(value)]}
-            onValueChange={([v]) => onChange(v)}
-            className="flex-1"
-          />
-          <span className="tabular-nums text-sm text-muted-foreground w-12 shrink-0">
-            {Number(value).toFixed(
-              (prop.step ?? 1) < 1
-                ? String(prop.step ?? 0.01).split(".")[1]?.length ?? 2
-                : 0,
-            )}
-          </span>
-        </div>
-      ) : (
-        <Input
-          id={fieldKey}
-          value={String(value)}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={String(prop.default ?? "")}
-          className="max-w-lg font-mono text-xs"
-        />
-      )}
-    </div>
   );
 }
 

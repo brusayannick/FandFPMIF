@@ -11,7 +11,7 @@ interface UiState {
   confidentialOnly: boolean;
   notificationsMuted: boolean;
   mateOpen: boolean;
-  // Locale + import defaults — used by Settings → General and pre-filled
+  // Locale + import defaults – used by Settings → General and pre-filled
   // into the CSV import form so users don't re-pick them every upload
   // (§7.6.1).
   timezone: string;

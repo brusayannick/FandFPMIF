@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "@/components/status-badge";
-import { JobChildRow } from "@/components/jobs/job-child-row";
+import { JobChildRow, PrecomputeStepRow } from "@/components/jobs/job-child-row";
 import { parseJobTitle, type JobGroup } from "@/lib/stores/jobs";
 import { cn } from "@/lib/cn";
 
@@ -23,8 +23,9 @@ interface JobGroupCardProps {
  * nested condensed *inside* the card instead of floating as flat rows below it.
  */
 export function JobGroupCard({ group, expanded, onToggle }: JobGroupCardProps) {
-  const { parent, children, done, total } = group;
+  const { parent, children, steps, done, total } = group;
   const pct = total > 0 ? Math.min(100, Math.floor((done / total) * 100)) : 0;
+  const hasRows = steps ? steps.length > 0 : children.length > 0;
   const { name: cleanTitle, badge } = parseJobTitle(parent);
   const status = group.active ? "running" : parent.status;
 
@@ -70,11 +71,22 @@ export function JobGroupCard({ group, expanded, onToggle }: JobGroupCardProps) {
         </div>
       </button>
 
-      {expanded && children.length > 0 && (
+      {expanded && hasRows && (
         <div className="border-t border-border bg-muted/20 px-1 py-1">
-          {children.map((child) => (
-            <JobChildRow key={child.id} job={child} />
-          ))}
+          {steps
+            ? steps.map((step) =>
+                step.job ? (
+                  <JobChildRow key={step.job.id} job={step.job} />
+                ) : (
+                  <PrecomputeStepRow
+                    key={step.moduleId}
+                    moduleId={step.moduleId}
+                    state={step.state as "waiting" | "skipped"}
+                    waitingOn={step.waitingOn}
+                  />
+                ),
+              )
+            : children.map((child) => <JobChildRow key={child.id} job={child} />)}
         </div>
       )}
     </Card>

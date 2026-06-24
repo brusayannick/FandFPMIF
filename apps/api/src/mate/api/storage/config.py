@@ -8,7 +8,7 @@ the per-operation sync hooks (:mod:`mate.api.storage.sync`) can cheaply ask
 
 Reads use a short-lived raw ``sqlite3`` connection (the row is a tiny singleton
 and SQLite WAL handles concurrent readers) so the cache can be warmed from any
-thread — including the DuckDB/ingest worker threads that hold no async session.
+thread - including the DuckDB/ingest worker threads that hold no async session.
 Writes go through the async ORM in ``routes/admin_storage.py``, which calls
 :func:`invalidate` afterwards.
 """
@@ -40,7 +40,7 @@ class StorageSettings:
     bucket: str | None = None
     region: str | None = None
     access_key: str | None = None
-    # Decrypted plaintext — kept in-process only, never serialised back out.
+    # Decrypted plaintext - kept in-process only, never serialised back out.
     secret_key: str | None = None
     path_style: bool = True
     use_ssl: bool = True
@@ -60,7 +60,7 @@ _lock = threading.Lock()
 def _fernet() -> Fernet:
     settings = get_settings()
     # Falls back to the DB URL so local dev works with no extra env; prod MUST
-    # set STORAGE_ENCRYPTION_KEY (and keep it stable — see config/.env.example).
+    # set STORAGE_ENCRYPTION_KEY (and keep it stable - see config/.env.example).
     secret = settings.storage_encryption_key or settings.database_url
     key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
     return Fernet(key)
@@ -76,7 +76,7 @@ def decrypt_secret(enc: str | None) -> str | None:
     try:
         return _fernet().decrypt(enc.encode()).decode()
     except (InvalidToken, ValueError):
-        # Wrong/rotated STORAGE_ENCRYPTION_KEY — admin must re-enter the secret.
+        # Wrong/rotated STORAGE_ENCRYPTION_KEY - admin must re-enter the secret.
         log.warning("storage_secret_decrypt_failed")
         return None
 

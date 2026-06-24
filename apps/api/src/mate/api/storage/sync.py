@@ -25,7 +25,7 @@ from mate.api.storage.config import get_storage_settings, is_s3
 
 log = structlog.get_logger(__name__)
 
-# Dirs already hydrated (or confirmed locally present) in this process — bounds
+# Dirs already hydrated (or confirmed locally present) in this process - bounds
 # the S3 list/download attempts to once per dir so repeated reads of a warm
 # cache don't hit the network. Only populated on a *successful* hydrate or a
 # confirmed-non-empty local dir, so a failure is retried on the next read.
@@ -65,7 +65,7 @@ def hydrate_dir_sync(local_dir: Path) -> None:
     with _hydrated_lock:
         if marker in _hydrated:
             return
-    # Local cache already warm — nothing to fetch.
+    # Local cache already warm - nothing to fetch.
     if local_dir.exists() and any(local_dir.iterdir()):
         with _hydrated_lock:
             _hydrated.add(marker)

@@ -2,7 +2,7 @@
 
 Two flavours of XML show up under the `.xml` extension:
 
-1. *Generic* XML — a single repeating event element with a flat bag of
+1. *Generic* XML - a single repeating event element with a flat bag of
    attributes / leaf-text children::
 
        <log>
@@ -14,13 +14,13 @@ Two flavours of XML show up under the `.xml` extension:
          </event>
        </log>
 
-2. *XES dressed as XML* — IEEE-1849 with typed-attribute children
+2. *XES dressed as XML* - IEEE-1849 with typed-attribute children
    (``<string key="…" value="…"/>``, ``<date …/>``, etc.) inside ``<trace>``
    and ``<event>`` wrappers, often with the XES namespace.
 
 This module probes the file (`probe_xml`) and parses it (`parse_xml`). When
 the content is XES-shaped we delegate to the dedicated XES parser instead of
-trying to fit it into the generic flat-event model — the typed-attribute
+trying to fit it into the generic flat-event model - the typed-attribute
 children would otherwise out-vote the real event rows in our sibling-cardinality
 heuristic, and case-level fields (the trace's ``concept:name``) wouldn't fan
 out onto the per-event rows. Sniffing happens early via `is_xes_like`.
@@ -66,13 +66,13 @@ def is_xes_like(path: Path, *, scan_limit: int = 20000) -> bool:
     * The root element carries an ``xes.*`` or ``openxes.*`` attribute (the
       OpenXES library emits these instead of a namespace declaration).
     * We see an ``<extension>`` element whose ``uri`` points at
-      ``xes-standard.org`` — XES files declare these in the log header.
+      ``xes-standard.org`` - XES files declare these in the log header.
     * We see a XES typed-attribute leaf (``<string key="…" value="…"/>`` etc.)
-      anywhere — including directly under ``<log>``, which is how XES carries
+      anywhere - including directly under ``<log>``, which is how XES carries
       log-level metadata.
 
     We scan up to ``scan_limit`` parse events and never bail to ``False`` on
-    a single sparse ``<trace>``/``<event>`` — an empty trace appearing before
+    a single sparse ``<trace>``/``<event>`` - an empty trace appearing before
     populated ones used to misclassify the whole file.
     """
     try:
@@ -111,7 +111,7 @@ def _event_fields(elem: etree._Element) -> dict[str, str]:
     Attributes contribute as ``field=attr-localname``; direct *leaf* child
     elements (i.e. children without their own element children) contribute as
     ``field=child-localname`` with the child's text content as the value. On a
-    name collision the child element wins — it's almost always the more
+    name collision the child element wins - it's almost always the more
     deliberate authoring choice.
     """
     out: dict[str, str] = {}
@@ -137,7 +137,7 @@ def _pick_event_element(root: etree._Element) -> str | None:
     """Choose the most likely event element by sibling cardinality.
 
     We count every element except the document root and pick whichever
-    local-name has the largest population — almost always the repeating
+    local-name has the largest population - almost always the repeating
     event row. Returns ``None`` if the document has no descendants.
     """
     counts: Counter[str] = Counter()
@@ -176,7 +176,7 @@ def probe_xml(
     ```
 
     ``coverage`` is the fraction of sampled events that contained the field.
-    ``samples`` is a deduped, capped slice of values for the field — purely
+    ``samples`` is a deduped, capped slice of values for the field - purely
     UI hints, not used by the parser. When ``format_hint`` is ``"xes"`` the
     frontend should skip the mapping wizard: the file will be parsed by the
     XES parser, which already knows its canonical schema.
@@ -296,7 +296,7 @@ def _parse_as_xes(
 
     The XES parser already understands typed-attribute children, the trace/event
     hierarchy, and the canonical XES keys (`concept:name`, `time:timestamp`,
-    `org:resource`, …) — so the result is what the user actually wants. The
+    `org:resource`, …) - so the result is what the user actually wants. The
     mapping we return is purely informational so the import job's `meta.json`
     is round-trippable.
     """
@@ -313,7 +313,7 @@ def _parse_as_xes(
         "canonical_columns": sorted(set(xes_detected.get("canonical_columns") or [])),
     }
     # Document the XES-derived field assignment in mapping form. case_id and
-    # activity share the same XES key (`concept:name`) — one is taken from the
+    # activity share the same XES key (`concept:name`) - one is taken from the
     # trace level, the other from the event level. We record the event-level
     # key for `activity` and a marker for case_id.
     informational = XmlColumnMapping(
@@ -340,7 +340,7 @@ def parse_xml(
     case_id / activity / timestamp on its own. XES-shaped XML bypasses the
     generic path entirely.
     """
-    # If the user supplied a mapping explicitly, honour it — they're treating
+    # If the user supplied a mapping explicitly, honour it - they're treating
     # the file as generic XML on purpose. Otherwise sniff for XES first; that's
     # the only way to handle the common "XES file with .xml extension" case
     # without having the typed-attribute children out-vote real events.
@@ -353,7 +353,7 @@ def parse_xml(
         effective = autodetect_mapping(probe)
         if effective is None:
             # Best-effort: parse with just the probed event element and leave the
-            # role columns raw — the central resolver in `dispatch` maps them and
+            # role columns raw - the central resolver in `dispatch` maps them and
             # flags the log for manual review. Empty role names never match a real
             # field, so nothing is renamed here.
             element = probe.get("event_element")
@@ -387,7 +387,7 @@ def parse_xml(
     # iterparse + clear-as-we-go keeps memory flat on large logs. We can't
     # constrain by tag the way the XES parser does because the target tag can
     # live anywhere in the tree and may carry a namespace we don't know up
-    # front — so we filter on local-name per event.
+    # front - so we filter on local-name per event.
     context = etree.iterparse(str(path), events=("end",))
     for _evt, elem in context:
         if not isinstance(elem, etree._Element):

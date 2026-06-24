@@ -17,7 +17,7 @@ export interface ActivityNodeData extends Record<string, unknown> {
   startCount?: number;
   /** Number of cases that end at this activity. */
   endCount?: number;
-  /** 0..1 — used by the performance DFG to tint the node by frequency. */
+  /** 0..1 – used by the performance DFG to tint the node by frequency. */
   intensity?: number;
   /** Sub-line under the label, e.g. "12 min" for performance edges' source nodes. */
   metric?: string;

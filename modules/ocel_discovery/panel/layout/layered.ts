@@ -49,7 +49,7 @@ const DIRECTION_HANDLES: Record<NonNullable<LayeredOptions["direction"]>, { sour
  * with proper port placement, channelled edge routing, and Brandes-Köpf
  * crossing minimisation.
  *
- * Returns a Promise — ELK runs in a Web Worker on browsers that support it
+ * Returns a Promise – ELK runs in a Web Worker on browsers that support it
  * and falls back to the main thread otherwise. Either way the call is
  * non-blocking from the caller's point of view.
  */
@@ -63,14 +63,14 @@ export async function elkLayout<TNodeData extends Record<string, unknown>, TEdge
 
   const celonisOpts: ElkOptions = opts.celonisLike
     ? {
-        // Network-simplex layering minimises edge length — what Celonis does.
+        // Network-simplex layering minimises edge length – what Celonis does.
         "elk.layered.layering.strategy": "NETWORK_SIMPLEX",
         // LEFTUP alignment: stricter than BALANCED (which averages four
         // candidate alignments and produces visible staircases).
         "elk.layered.nodePlacement.bk.fixedAlignment": "LEFTUP",
         // Pull weakly-connected components close together (no big gaps).
         "elk.layered.compaction.connectedComponents": "true",
-        // Push port routing into proper channels — fewer overlapping edges.
+        // Push port routing into proper channels – fewer overlapping edges.
         "elk.layered.spacing.edgeNodeBetweenLayers": "20",
         "elk.layered.spacing.edgeEdgeBetweenLayers": "12",
         "elk.spacing.edgeNode": "16",
@@ -145,7 +145,7 @@ export async function elkLayout<TNodeData extends Record<string, unknown>, TEdge
   }
 
   // Capture ELK's edge sections so a custom xyflow edge component can render
-  // through the bend points — that's how spline routing actually looks
+  // through the bend points – that's how spline routing actually looks
   // Celonis-clean (xyflow's built-in bezier ignores ELK's intended path).
   const sectionsByEdge = new Map<string, { x: number; y: number }[]>();
   for (const re of result.edges ?? []) {

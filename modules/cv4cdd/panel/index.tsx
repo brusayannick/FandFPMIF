@@ -85,7 +85,7 @@ export function Cv4cddPanel({ logId }: { logId: string; moduleId: string }) {
         <EmptyState
           icon={Sparkles}
           title="No drifts detected yet"
-          description="A fine-tuned computer-vision model scans a similarity-matrix encoding of the log for sudden, gradual, incremental, and recurring concept drifts. Detection runs automatically as a background job — the module tile greys out on the process page while it's in flight."
+          description="A fine-tuned computer-vision model scans a similarity-matrix encoding of the log for sudden, gradual, incremental, and recurring concept drifts. Detection runs automatically as a background job – the module tile greys out on the process page while it's in flight."
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.2fr]">
@@ -105,7 +105,7 @@ export function Cv4cddPanel({ logId }: { logId: string; moduleId: string }) {
 
 function ImageCard({ logId, nonce }: { logId: string; nonce: number }) {
   // The /image route is auth-gated (it serves per-user cached PNG bytes), so a
-  // plain <img src> can't reach it — the browser won't attach the bearer token
+  // plain <img src> can't reach it – the browser won't attach the bearer token
   // and the request 401s. Fetch it through rawFetch (which adds the token) and
   // render the bytes via a blob URL instead.
   const [src, setSrc] = useState<string | null>(null);
@@ -147,7 +147,7 @@ function ImageCard({ logId, nonce }: { logId: string; nonce: number }) {
       <CardContent className="space-y-3">
         <p className="text-[11px] text-muted-foreground">
           Pairwise window-similarity matrix (viridis). Detected drifts are
-          shown as coloured bounding boxes — the x-axis is time.
+          shown as coloured bounding boxes – the x-axis is time.
         </p>
         <div
           className="relative w-[70%] overflow-hidden rounded-md border bg-muted/30"
@@ -283,7 +283,7 @@ function DriftsCard({
 // ── Utils ─────────────────────────────────────────────────────────────────────
 
 function fmtTs(iso: string): string {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString(undefined, {

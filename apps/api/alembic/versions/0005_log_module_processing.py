@@ -1,4 +1,4 @@
-"""log module-processing lifecycle — process_logs.processing_import_job_id + expected_modules
+"""log module-processing lifecycle - process_logs.processing_import_job_id + expected_modules
 
 Revision ID: 0005_log_module_processing
 Revises: 0004_analytics_export_indexes
@@ -8,9 +8,9 @@ Adds the two columns that back the new ``processing`` log state: a freshly
 imported log is held disabled until every subscribing module finishes
 precomputing against it.
 
-  - ``processing_import_job_id`` — the import job whose child jobs are the
+  - ``processing_import_job_id`` - the import job whose child jobs are the
     module precompute runs to wait on (lets completion survive an API restart).
-  - ``expected_modules`` — the module-id set, frozen at import time, that must
+  - ``expected_modules`` - the module-id set, frozen at import time, that must
     all reach a terminal job before the log flips to ``ready``.
 
 Both nullable, no backfill (existing rows are already ``ready``/``failed``).

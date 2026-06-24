@@ -5,7 +5,7 @@ import type { StoreApi } from "zustand";
 
 import { getPreference, putPreference } from "@/lib/preferences";
 
-/** The serialisable data slice of a store — its action functions stripped. */
+/** The serialisable data slice of a store – its action functions stripped. */
 export function pickData<T extends object>(state: T): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(state as Record<string, unknown>).filter(
@@ -122,14 +122,14 @@ export function useServerPersistedStore<T extends object>({
       // account on this browser resets to defaults rather than inheriting the
       // previous account's in-memory state.
       apply(blob);
-      // Record the post-hydration snapshot so the first change — not the
-      // hydration itself — is what triggers a save.
+      // Record the post-hydration snapshot so the first change – not the
+      // hydration itself – is what triggers a save.
       const snapshot = JSON.stringify(read());
       lastSaved.current = snapshot;
       hydrated.current = true;
       unsub = store.subscribe(() => save(false));
       if (migrated) {
-        // Persist the imported baseline now (worst case — a failed PUT — just
+        // Persist the imported baseline now (worst case – a failed PUT – just
         // degrades to starting from defaults, never worse than no migration).
         void putPreference(key, JSON.parse(snapshot) as Record<string, unknown>, false);
       }

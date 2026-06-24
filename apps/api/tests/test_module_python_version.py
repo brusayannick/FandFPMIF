@@ -1,7 +1,7 @@
 """Per-module Python-version handling (installer pinning + validation) and the
 subprocess job/event metadata round-trip.
 
-These are pure unit tests — they mock `installer._run` so no real `uv` runs, and
+These are pure unit tests - they mock `installer._run` so no real `uv` runs, and
 exercise `SubprocessModule._install_stubs` directly so no worker is spawned. The
 end-to-end subprocess path (real venv + worker + DataFrame materialise) is left
 to a manual/Docker smoke test since it needs uv and a real event log.

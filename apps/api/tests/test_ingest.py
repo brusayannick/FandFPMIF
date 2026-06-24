@@ -22,7 +22,7 @@ async def _wait_until_ready(client: AsyncClient, log_id: str, timeout: float = 5
         if last["status"] == "failed":
             raise AssertionError(f"Import failed: {last.get('error')}")
         await asyncio.sleep(0.05)
-    raise AssertionError(f"Import did not finish in {timeout}s — last state: {last}")
+    raise AssertionError(f"Import did not finish in {timeout}s - last state: {last}")
 
 
 @pytest.mark.asyncio
@@ -74,7 +74,7 @@ async def test_csv_round_trip(client: AsyncClient) -> None:
     assert detail["source_format"] == "csv"
     assert detail["events_count"] == 9
     # The default test client loads no modules, so nothing subscribes to
-    # `log.imported` — the import must skip the `processing` gate and resolve
+    # `log.imported` - the import must skip the `processing` gate and resolve
     # straight to `ready`. (See test_module_processing.py for the
     # subscriber-installed → `processing` path.)
     assert detail["status"] == "ready"
@@ -123,7 +123,7 @@ async def test_xml_probe_endpoint(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_xml_with_xes_payload_delegates_to_xes_parser(client: AsyncClient) -> None:
     """A .xml file whose contents are XES should parse via the XES parser
-    instead of the generic flat-event model — otherwise the typed-attribute
+    instead of the generic flat-event model - otherwise the typed-attribute
     children (<string>/<int>/<date>) out-vote the real <event> rows and the
     detected schema comes out garbage.
     """
@@ -137,7 +137,7 @@ async def test_xml_with_xes_payload_delegates_to_xes_parser(client: AsyncClient)
     assert resp.status_code == 202, resp.text
     log_id = resp.json()["log_id"]
     detail = await _wait_until_ready(client, log_id)
-    # Same numbers as the equivalent .xes fixture — 9 events / 3 cases.
+    # Same numbers as the equivalent .xes fixture - 9 events / 3 cases.
     assert detail["events_count"] == 9
     assert detail["cases_count"] == 3
     schema = detail.get("detected_schema") or {}
@@ -163,7 +163,7 @@ async def test_xml_probe_recognises_xes(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_xml_round_trip_with_explicit_mapping(client: AsyncClient) -> None:
-    # Same fixture but supply an explicit mapping — exercises the wizard path.
+    # Same fixture but supply an explicit mapping - exercises the wizard path.
     mapping = {
         "event_element": "event",
         "case_id": "case_id",

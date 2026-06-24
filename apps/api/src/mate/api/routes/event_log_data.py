@@ -70,7 +70,7 @@ async def _require_ready(log_id: str, session: SessionDep, user_id: str) -> Even
             status_code=409,
             detail=f"Event log is {row.status!r}; data endpoints require status=ready.",
         )
-    # Object-centric (OCEL) logs have no case_id / variants / activities — they
+    # Object-centric (OCEL) logs have no case_id / variants / activities - they
     # are served exclusively by the /ocel/* endpoints. Every case-centric data
     # endpoint funnels through here, so this one guard isolates them all.
     if row.log_model == "object_centric":
@@ -120,7 +120,7 @@ def _build_where(
 ) -> tuple[str, list[Any]]:
     """Build a parameterised SQL `WHERE` clause for the events view.
 
-    All identifiers are column names from the parquet schema — checked
+    All identifiers are column names from the parquet schema - checked
     against `column_names` before being interpolated. Values always go
     through `?` parameter binding.
     """
@@ -256,7 +256,7 @@ async def list_column_values(
     q: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = _COLUMN_VALUES_LIMIT,
 ) -> ColumnValuesPage:
-    """Distinct values + counts for one column — backs the filter checklist.
+    """Distinct values + counts for one column - backs the filter checklist.
 
     Always reads the *raw* dataset (ignores any applied filter) so the user can
     pick from every value, not just the ones currently surviving the filter.
@@ -314,7 +314,7 @@ async def get_time_bounds(
     session: SessionDep,
     user: CurrentUserDep,
 ) -> TimeBounds:
-    """Earliest/latest timestamp in the log — seeds the dashboard time-range
+    """Earliest/latest timestamp in the log - seeds the dashboard time-range
     slider. Reads the *raw* dataset (ignores any applied filter) so the slider
     spans the full window. The canonical ``timestamp`` column is preferred;
     if it's absent or non-temporal the bounds come back ``null``.
@@ -348,7 +348,7 @@ async def put_active_filter(
     Persists it on the log, then re-publishes ``log.imported`` so every
     installed module re-runs its import/processing against the now-filtered
     data (modules subscribe to that topic). An empty ``filter`` clears the
-    overlay — back to the full dataset — and likewise re-runs modules.
+    overlay - back to the full dataset - and likewise re-runs modules.
     """
     log_row = await _require_ready(log_id, session, user.id)
 
@@ -362,7 +362,7 @@ async def put_active_filter(
     await session.commit()
 
     # Re-publish the import-completed signal so modules reprocess the filtered
-    # dataset — mirrors the payload the import pipeline emits (ingest/dispatch.py)
+    # dataset - mirrors the payload the import pipeline emits (ingest/dispatch.py)
     # plus a `reapplied` marker so handlers can distinguish a refilter from a
     # first import if they care.
     retriggered = False
@@ -705,7 +705,7 @@ async def list_variant_cases(
     await _require_ready(log_id, session, user.id)
     async with EventLogAccess(log_id, user.id) as access:
         # Rebuild the variant's activity sequence on the fly so we can match cases.
-        # The variant_id alone isn't enough since it's a hash — but we have the
+        # The variant_id alone isn't enough since it's a hash - but we have the
         # cases.parquet which already stores variant_id per case (computed at
         # import / on every edit), so we join through that.
         if not access._paths.cases.exists():  # type: ignore[attr-defined]

@@ -1,7 +1,7 @@
-"""/api/v1/modules — list manifests, per-log availability, get/put config.
+"""/api/v1/modules - list manifests, per-log availability, get/put config.
 
 Module-defined routes are mounted by the loader (phase 5) directly onto the
-app under ``/api/v1/modules/{id}/...`` — they do **not** go through this
+app under ``/api/v1/modules/{id}/...`` - they do **not** go through this
 router; this router covers the platform's own module-meta surface.
 """
 
@@ -37,6 +37,7 @@ from mate.api.modules.installs import (
     user_module_ids,
     user_owns_module,
 )
+from mate.api.policy import SCOPE_MODULE, resolve
 from mate.api.schemas.event_logs import LogModel
 
 # UserSetting key holding the per-user record of which default module ids have
@@ -68,14 +69,14 @@ async def _reconcile_default_modules(
 
     The set of already-offered default ids is recorded per user. On each visit
     we grant only the defaults that are new since last time, then extend the
-    record — so a newly bundled default shows up for existing users without a
+    record - so a newly bundled default shows up for existing users without a
     re-seed, while a default the user intentionally uninstalled is not brought
     back (its id is already in the recorded set).
 
     A legacy row stores a bare ``True`` (the old one-shot flag); we can't recover
     which ids it covered, so it is treated as "nothing recorded" and the full
     current default set is reconciled once. That can re-grant a default removed
-    *before* this upgrade, but only that once — afterwards the row is an id list
+    *before* this upgrade, but only that once - afterwards the row is an id list
     and removals stick.
     """
     row = await session.get(UserSetting, (user_id, _DEFAULTS_SEEDED_KEY))
@@ -112,6 +113,9 @@ class ModuleSummary(BaseModel):
 class ModuleConfigPayload(BaseModel):
     config: dict[str, Any] = {}
     enabled: bool = True
+    # Set by GET when an admin has locked this module's config for all users;
+    # the detail page then renders read-only. Ignored on PUT input.
+    controlled_by_admin: bool = False
 
 
 @router.get("", response_model=list[ModuleSummary])
@@ -180,7 +184,7 @@ class DashboardCard(BaseModel):
     """One placeable card the Dashboards palette can drop onto a board.
 
     Aggregated from every owned module's ``frontend.widgets`` so the palette
-    can render the full catalog without loading any bundle — the bundle itself
+    can render the full catalog without loading any bundle - the bundle itself
     is fetched lazily by ``useWidget(module_id, widget_id)`` when the card is
     actually mounted.
     """
@@ -193,6 +197,10 @@ class DashboardCard(BaseModel):
     icon: str | None = None
     default_w: int = 6
     default_h: int = 8
+    # Smallest size the card may be resized to on a dashboard (RGL cells). The
+    # canvas applies these as the grid item's `minW`/`minH`.
+    min_w: int = 2
+    min_h: int = 3
     # Per-card settings schema (same dialect as module `config_schema`). The
     # palette renders a settings form from this for each placed card in edit
     # mode. ``None`` ⇒ the card has no options beyond its title.
@@ -233,6 +241,8 @@ async def list_cards(session: SessionDep, user: CurrentUserDep) -> list[Dashboar
                     icon=w.icon,
                     default_w=w.default_w,
                     default_h=w.default_h,
+                    min_w=w.min_w,
+                    min_h=w.min_h,
                     config_schema=w.config_schema,
                     log_models=w.log_models,
                 )
@@ -279,6 +289,14 @@ async def get_config(
     module_id: str, session: SessionDep, user: CurrentUserDep
 ) -> ModuleConfigPayload:
     await _assert_owns_module(session, user.id, module_id)
+    # Admin-controlled? Return the shared config (module config is not secret)
+    # and flag it read-only - mirrors the AI-config control path.
+    admin_cfg, controlled = await resolve(session, SCOPE_MODULE, module_id, user.id)
+    if controlled:
+        loaded = get_module_loader().loaded.get(module_id)
+        default_enabled = loaded.manifest.default_enabled if loaded else True
+        cfg = admin_cfg if isinstance(admin_cfg, dict) else {}
+        return ModuleConfigPayload(config=cfg, enabled=default_enabled, controlled_by_admin=True)
     row = await session.get(ModuleConfig, (user.id, module_id))
     if row is None:
         # No saved config → fall back to the manifest's default_enabled, the
@@ -299,6 +317,12 @@ async def put_config(
     user: CurrentUserDep,
 ) -> ModuleConfigPayload:
     await _assert_owns_module(session, user.id, module_id)
+    _, controlled = await resolve(session, SCOPE_MODULE, module_id, user.id)
+    if controlled:
+        raise HTTPException(
+            status_code=403,
+            detail="This module's configuration is controlled by your administrator.",
+        )
     row = await session.get(ModuleConfig, (user.id, module_id))
     if row is None:
         row = ModuleConfig(
@@ -381,7 +405,7 @@ async def install_from_upload(
 )
 async def install_from_git(payload: GitInstallPayload, user: CurrentUserDep) -> InstallJobResponse:
     runtime = get_job_runtime()
-    title = f"Install module — {payload.url.rsplit('/', 1)[-1]}"
+    title = f"Install module - {payload.url.rsplit('/', 1)[-1]}"
     if payload.ref:
         title += f" ({payload.ref})"
     job_id = await runtime.submit(
@@ -403,7 +427,7 @@ async def install_from_registry(
     payload: RegistryInstallPayload, user: CurrentUserDep
 ) -> InstallJobResponse:
     runtime = get_job_runtime()
-    title = f"Install module — {payload.source}:{payload.id}"
+    title = f"Install module - {payload.source}:{payload.id}"
     if payload.version:
         title += f"@{payload.version}"
     job_id = await runtime.submit(
@@ -476,7 +500,7 @@ async def get_module_asset(module_id: str, asset_path: str, user: CurrentUserDep
     if loaded is None:
         raise HTTPException(status_code=404, detail="Module not found.")
     dist_root = (loaded.discovered.folder / ".dist").resolve()
-    # Reject path traversal — resolve() collapses `..` so the prefix check is
+    # Reject path traversal - resolve() collapses `..` so the prefix check is
     # what actually enforces containment.
     candidate = (dist_root / asset_path).resolve()
     try:
@@ -499,14 +523,14 @@ class RestoreDefaultsResponse(BaseModel):
 async def restore_defaults(session: SessionDep, user: CurrentUserDep) -> RestoreDefaultsResponse:
     """Re-add any default modules the user has removed (idempotent).
 
-    Only ever *adds* the shared defaults — never touches custom uploads.
+    Only ever *adds* the shared defaults - never touches custom uploads.
     Publishes ``module.installed`` per re-added id so other tabs refresh their
     listing.
     """
     loader = get_module_loader()
     # `default_module_ids` is computed from discovery (before install/import), so
     # a default that failed to install or import is in that set but absent from
-    # `loaded`. Restrict to actually-loaded modules — otherwise we'd write an
+    # `loaded`. Restrict to actually-loaded modules - otherwise we'd write an
     # install row and report "restored" for a module that never appears in the
     # listing (which only shows loaded manifests).
     default_ids = {mid for mid in loader.default_module_ids if mid in loader.loaded}
@@ -527,13 +551,13 @@ async def restore_defaults(session: SessionDep, user: CurrentUserDep) -> Restore
 async def uninstall(module_id: str, session: SessionDep, user: CurrentUserDep) -> None:
     # Per-user uninstall: drop this user's ownership record. The shared
     # on-disk artifact and in-process load are only torn down once the last
-    # owner removes it — other users keep using it untouched.
+    # owner removes it - other users keep using it untouched.
     await _assert_owns_module(session, user.id, module_id)
     loader = get_module_loader()
     await remove_install(session, user.id, module_id)
     await session.commit()
 
-    # Never tear down a default's shared repo code — only the user's install row
+    # Never tear down a default's shared repo code - only the user's install row
     # is removed above. Uploads live under uploaded_modules_dir and are removed
     # only once their last owner uninstalls. Entry-point/registry modules live
     # in neither root, so the existence check below leaves them alone.
@@ -544,6 +568,6 @@ async def uninstall(module_id: str, session: SessionDep, user: CurrentUserDep) -
             remove_module_artifacts(target)
             shutil.rmtree(target, ignore_errors=True)
 
-    # Scope the event to this user so the WS only notifies their sessions —
+    # Scope the event to this user so the WS only notifies their sessions -
     # other owners' module lists are unaffected.
     await loader.bus.publish("module.uninstalled", {"id": module_id, "user_id": user.id})

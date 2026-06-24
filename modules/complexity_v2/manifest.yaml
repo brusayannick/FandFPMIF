@@ -3,16 +3,14 @@ name: Complexity v2
 version: 1.0.0
 category: advanced
 description: >-
-  The full event-log complexity suite from Langer's master thesis
-  "Understanding Business Process Complexity" — 28 metrics across Entropy,
-  Enriched Entropy, Size, Variation and Distance, including order/activity
-  variation, average edit distance and structural process variety
-  (Levenshtein + agglomerative clustering), plus the directly-follows
-  transition-probability matrix.
+  A complete complexity suite of 28 metrics spanning entropy, size, variation,
+  and trace distance (including edit distance and structural variety), plus the
+  directly-follows transition-probability matrix. Based on Langer's thesis on
+  business process complexity.
 author: E. Langer
 license: MIT
 default_enabled: true
-# Runs entirely locally — safe to use against confidential event logs.
+# Runs entirely locally – safe to use against confidential event logs.
 isConfidentialSafe: true
 
 requirements:
@@ -54,6 +52,8 @@ frontend:
       icon: Sigma
       default_w: 6
       default_h: 7
+      min_w: 5
+      min_h: 5
     - id: complexity-v2-categories
       entry: ./widgets/ComplexityCategories.tsx
       title: Complexity metrics by category
@@ -61,6 +61,8 @@ frontend:
       icon: Table
       default_w: 6
       default_h: 9
+      min_w: 5
+      min_h: 6
   page_layout:
     - section: Overview
       widgets: [complexity-v2-suite]

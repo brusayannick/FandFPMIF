@@ -16,13 +16,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mate.sdk.errors import ModuleManifestError
 
-ModuleCategory = Literal["foundation", "attribute", "external_input", "advanced", "other"]
+ModuleCategory = Literal[
+    "foundation", "attribute", "external_input", "advanced", "comparison", "other"
+]
 IsolationMode = Literal["in_process", "subprocess"]
 
 
 class EventLogRequirements(BaseModel):
     # Which log model this module operates on. The platform makes a module
-    # available only on logs of the matching model — case-centric and
+    # available only on logs of the matching model - case-centric and
     # object-centric (OCEL) modules never run against each other's logs.
     # Defaults to "case_centric" so every existing module stays case-centric.
     log_model: Literal["case_centric", "object_centric"] = "case_centric"
@@ -58,7 +60,7 @@ class DependenciesPython(BaseModel):
         for name in self.inherit:
             if name.lower() in pkg_names:
                 raise ModuleManifestError(
-                    f"`{name}` is in both dependencies.python.inherit and dependencies.python.packages — "
+                    f"`{name}` is in both dependencies.python.inherit and dependencies.python.packages - "
                     "pick one. Inherit reuses the platform's version; packages installs a private copy."
                 )
         return self
@@ -87,6 +89,13 @@ class WidgetEntry(BaseModel):
     icon: str | None = None
     default_w: int = 6
     default_h: int = 8
+    # Smallest size (react-grid-layout cells) the card may be resized to on a
+    # dashboard. The Dashboards canvas enforces these as the grid item's
+    # `minW`/`minH` so a card can never be shrunk below what it can render. The
+    # defaults match the canvas's historical floor; `default_w`/`default_h` are
+    # clamped up to these below so a freshly dropped card is never sub-minimum.
+    min_w: int = 2
+    min_h: int = 3
     # Optional per-card settings, declared in the same JSON-Schema-flavoured
     # dialect as a module's top-level `config_schema` (`{properties: {...}}`
     # with `type`/`title`/`enum`/`minimum`/`ui.widget` ...). The Dashboards
@@ -101,6 +110,14 @@ class WidgetEntry(BaseModel):
     log_models: list[Literal["case_centric", "object_centric"]] = Field(
         default_factory=lambda: ["case_centric"]
     )
+
+    @model_validator(mode="after")
+    def _clamp_defaults_to_min(self) -> Self:
+        # A card's initial drop size must never be below its own minimum, or RGL
+        # would immediately bounce it up and the placement would look wrong.
+        self.default_w = max(self.default_w, self.min_w)
+        self.default_h = max(self.default_h, self.min_h)
+        return self
 
 
 class PageLayoutSection(BaseModel):
@@ -161,14 +178,14 @@ class ModelStoreManifest(BaseModel):
     title: str = "Model files"
     description: str | None = None
     # Accepted upload extension(s), passed to the file picker's `accept` attr
-    # (e.g. ".tar.zst"). Cosmetic — server-side validation is the route's job.
+    # (e.g. ".tar.zst"). Cosmetic - server-side validation is the route's job.
     accept: str = ".tar.zst"
     # Where the selected model's folder name is stored in the module config.
     config_key: str = "model"
 
 
 class Manifest(BaseModel):
-    """The top-level manifest object — `manifest.yaml`."""
+    """The top-level manifest object - `manifest.yaml`."""
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -184,14 +201,14 @@ class Manifest(BaseModel):
     provides: list[str] = Field(default_factory=list)
     consumes: list[str] = Field(default_factory=list)
     # Free-form hints (verbs, synonyms, domain terms) that help MATE AI's intent
-    # classifier route a user's chat message to this module. Optional — when
+    # classifier route a user's chat message to this module. Optional - when
     # omitted the platform derives keywords from the name/description/provides.
     keywords: list[str] = Field(default_factory=list)
     dependencies: Dependencies = Field(default_factory=Dependencies)
     frontend: ManifestFrontend = Field(default_factory=ManifestFrontend)
     permissions: list[str] = Field(default_factory=list)
     default_enabled: bool = True
-    # Whether the module is safe to run against confidential data — i.e. it
+    # Whether the module is safe to run against confidential data - i.e. it
     # processes the event log entirely locally and never ships data to an
     # external service. When the user enables "Show only confidential modules"
     # in platform settings, modules with this set to `false` are hidden.
@@ -235,7 +252,7 @@ class Manifest(BaseModel):
             raise ModuleManifestError(f"Manifest validation failed for {path}: {exc}") from exc
 
     def dependencies_hash(self) -> str:
-        """Stable hash of the dependencies block — used to skip `uv sync` on
+        """Stable hash of the dependencies block - used to skip `uv sync` on
         unchanged boots (§5.4)."""
         import hashlib
         import json

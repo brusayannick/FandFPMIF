@@ -1,6 +1,6 @@
 """Serialise pm4py discovery outputs to plain JSON for the xyflow canvases.
 
-The frontend lays out via dagre / a recursive walker — the JSON contains no
+The frontend lays out via dagre / a recursive walker - the JSON contains no
 coordinates, only graph structure plus weights / labels.
 """
 
@@ -35,7 +35,7 @@ def serialize_dfg(
         }
         if durations is not None:
             dur = durations.get((src, tgt))
-            # Reject NaN — pandas mean over a single-event group returns NaN.
+            # Reject NaN - pandas mean over a single-event group returns NaN.
             if dur is not None and dur == dur:
                 edge["performance_seconds"] = float(dur)
         edges.append(edge)
@@ -51,7 +51,7 @@ def serialize_dfg(
 
     return {
         "kind": "dfg",
-        # Bumped when the shape gains a field — used by the route's cache
+        # Bumped when the shape gains a field - used by the route's cache
         # check to invalidate older snapshots automatically.
         "version": 3,
         "activities": activity_payload,
@@ -184,7 +184,7 @@ def serialize_bpmn(bpmn_graph: Any) -> dict[str, Any]:
 
     pm4py exposes write_bpmn() but not a bytes/stream API, so we round-trip
     through a NamedTemporaryFile. The XML it emits has no BPMNDI (diagram
-    interchange) section — coordinates are filled in client-side by
+    interchange) section - coordinates are filled in client-side by
     bpmn-auto-layout before bpmn-js renders.
     """
     import tempfile
@@ -195,7 +195,7 @@ def serialize_bpmn(bpmn_graph: Any) -> dict[str, Any]:
     with tempfile.NamedTemporaryFile(suffix=".bpmn", delete=False) as fh:
         tmp = Path(fh.name)
     try:
-        # auto_layout=True would invoke pm4py's graphviz-based layouter — a
+        # auto_layout=True would invoke pm4py's graphviz-based layouter - a
         # heavy dep we'd rather not require. bpmn-auto-layout on the client
         # fills in BPMNDI just before render.
         pm4py.write_bpmn(bpmn_graph, str(tmp), auto_layout=False)

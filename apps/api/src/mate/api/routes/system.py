@@ -1,4 +1,4 @@
-"""System-level diagnostics — disk usage, version, copy-diagnostics blob.
+"""System-level diagnostics - disk usage, version, copy-diagnostics blob.
 
 Backs the *Settings → General → Data & storage* gauge and the *Settings →
 About → Copy diagnostics* button (§7.6.1, §7.6.3).
@@ -27,6 +27,7 @@ from mate.api.jobs.runtime import (
     save_persisted_concurrency,
 )
 from mate.api.modules import get_module_loader
+from mate.api.system.metrics import SystemResourcesOut, get_resource_sampler
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/system", tags=["system"])
@@ -109,7 +110,7 @@ async def get_jobs_config(user: CurrentUserDep) -> JobsConfigOut:
 async def put_jobs_config(body: JobsConfigIn, user: AdminUserDep) -> JobsConfigOut:
     """Resize the worker pool live and persist the value (admin only).
 
-    The change takes effect immediately (graceful — running jobs are never
+    The change takes effect immediately (graceful - running jobs are never
     interrupted) and survives a restart via ``system_settings``.
     """
     applied = await get_job_runtime().set_concurrency(body.worker_concurrency)
@@ -154,3 +155,13 @@ async def diagnostics(user: CurrentUserDep) -> dict[str, Any]:
         },
         "modules": manifests,
     }
+
+
+@router.get("/resources", response_model=SystemResourcesOut)
+async def system_resources(user: AdminUserDep) -> SystemResourcesOut:
+    """Live host CPU/RAM + per-source breakdown for *Admin → System* (admin only).
+
+    Reads the in-memory snapshot maintained by the background sampler - no psutil
+    work happens in the request path.
+    """
+    return get_resource_sampler().snapshot()

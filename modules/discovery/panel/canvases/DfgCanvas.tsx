@@ -116,7 +116,7 @@ export function DfgCanvas({
             : 1 + Math.log10(1 + e.frequency);
 
       // Edge label modes: explicit (no silent fall-through to count when
-      // duration is selected but missing — show "—" so the user knows).
+      // duration is selected but missing – show "–" so the user knows).
       let label: string | undefined;
       if (dfg.edgeLabel === "off") {
         label = undefined;
@@ -124,7 +124,7 @@ export function DfgCanvas({
         label =
           typeof e.performance_seconds === "number"
             ? formatDuration(e.performance_seconds)
-            : "—";
+            : "–";
       } else {
         // count
         label = formatNumber(e.frequency);
@@ -159,7 +159,7 @@ export function DfgCanvas({
     // Within-layer tie-breaker. Prefer real temporal order (mean_trace_position
     // from the discovery serializer v3+): activities that occur earlier in
     // traces float to the top/left of their layer. Falls back to negative
-    // frequency for older cached payloads where the field is missing — both
+    // frequency for older cached payloads where the field is missing – both
     // are deterministic and meaningful, the temporal one is just truer.
     const positionByActivity = new Map<string, number>();
     const frequencyByActivity = new Map<string, number>();

@@ -2,7 +2,7 @@ id: precompute_mod
 name: Precompute Module
 version: 0.1.0
 category: foundation
-description: Test fixture — subscribes to log.imported with a @job so a freshly imported log enters the `processing` state until this finishes.
+description: Test fixture – subscribes to log.imported with a @job so a freshly imported log enters the `processing` state until this finishes.
 author: Tests
 license: MIT
 

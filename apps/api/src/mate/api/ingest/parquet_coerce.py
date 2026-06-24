@@ -1,13 +1,13 @@
 """Shared parquet-safe dtype coercion for ingested frames.
 
-Object-dtype columns can hold a messy mix of strings, Python floats, and NaN —
+Object-dtype columns can hold a messy mix of strings, Python floats, and NaN -
 e.g. an XES attribute like ``RequestedAmount`` that is a number in some events
 and a string ("EUR") in others, or an OCEL attribute that is absent for some
 objects. PyArrow then fails with "Expected bytes, got a 'float' object".
 
 Strategy per object column: if every non-null value parses as a number, use a
 numeric dtype; otherwise coerce everything to a clean string column with real
-nulls. Columns named in ``string_only`` are forced to string regardless — they
+nulls. Columns named in ``string_only`` are forced to string regardless - they
 are contractual identifiers (case_id / ocel:oid / …) and an all-digit value
 would otherwise get silently re-typed to int.
 """

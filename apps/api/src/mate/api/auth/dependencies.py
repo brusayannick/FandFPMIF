@@ -46,7 +46,7 @@ _UNAUTH = HTTPException(
 
 _seen_user_ids: set[str] = set()
 
-# Demo/dev login bypass — see Settings.demo_mode. The web app mints this exact
+# Demo/dev login bypass - see Settings.demo_mode. The web app mints this exact
 # sentinel as the session access token for the demo provider; when demo_mode is
 # on we accept it verbatim (no JWKS) and resolve the fixed demo user below. The
 # string is intentionally not a JWT so it can never collide with a real token.

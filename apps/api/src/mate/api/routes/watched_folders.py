@@ -251,7 +251,7 @@ async def scan_watched_folder(
     runtime: _RuntimeDep,
     user: CurrentUserDep,
 ) -> ScanResponse:
-    """Scan now — list the source and import any new/changed files immediately."""
+    """Scan now - list the source and import any new/changed files immediately."""
     row = await get_owned_watched_folder(session, watch_id, user.id)
     result = await scan_watch(row, session=session, runtime=runtime)
     return ScanResponse(

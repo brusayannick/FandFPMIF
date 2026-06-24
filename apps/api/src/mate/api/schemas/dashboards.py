@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mate.api.schemas.event_logs import LogModel
 
-# Canvas grid granularity — how finely cards snap and how much they're spaced.
+# Canvas grid granularity - how finely cards snap and how much they're spaced.
 # The pixel geometry per level lives in the web app (dashboard-queries.ts); the
 # backend only stores the chosen level.
 Granularity = Literal["free", "fine", "medium", "low"]
@@ -32,7 +32,7 @@ class FilterPreset(BaseModel):
     """A named, saved set of global column filters (a "saved filter"). The board can
     mark one as active (``CanvasSettings.active_preset_id``) so it applies on
     load in view mode. ``filters`` mirrors the web ``FilterEntry`` shape but is
-    kept as opaque dicts here — the same leniency the ephemeral filter header
+    kept as opaque dicts here - the same leniency the ephemeral filter header
     gets; ``EventLogAccess`` validates fields when it bakes the predicate."""
 
     id: str
@@ -71,7 +71,7 @@ class DashboardItem(BaseModel):
 
 
 class DashboardSummary(BaseModel):
-    """List-view row — no card payload, just enough for the grid of boards."""
+    """List-view row - no card payload, just enough for the grid of boards."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -94,7 +94,7 @@ class DashboardDetail(BaseModel):
     settings: CanvasSettings = Field(default_factory=CanvasSettings)
     created_at: datetime
     updated_at: datetime
-    # False when the board was opened via a share — the UI then renders it
+    # False when the board was opened via a share - the UI then renders it
     # read-only (no edit toolbar, no save). The owner-only mutation routes also
     # 404 for a non-owner, so this is defence-in-depth, not the only gate.
     is_owner: bool = True
@@ -104,7 +104,7 @@ class DashboardCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
     event_log_id: str | None = None
-    # The board's data model, fixed at creation — drives which cards the palette
+    # The board's data model, fixed at creation - drives which cards the palette
     # offers and which logs are bindable. Not editable afterwards.
     log_model: LogModel = "case_centric"
     items: list[DashboardItem] = Field(default_factory=list)
@@ -120,7 +120,7 @@ class DashboardCreate(BaseModel):
 
 
 class DashboardUpdate(BaseModel):
-    """Partial update — only fields present in the body are touched. `items`
+    """Partial update - only fields present in the body are touched. `items`
     and `event_log_id` are nullable+present-aware so a board can be cleared or
     unbound from its log explicitly."""
 

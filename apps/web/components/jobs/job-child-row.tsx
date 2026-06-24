@@ -1,8 +1,11 @@
 "use client";
 
-import { Check, Circle, Loader2, X } from "lucide-react";
+import { type MouseEvent } from "react";
+import { Check, Circle, Clock, Loader2, Minus, X } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { useCancelJob } from "@/lib/queries";
 import { parseJobTitle, type LiveJob } from "@/lib/stores/jobs";
 import { jobProgress } from "@/lib/job-progress";
 import { cn } from "@/lib/cn";
@@ -14,10 +17,13 @@ import { cn } from "@/lib/cn";
  * pulse, and shows a real bar once the child reports a fraction or total.
  */
 export function JobChildRow({ job }: { job: LiveJob }) {
+  const cancel = useCancelJob();
   const { name: cleanTitle } = parseJobTitle(job);
   const { pct, label } = jobProgress(job);
   const running = job.status === "running";
   const isError = job.status === "failed";
+  const isActive =
+    job.status === "running" || job.status === "queued" || job.status === "paused";
 
   return (
     <div className="flex items-start gap-2 rounded-md px-2 py-1.5 pl-[1.875rem]">
@@ -25,14 +31,37 @@ export function JobChildRow({ job }: { job: LiveJob }) {
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center justify-between gap-2">
           <div className="truncate text-xs font-medium leading-tight">{cleanTitle}</div>
-          <span
-            className={cn(
-              "shrink-0 text-[11px] tabular-nums",
-              isError ? "text-destructive" : "text-muted-foreground",
+          <div className="flex shrink-0 items-center gap-1">
+            <span
+              className={cn(
+                "text-[11px] tabular-nums",
+                isError ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {isError ? "Failed" : running ? label : statusLabel(job.status)}
+            </span>
+            {isActive && (
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label="Cancel"
+                className="h-5 w-5 cursor-pointer p-0"
+                // Child rows sit inside the group card's expand/collapse button,
+                // so swallow the click to avoid toggling the group.
+                onClick={(e: MouseEvent) => {
+                  e.stopPropagation();
+                  cancel.mutate(job.id);
+                }}
+                disabled={cancel.isPending}
+              >
+                {cancel.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <X className="h-3 w-3" />
+                )}
+              </Button>
             )}
-          >
-            {isError ? "Failed" : running ? label : statusLabel(job.status)}
-          </span>
+          </div>
         </div>
         {running && (
           <Progress
@@ -49,6 +78,56 @@ export function JobChildRow({ job }: { job: LiveJob }) {
             {job.message}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A checklist row for a precompute step that has *no* job yet: either `waiting`
+ * (its upstream hasn't finished, so the platform hasn't submitted it) or
+ * `skipped` (an upstream failed, so its `<upstream>.completed` trigger will never
+ * fire). Mirrors `JobChildRow`'s layout so the checklist stays aligned.
+ */
+export function PrecomputeStepRow({
+  moduleId,
+  state,
+  waitingOn,
+}: {
+  moduleId: string;
+  state: "waiting" | "skipped";
+  waitingOn: string[];
+}) {
+  const label =
+    state === "skipped"
+      ? "Skipped"
+      : waitingOn.length > 0
+        ? `Waiting on ${waitingOn.join(", ")}`
+        : "Waiting";
+
+  return (
+    <div className="flex items-start gap-2 rounded-md px-2 py-1.5 pl-[1.875rem]">
+      {state === "skipped" ? (
+        <Minus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+      ) : (
+        <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <div
+            className={cn(
+              "truncate text-xs font-medium leading-tight",
+              state === "skipped"
+                ? "text-muted-foreground line-through"
+                : "text-muted-foreground",
+            )}
+          >
+            {moduleId}
+          </div>
+          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+            {label}
+          </span>
+        </div>
       </div>
     </div>
   );

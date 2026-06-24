@@ -185,7 +185,7 @@ async def test_dashboard_log_model_locked_after_creation(client: AsyncClient) ->
     )
     dash_id = resp.json()["id"]
 
-    # PATCH ignores log_model — it isn't an editable field.
+    # PATCH ignores log_model - it isn't an editable field.
     resp = await client.patch(
         f"/api/v1/dashboards/{dash_id}",
         json={"name": "Locked still", "log_model": "object_centric"},

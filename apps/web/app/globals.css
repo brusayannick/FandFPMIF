@@ -5,7 +5,7 @@
 
 /*
  * Theme tokens. INSTRUCTIONS.md §7.1 calls for zero hardcoded colours in
- * components — every Tailwind utility that touches a colour resolves through
+ * components – every Tailwind utility that touches a colour resolves through
  * one of these CSS variables. Light + dark modes share the same names so the
  * `dark` class on <html> flips them transparently.
  *
@@ -209,7 +209,7 @@
   }
 }
 
-/* xyflow minimap — ensure node abstractions render even if the inline
+/* xyflow minimap – ensure node abstractions render even if the inline
    `nodeColor` prop is overridden / cleared by upstream changes. */
 .react-flow__minimap-node {
   fill: rgb(99, 102, 241);
@@ -229,7 +229,7 @@
   stroke: rgba(255, 255, 255, 0.3);
 }
 
-/* xyflow — make edges visibly hover/selectable. The library only sets
+/* xyflow – make edges visibly hover/selectable. The library only sets
    inline `style.stroke` so we override via CSS variables on the path. */
 .react-flow__edge-path {
   cursor: pointer;
@@ -269,7 +269,7 @@
   transition: none !important;
 }
 
-/* Free-mode drag (the canvas drives it, not RGL — see dashboard-canvas.tsx): the
+/* Free-mode drag (the canvas drives it, not RGL – see dashboard-canvas.tsx): the
    grabbed card must track the cursor with no easing, and sit above the cards
    reflowing around it. The others keep their transition, so they spring back. */
 .react-grid-item.rgl-free-dragging {
@@ -290,7 +290,7 @@
 .dashboard-canvas-bg {
   background-color: var(--background);
   background-image: radial-gradient(var(--border) 1px, transparent 1px);
-  /* A fixed, neutral dot texture — a workspace backdrop, not a snap guide. The
+  /* A fixed, neutral dot texture – a workspace backdrop, not a snap guide. The
      actual snap grid is driven by the board's granularity (column count + row
      height in react-grid-layout) and intentionally isn't reflected here. */
   background-size: 24px 24px;

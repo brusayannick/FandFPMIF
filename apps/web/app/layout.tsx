@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "@/app/globals.css";
-// bpmn-js + diagram-js-minimap CSS — loaded here (host app) rather than
+// bpmn-js + diagram-js-minimap CSS – loaded here (host app) rather than
 // inside the discovery module because the module bundler (esbuild) has no
 // loaders for .woff / .ttf / .eot / .svg font assets.
 import "bpmn-js/dist/assets/diagram-js.css";

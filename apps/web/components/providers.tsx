@@ -18,7 +18,7 @@ function makeQueryClient() {
         staleTime: 30_000,
         refetchOnWindowFocus: false,
         retry: (count, err: unknown) => {
-          // Don't retry on 4xx — they're our fault, not the network's.
+          // Don't retry on 4xx – they're our fault, not the network's.
           const status = (err as { status?: number } | null)?.status;
           if (status && status >= 400 && status < 500) return false;
           return count < 2;

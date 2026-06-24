@@ -43,7 +43,7 @@ interface DetectedSchema {
 /**
  * Lets the user point the three mandatory roles (and optional ones) at the
  * right source columns. Saving re-imports the log from its retained original
- * with the chosen mapping — see `POST /event-logs/{id}/remap`.
+ * with the chosen mapping – see `POST /event-logs/{id}/remap`.
  */
 export function ColumnRolesSection({ logId, log }: { logId: string; log: EventLogDetail }) {
   const remap = useRemapEventLog(logId);

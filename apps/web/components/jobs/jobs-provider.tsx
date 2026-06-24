@@ -35,7 +35,7 @@ export function JobsProvider() {
         if (!cancelled) setAll(rows);
       })
       .catch(() => {
-        /* the dock falls back to "no jobs yet" — non-fatal */
+        /* the dock falls back to "no jobs yet" – non-fatal */
       });
     return () => {
       cancelled = true;
@@ -65,7 +65,7 @@ export function JobsProvider() {
         }
 
         if (env.topic === "log.ready") {
-          // The log is now openable — it either had no subscribing modules
+          // The log is now openable – it either had no subscribing modules
           // (`processing` skipped) or every one finished precomputing. This is
           // the success signal, moved off the import job's `job.completed`
           // because that only marks the *parse* done, not module readiness.

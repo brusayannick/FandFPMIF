@@ -4,20 +4,20 @@
  * Live-update stream client (job lifecycle + log-import toasts/drawer).
  *
  * Transport is **Server-Sent Events over `fetch`**, despite the historical
- * `ws` filename — which is kept because `@/lib/ws` is a published module-SDK
+ * `ws` filename – which is kept because `@/lib/ws` is a published module-SDK
  * import alias (see `runtime-externals.json`). Production sits behind a proxy
  * chain (uni edge proxy → Caddy → api) that carries HTTP streaming
- * transparently but drops WS upgrades — the handshake reaches the API as a
- * plain GET and 404s — so the old WebSocket bus silently died in prod. SSE
+ * transparently but drops WS upgrades – the handshake reaches the API as a
+ * plain GET and 404s – so the old WebSocket bus silently died in prod. SSE
  * rides the same path Mate AI streaming already uses (`/api/v1/ai/chat`).
  *
  * `subscribeBus` opens `GET /api/v1/events?topic=…` (one per session) for
  * topic-filtered fan-out. `subscribeJob` opens `GET /api/v1/jobs/{id}/stream`
  * for high-frequency progress on a focused job.
  *
- * Auth is the standard `Authorization: Bearer` header (via `rawFetch`), so —
- * unlike the old WS client — the token no longer rides in the URL where it
- * leaked into the API access logs. HTTP `401` means "auth failed — sign back
+ * Auth is the standard `Authorization: Bearer` header (via `rawFetch`), so –
+ * unlike the old WS client – the token no longer rides in the URL where it
+ * leaked into the API access logs. HTTP `401` means "auth failed – sign back
  * in" rather than reconnecting in a loop. Both reconnect with exponential
  * backoff (capped at 8s) so a transient blip never breaks the pipeline.
  */
@@ -76,12 +76,12 @@ function subscribeSse<T>(
         signal: controller.signal,
       });
     } catch {
-      reconnect(); // network error before headers — retry
+      reconnect(); // network error before headers – retry
       return;
     }
 
     if (res.status === 401) {
-      // Auth failed — clear the session and bounce to /login rather than
+      // Auth failed – clear the session and bounce to /login rather than
       // reconnecting in a loop. We go through /login (not a hardcoded
       // signIn("keycloak")) so this works for every provider: in demo mode
       // /login auto-signs the demo user back in, and forcing Keycloak here
@@ -103,7 +103,7 @@ function subscribeSse<T>(
       reconnect();
       return;
     }
-    attempt = 0; // connected — reset backoff
+    attempt = 0; // connected – reset backoff
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -127,7 +127,7 @@ function subscribeSse<T>(
         }
       }
     } catch {
-      // Aborted (close) or a mid-stream blip — fall through to reconnect.
+      // Aborted (close) or a mid-stream blip – fall through to reconnect.
     }
     reconnect();
   };

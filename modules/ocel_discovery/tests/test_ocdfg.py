@@ -1,4 +1,4 @@
-"""OC-DFG serializer test — builds a small OCEL, discovers the OC-DFG with
+"""OC-DFG serializer test - builds a small OCEL, discovers the OC-DFG with
 pm4py, and asserts the flattened shape the widgets consume."""
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 
 Folders are hierarchical (arbitrary nesting) and live alongside event logs
 on the /processes overview. Reorder bulk-updates positions and parents for
-both folders and event logs in one shot — DnD on the client commits
+both folders and event logs in one shot - DnD on the client commits
 exactly once when the drag ends.
 """
 
@@ -227,7 +227,7 @@ async def reorder(payload: ReorderRequest, session: SessionDep, user: CurrentUse
     """Bulk-update parent + position for any mix of folders and logs.
 
     The frontend calls this exactly once at the end of a drag with the full
-    new ordering — that keeps the DB consistent even if the client has been
+    new ordering - that keeps the DB consistent even if the client has been
     showing optimistic state.
     """
     for item in payload.items:

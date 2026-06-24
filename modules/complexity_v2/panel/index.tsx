@@ -76,7 +76,7 @@ function Header({ data }: { data: ComplexityV2Payload }) {
         </h2>
         <p className="max-w-2xl text-xs text-muted-foreground">
           The full event-log complexity suite (Table 3.3) from Langer&rsquo;s thesis
-          <span className="italic"> Understanding Business Process Complexity</span> —
+          <span className="italic"> Understanding Business Process Complexity</span> –
           entropy, size, variation and distance measures.
         </p>
       </div>
@@ -261,5 +261,5 @@ function cellColor(p: number): string {
 }
 
 function fmtInt(n: number | null): string {
-  return n === null || n === undefined ? "—" : Math.round(n).toLocaleString();
+  return n === null || n === undefined ? "–" : Math.round(n).toLocaleString();
 }

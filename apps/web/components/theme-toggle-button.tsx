@@ -9,7 +9,7 @@ import { useMounted } from "@/lib/use-mounted";
 export function ThemeToggleButton({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
   // next-themes only resolves the theme on the client, so the server and the
-  // first client render must not depend on it — otherwise the icon/label differ
+  // first client render must not depend on it – otherwise the icon/label differ
   // and React throws a hydration mismatch. Render a stable default until mounted.
   const mounted = useMounted();
 

@@ -1,6 +1,6 @@
 /**
  * Privacy-signal detection. Returns true when the browser indicates the
- * user does NOT want to be tracked — we honour both legacy DNT and modern
+ * user does NOT want to be tracked – we honour both legacy DNT and modern
  * Global Privacy Control. When this returns true the provider forces the
  * store off regardless of opt-in state.
  */

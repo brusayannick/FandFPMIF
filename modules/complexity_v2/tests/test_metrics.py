@@ -1,7 +1,7 @@
 """Unit tests for the Complexity v2 metric suite.
 
 Exercises the pure functions in :mod:`modules.complexity_v2.metrics_core`
-against synthetic logs — no ``ModuleContext`` needed.
+against synthetic logs - no ``ModuleContext`` needed.
 """
 
 from __future__ import annotations

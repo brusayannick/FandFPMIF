@@ -18,6 +18,10 @@ interface JobLive extends JobDetail {
   // Frontend-only adornments
   rate_local?: number | null;
   eta_local?: number | null;
+  // Epoch ms of the last `job.started`/`job.progress` tick. Drives the stall
+  // hint - a running job that hasn't ticked in a while is likely wedged. Purely
+  // client-side (the server stores no last-progress timestamp).
+  last_progress_at?: number;
 }
 
 interface State {
@@ -116,6 +120,7 @@ export const useJobsStore = create<State>((set, get) => {
         id,
         status: "running",
         started_at: prev?.started_at ?? new Date().toISOString(),
+        last_progress_at: Date.now(),
       });
       tracker(id).reset();
     } else if (topic === "job.progress") {
@@ -137,6 +142,7 @@ export const useJobsStore = create<State>((set, get) => {
         eta_seconds: (payload.eta_seconds as number | null) ?? prev?.eta_seconds ?? null,
         rate_local: localRate,
         eta_local: localEta,
+        last_progress_at: Date.now(),
       });
     } else if (topic === "job.completed") {
       byId.set(id, {
@@ -160,8 +166,21 @@ export const useJobsStore = create<State>((set, get) => {
       byId.delete(id);
       trackers.delete(id);
     } else if (topic === "job.snapshot") {
-      // Per-job WS sends an initial snapshot — overwrite cleanly.
+      // Per-job WS sends an initial snapshot – overwrite cleanly.
       byId.set(id, payload as unknown as JobLive);
+    } else if (topic === "job.plan") {
+      // The import handler publishes the precompute DAG plan once it knows which
+      // modules will run, so the group card can show waiting/skipped steps for a
+      // *live* import before its children exist (the parent's payload in the
+      // store is otherwise empty until a full `GET /jobs` rehydrate).
+      if (!prev) return;
+      byId.set(id, {
+        ...prev,
+        payload_json: {
+          ...(prev.payload_json ?? {}),
+          precompute_plan: payload.precompute_plan,
+        },
+      });
     } else {
       return;
     }
@@ -291,10 +310,129 @@ export interface JobGroup {
   parent: LiveJob;
   children: LiveJob[];
   active: boolean;
-  /** Children in a terminal state. */
+  /** Steps in a terminal state (terminal job or skipped). */
   done: number;
-  /** Total children = total checklist steps. */
+  /** Total checklist steps. */
   total: number;
+  /**
+   * The precompute DAG as an ordered checklist, when the parent import job
+   * carries a `precompute_plan`. Includes steps whose job doesn't exist yet
+   * (`waiting`) or never will (`skipped`, because an upstream failed). `null`
+   * when there's no plan – the card falls back to rendering `children`.
+   */
+  steps: PrecomputeStep[] | null;
+}
+
+/** One row in an import group's precompute checklist. */
+export interface PrecomputeStep {
+  moduleId: string;
+  /** The live job row, or `null` for a not-yet-/never-submitted step. */
+  job: LiveJob | null;
+  state: StepState;
+  /** Upstream module-ids this step is still blocked on (for `waiting`). */
+  waitingOn: string[];
+}
+
+export type StepState =
+  | "waiting"
+  | "skipped"
+  | "queued"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+interface PrecomputePlanNode {
+  id: string;
+  after?: string[];
+}
+
+// A step is "done" (for the N-of-M bar) once it can make no further progress:
+// a terminal job, or a `skipped` step whose upstream failed.
+const STEP_DONE = new Set<StepState>(["completed", "failed", "cancelled", "skipped"]);
+
+/**
+ * Build the precompute checklist from the parent's `precompute_plan` and its
+ * live child jobs. Live rows fix a node's state; the rest are resolved to a
+ * fixpoint: a chained step is `skipped` once *every* upstream is settled without
+ * success (so its `<upstream>.completed` trigger will never fire), otherwise it
+ * is `waiting`. Returns `null` when the parent carries no plan.
+ */
+function buildPrecomputeSteps(parent: LiveJob, children: LiveJob[]): PrecomputeStep[] | null {
+  const raw = (parent.payload_json as { precompute_plan?: PrecomputePlanNode[] } | null)
+    ?.precompute_plan;
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+
+  const childByModule = new Map<string, LiveJob>();
+  for (const c of children) if (c.module_id) childByModule.set(c.module_id, c);
+
+  const stateOf = new Map<string, StepState>();
+  for (const node of raw) {
+    const job = childByModule.get(node.id);
+    if (job) stateOf.set(node.id, job.status as StepState);
+  }
+
+  const succeeded = (id: string) => stateOf.get(id) === "completed";
+  const deadEnd = (id: string) => {
+    const st = stateOf.get(id);
+    return st === "failed" || st === "cancelled" || st === "skipped";
+  };
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of raw) {
+      if (stateOf.has(node.id)) continue;
+      const after = node.after ?? [];
+      if (after.length === 0) continue; // a root awaiting its own job → waiting
+      if (after.some(succeeded)) continue; // an upstream succeeded → will be triggered
+      if (after.every(deadEnd)) {
+        stateOf.set(node.id, "skipped");
+        changed = true;
+      }
+    }
+  }
+
+  const steps: PrecomputeStep[] = raw.map((node) => {
+    const job = childByModule.get(node.id) ?? null;
+    const fixed = stateOf.get(node.id);
+    if (fixed === "skipped" && !job) {
+      return { moduleId: node.id, job: null, state: "skipped", waitingOn: [] };
+    }
+    if (job && fixed) {
+      return { moduleId: node.id, job, state: fixed, waitingOn: [] };
+    }
+    const waitingOn = (node.after ?? []).filter((u) => stateOf.get(u) !== "completed");
+    return { moduleId: node.id, job: null, state: "waiting", waitingOn };
+  });
+
+  // Defensive: surface any real child the plan didn't predict so a running job
+  // is never hidden (e.g. a module installed after import).
+  const planIds = new Set(raw.map((n) => n.id));
+  for (const c of children) {
+    if (c.module_id && !planIds.has(c.module_id)) {
+      steps.push({ moduleId: c.module_id, job: c, state: c.status as StepState, waitingOn: [] });
+    }
+  }
+  return steps;
+}
+
+/** Default stall threshold: a running job silent this long is flagged. */
+export const STALL_THRESHOLD_MS = 180_000; // 3 min
+
+/**
+ * Seconds a running job has been silent past the threshold, or `null` when it's
+ * healthy / not running. Frontend-only: keyed off `last_progress_at`, which only
+ * exists once we've seen a live `job.started`/`job.progress` for this job.
+ */
+export function jobStallSeconds(
+  job: LiveJob,
+  nowMs: number,
+  thresholdMs = STALL_THRESHOLD_MS,
+): number | null {
+  if (job.status !== "running" || !job.last_progress_at) return null;
+  const silentMs = nowMs - job.last_progress_at;
+  return silentMs >= thresholdMs ? Math.floor(silentMs / 1000) : null;
 }
 
 const byCreatedAsc = (a: LiveJob, b: LiveJob) =>
@@ -305,7 +443,7 @@ const byCreatedAsc = (a: LiveJob, b: LiveJob) =>
  *
  * A job is a group parent iff ≥1 other job points at it via `parent_job_id`.
  * An import job with no children yet (still importing) has no group and renders
- * standalone — it becomes a header the moment its first child is queued.
+ * standalone – it becomes a header the moment its first child is queued.
  *
  * This allocates fresh `JobGroup` wrappers every call, so it must NOT be used
  * as a `useShallow` selector (the new references defeat the comparison and spin
@@ -333,10 +471,18 @@ export const selectJobGroups = (
       continue;
     }
     children.sort(byCreatedAsc);
-    const done = children.filter((c) => FINISHED.has(c.status)).length;
-    const active =
-      ACTIVE.has(j.status) || children.some((c) => ACTIVE.has(c.status));
-    groups.push({ parent: j, children, active, done, total: children.length });
+    const steps = buildPrecomputeSteps(j, children);
+    let done: number;
+    let total: number;
+    if (steps) {
+      total = steps.length;
+      done = steps.filter((s) => STEP_DONE.has(s.state)).length;
+    } else {
+      total = children.length;
+      done = children.filter((c) => FINISHED.has(c.status)).length;
+    }
+    const active = ACTIVE.has(j.status) || done < total;
+    groups.push({ parent: j, children, steps, active, done, total });
   }
 
   groups.sort((a, b) =>

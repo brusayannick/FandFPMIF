@@ -12,7 +12,7 @@ import type { TimeBounds } from "@/lib/dashboard-queries";
  *
  * Built from *local* wall-clock components on purpose. The bounds come back as
  * naive ISO (`datetime.isoformat()`, no offset), which `Date.parse` interprets
- * as local time — and the stored `timestamp` column is itself naive wall-clock.
+ * as local time – and the stored `timestamp` column is itself naive wall-clock.
  * Using `toISOString()` here would re-encode in UTC, shifting the literal by the
  * viewer's offset so the gte/lte window no longer lines up with the data (in a
  * +2h zone the filter matched everything → "the slider does nothing").

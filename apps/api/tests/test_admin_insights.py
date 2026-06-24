@@ -1,4 +1,4 @@
-"""Admin insights — cross-user dashboards gated by the ``admin`` realm role.
+"""Admin insights - cross-user dashboards gated by the ``admin`` realm role.
 
 The default test user (``conftest._override_current_user_for_tests``) holds only
 the ``user`` role, so it exercises the 403 path; ``admin_client`` re-overrides

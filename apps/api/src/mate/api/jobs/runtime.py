@@ -12,7 +12,7 @@ What's wired (phase 4):
     they resume; other tenants keep flowing and already-running jobs of the
     paused user finish (the spec calls pause/resume out in §7.9.5).
   - Progress is throttled to SQLite (every `progress_persist_every` ticks),
-    but every call broadcasts on the bus — this keeps the drawer's per-job
+    but every call broadcasts on the bus - this keeps the drawer's per-job
     `WS /jobs/{id}/stream` smooth without writing to disk thousands of times
     per import.
   - Retry: re-enqueue with the same payload but a fresh job id.
@@ -39,6 +39,7 @@ from mate.api.db.engine import get_sessionmaker
 from mate.api.db.models import Job, SystemSetting
 from mate.api.events import EventBus, get_event_bus
 from mate.api.uuid7 import uuid7_str
+from mate.sdk import Cancelled as SdkCancelled
 
 log = structlog.get_logger(__name__)
 
@@ -47,7 +48,7 @@ def _utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-# Worker-pool sizing bounds — mirror ``Settings.worker_concurrency`` (ge=1, le=8).
+# Worker-pool sizing bounds - mirror ``Settings.worker_concurrency`` (ge=1, le=8).
 # Surfaced to the UI by ``GET /system/jobs`` so the slider can't post out of range.
 MIN_WORKERS = 1
 MAX_WORKERS = 8
@@ -70,7 +71,7 @@ async def load_persisted_concurrency() -> int | None:
 
     Returns ``None`` when nothing was persisted (fresh DB / never changed) so the
     caller keeps the env/default value. Tolerant of a missing table or bad value
-    — boot must never fail because of this optional setting.
+    - boot must never fail because of this optional setting.
     """
     try:
         sm = get_sessionmaker()
@@ -97,8 +98,27 @@ async def save_persisted_concurrency(n: int) -> None:
         await session.commit()
 
 
-class JobCancelled(Exception):
-    """Raised inside a handler when the job is cancelled cooperatively."""
+class JobCancelled(BaseException):
+    """Raised inside a handler when the job is cancelled cooperatively.
+
+    Derives from :class:`BaseException` (not :class:`Exception`) so a handler's
+    broad ``except Exception:`` can't swallow a cooperative cancel - it mirrors
+    :class:`asyncio.CancelledError`. ``_run_one`` catches it on a branch that
+    precedes the generic ``except Exception``, turning it into ``job.cancelled``.
+    """
+
+
+# Cooperative-cancel exception types caught on the cancel branch of ``_run_one``,
+# all deriving from BaseException so a handler's broad ``except Exception`` can't
+# swallow them: ``JobCancelled`` (raised by JobHandle), ``asyncio.CancelledError``
+# (task-cancel / shutdown), and the SDK's ``Cancelled`` - raised by a module via
+# ``ctx.check_cancelled``, or reconstructed on the host from a subprocess
+# worker's soft cancel (``subprocess_worker`` translates the cancel RPC error).
+_COOPERATIVE_CANCEL_EXC: tuple[type[BaseException], ...] = (
+    JobCancelled,
+    asyncio.CancelledError,
+    SdkCancelled,
+)
 
 
 JobHandler = Callable[["JobHandle"], Awaitable[None]]
@@ -156,6 +176,11 @@ class JobHandle:
         message: str | None = None,
         force: bool = False,
     ) -> None:
+        # Auto-poll cooperative cancel on *every* progress tick - before any bus
+        # publish or DB write. This makes any handler/module that reports progress
+        # soft-cancellable for free (the import job, all in-process modules that
+        # call ctx.progress.update, etc.) without each one wiring a poll itself.
+        self.cancel_token.raise_if_cancelled()
         elapsed = max(time.monotonic() - self.started_at, 1e-6)
         rate = current / elapsed if current else None
         eta = ((total - current) / rate) if (rate and total and total > current) else None
@@ -196,6 +221,18 @@ class JobHandle:
             await session.commit()
 
 
+@dataclass(frozen=True)
+class RunningJobInfo:
+    """Lightweight snapshot of an executing job for the admin resource sampler."""
+
+    id: str
+    user_id: str
+    type: str
+    title: str
+    module_id: str | None
+    started_at: float
+
+
 class JobRuntime:
     """Asyncio queue + worker pool. Handlers register by `type`."""
 
@@ -211,24 +248,56 @@ class JobRuntime:
         # Pause is per-user (the queue itself is shared across all tenants). A
         # user in `_paused_users` has their dequeued jobs parked in `_deferred`
         # instead of run; everyone else keeps flowing. Resuming re-enqueues the
-        # parked ids. Held in memory only — like queued jobs, deferred ids don't
+        # parked ids. Held in memory only - like queued jobs, deferred ids don't
         # survive a process restart (the queue isn't rebuilt from SQLite).
         self._paused_users: set[str] = set()
         self._deferred: dict[str, list[str]] = {}
         self._cancel_tokens: dict[str, CancelToken] = {}
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        # Live JobHandles for currently-executing jobs, keyed by job-id. Mirrors
+        # `_running_tasks` (set in `_run_one`, popped in its finally); lets the
+        # admin resource sampler attribute load to module/user without a DB hit.
+        self._running_handles: dict[str, JobHandle] = {}
         self._process_pool: ProcessPoolExecutor | None = None
-        # Optional hook (wired by the module loader) invoked when a *running*
-        # job owned by a subprocess-isolated module is cancelled. The
-        # cooperative token + asyncio task-cancel only unwind the host-side
-        # proxy await; the worker process keeps running the (often
-        # un-interruptible, native/threaded) handler. The hook kills+respawns
-        # that module's worker so the compute actually stops.
-        self._subprocess_canceller: Callable[[str, str], Awaitable[None]] | None = None
+        # Two-phase cancel hooks for subprocess-isolated module jobs (wired by
+        # the module loader). The cooperative token + asyncio task-cancel only
+        # unwind the host-side proxy await; the worker process keeps running the
+        # handler. So on cancel we first call the *soft* hook (flag the worker so
+        # its next ctx RPC raises and it unwinds cooperatively), then - after a
+        # grace window - the *hard* hook (SIGKILL+respawn) if it hasn't stopped.
+        self._subprocess_soft_canceller: Callable[[str, str], Awaitable[None]] | None = None
+        self._subprocess_hard_canceller: Callable[[str, str], Awaitable[None]] | None = None
+        # Grace-window watchdogs spawned by `cancel()`; tracked so they're
+        # cleaned up when the job ends (`_run_one` finally) or the runtime stops.
+        self._escalation_tasks: dict[str, asyncio.Task[None]] = {}
+
+    def set_subprocess_soft_canceller(
+        self, fn: Callable[[str, str], Awaitable[None]] | None
+    ) -> None:
+        """Register the soft `(job_id, module_id) -> None` cancel hook.
+
+        Called immediately on cancel; should flag the worker so its next ctx RPC
+        raises (cooperative wind-down) and return at once - never block.
+        """
+        self._subprocess_soft_canceller = fn
+
+    def set_subprocess_hard_canceller(
+        self, fn: Callable[[str, str], Awaitable[None]] | None
+    ) -> None:
+        """Register the hard `(job_id, module_id) -> None` cancel hook.
+
+        Called only after the grace window elapses and the job is still running -
+        the SIGKILL+respawn escalation for a worker that didn't wind down.
+        """
+        self._subprocess_hard_canceller = fn
 
     def set_subprocess_canceller(self, fn: Callable[[str, str], Awaitable[None]] | None) -> None:
-        """Register the `(job_id, module_id) -> None` hook described above."""
-        self._subprocess_canceller = fn
+        """Back-compat shim: register a single hook as the *hard* canceller.
+
+        Older call sites wired one kill+respawn hook via this method; they keep
+        working (the cancel path falls back to it when no soft hook is set).
+        """
+        self._subprocess_hard_canceller = fn
 
     def _ensure_bus(self) -> EventBus:
         return self._bus if self._bus is not None else get_event_bus()
@@ -238,7 +307,7 @@ class JobRuntime:
         (§8.3). Sized to match `worker_concurrency` so heavy parallel mining
         on a multi-core box doesn't starve other workers. We don't create
         the pool eagerly because not every deployment uses module CPU
-        offloading — paying the fork cost on every boot would be wasteful.
+        offloading - paying the fork cost on every boot would be wasteful.
         """
         if self._process_pool is None:
             self._process_pool = ProcessPoolExecutor(
@@ -282,7 +351,7 @@ class JobRuntime:
         """Fail any rows left in `running` by a previous process.
 
         A worker can only ever crash mid-job (process killed, container
-        restart) — there's no recovery thread to resume an in-flight job, so
+        restart) - there's no recovery thread to resume an in-flight job, so
         the row would otherwise stay `running` forever and the UI would show
         a phantom active task.
         """
@@ -317,6 +386,13 @@ class JobRuntime:
         if self._running_tasks:
             await asyncio.gather(*self._running_tasks.values(), return_exceptions=True)
         self._running_tasks.clear()
+        # Tear down any in-flight grace watchdogs so they don't fire (and try to
+        # hard-kill a worker) after the runtime has stopped.
+        for esc in self._escalation_tasks.values():
+            esc.cancel()
+        if self._escalation_tasks:
+            await asyncio.gather(*self._escalation_tasks.values(), return_exceptions=True)
+        self._escalation_tasks.clear()
         for tok in self._cancel_tokens.values():
             tok.cancel()
         self._cancel_tokens.clear()
@@ -334,8 +410,39 @@ class JobRuntime:
             await self.stop()
 
     def concurrency(self) -> int:
-        """Current target worker count — reflects live changes, not just boot."""
+        """Current target worker count - reflects live changes, not just boot."""
         return self._target_concurrency
+
+    def live_stats(self) -> dict[str, int]:
+        """In-memory runtime snapshot for the admin dashboard.
+
+        Cross-user counts (the asyncio queue is shared across all tenants), so
+        this is admin-only by convention - the route gates it.
+        """
+        return {
+            "concurrency": self._target_concurrency,
+            "live_workers": self._live_worker_count(),
+            "queue_depth": self._queue.qsize(),
+            "running": len(self._running_tasks),
+            "paused_users": len(self._paused_users),
+        }
+
+    def running_jobs(self) -> list[RunningJobInfo]:
+        """Snapshot of currently-executing jobs (admin resource breakdown).
+
+        Cross-user and in-memory - admin-only by convention, like `live_stats`.
+        """
+        return [
+            RunningJobInfo(
+                id=h.id,
+                user_id=h.user_id,
+                type=h.type,
+                title=h.title,
+                module_id=h.module_id,
+                started_at=h.started_at,
+            )
+            for h in self._running_handles.values()
+        ]
 
     def _live_worker_count(self) -> int:
         return sum(1 for w in self._workers if not w.done())
@@ -345,10 +452,10 @@ class JobRuntime:
 
         Scale-up spawns workers immediately. Scale-down is graceful: one retire
         sentinel is queued per surplus worker; an idle worker retires at once, a
-        busy one only after it finishes its current job — so a resize never
+        busy one only after it finishes its current job - so a resize never
         orphans a running job, and a backlog is drained before any worker is
         shed. The ProcessPool (CPU offload, §8.3) keeps its current size until
-        next (re)created; the asyncio worker pool — the meaningful knob — is
+        next (re)created; the asyncio worker pool - the meaningful knob - is
         resized here. Returns the clamped value actually applied.
         """
         n = _clamp_workers(n)
@@ -381,7 +488,7 @@ class JobRuntime:
             return
         self._paused_users.add(user_id)
         # user_id scopes the event so only the pausing user's sessions flip to
-        # "Paused" — other tenants' jobs (and dock badges) are unaffected.
+        # "Paused" - other tenants' jobs (and dock badges) are unaffected.
         await self._ensure_bus().publish("job.queue.paused", {"user_id": user_id})
         log.info("job_runtime.queue_paused", user_id=user_id)
 
@@ -449,8 +556,11 @@ class JobRuntime:
         """Mark a job cancelled. Returns True if it was queued or running.
 
         - If running: the cooperative `CancelToken` is set; the handler is
-          expected to call `handle.raise_if_cancelled()` periodically. The
-          worker catches `JobCancelled` and updates the row + emits the event.
+          expected to call `handle.raise_if_cancelled()` periodically (any
+          progress tick polls it for free). The worker catches `JobCancelled`
+          and updates the row + emits the event. For a subprocess module the
+          token can't reach the worker, so we additionally run the two-phase
+          soft→grace→hard cancel (see below).
         - If queued: we mark the row cancelled and emit the event right away;
           when the worker pulls the id off the queue it'll see the status and
           skip the work.
@@ -479,13 +589,11 @@ class JobRuntime:
             task.cancel()
 
         # The token/task-cancel above only unwinds the host-side await for a
-        # subprocess module — the worker keeps running. Kill+respawn its worker
-        # so the underlying compute (e.g. AgentSimulator's pipeline) halts.
-        if running and module_id and self._subprocess_canceller is not None:
-            try:
-                await self._subprocess_canceller(job_id, module_id)
-            except Exception:
-                logging.exception("subprocess cancel hook failed for job %s", job_id)
+        # subprocess module - the worker keeps running. Two-phase stop: ask it to
+        # wind down cooperatively now (soft), then escalate to kill+respawn after
+        # a grace window if it's still running.
+        if running and module_id:
+            await self._begin_subprocess_cancel(job_id, module_id)
 
         if not running:
             await self._ensure_bus().publish(
@@ -494,10 +602,60 @@ class JobRuntime:
             )
         return True
 
+    async def _begin_subprocess_cancel(self, job_id: str, module_id: str) -> None:
+        """Soft-cancel a running subprocess job, then arm the grace watchdog.
+
+        The soft hook only flags the worker (its next ctx RPC raises) and returns
+        immediately, so cancel() stays responsive. If neither hook is wired (a
+        plain in-process module - no bridge) this is a no-op: such jobs stop on
+        the cooperative token alone.
+        """
+        soft = self._subprocess_soft_canceller
+        if soft is not None:
+            try:
+                await soft(job_id, module_id)
+            except Exception:
+                logging.exception("subprocess soft-cancel hook failed for job %s", job_id)
+        # Arm the escalation watchdog only if a hard hook exists and one isn't
+        # already running for this job. The watchdog sleeps off the event loop in
+        # its own task - it never blocks cancel() or the worker pool.
+        if self._subprocess_hard_canceller is not None and job_id not in self._escalation_tasks:
+            self._escalation_tasks[job_id] = asyncio.create_task(
+                self._escalate_subprocess_cancel(job_id, module_id)
+            )
+
+    async def _escalate_subprocess_cancel(self, job_id: str, module_id: str) -> None:
+        """Wait out the grace window, then hard-kill the worker iff still running.
+
+        A worker that wound down cooperatively (its handler task left
+        `_running_tasks` and `_run_one` cancelled this watchdog in its finally)
+        is never hard-killed. One that ignored the soft signal - a native job
+        with no poll point - gets the SIGKILL+respawn it would have gotten before
+        this two-phase change, just delayed by the grace.
+        """
+        grace = self.settings.subprocess_cancel_grace_seconds
+        try:
+            await asyncio.sleep(grace)
+        except asyncio.CancelledError:
+            return
+        # Still running after grace → escalate. (If it finished, `_run_one` has
+        # already popped the task and cancelled this watchdog.)
+        if job_id not in self._running_tasks:
+            return
+        hard = self._subprocess_hard_canceller
+        if hard is None:
+            return
+        try:
+            await hard(job_id, module_id)
+        except Exception:
+            logging.exception("subprocess hard-cancel hook failed for job %s", job_id)
+        finally:
+            self._escalation_tasks.pop(job_id, None)
+
     async def cancel_for_logs(self, log_ids: list[str]) -> int:
         """Cancel every queued/running job whose payload references one of `log_ids`.
 
-        Jobs don't carry an indexed `log_id` column — the affiliation lives in
+        Jobs don't carry an indexed `log_id` column - the affiliation lives in
         `payload_json["log_id"]`. We pull all active jobs and filter in Python,
         which is fine because the active set is small (bounded by the worker
         pool + queue depth, not history).
@@ -525,7 +683,7 @@ class JobRuntime:
 
         Issues per-job `cancel()` calls so the existing path (DB row flip,
         token signal, asyncio task cancel, `job.cancelled` event) runs for
-        each one — keeps the UI in sync without a separate broadcast.
+        each one - keeps the UI in sync without a separate broadcast.
         """
         sm = get_sessionmaker()
         async with sm() as session:
@@ -572,7 +730,7 @@ class JobRuntime:
                 if item is _RETIRE:
                     # Graceful scale-down signal: retire this worker iff we're
                     # still over target. A scale-up that arrived after the
-                    # sentinel was queued cancels the need — then it's a no-op.
+                    # sentinel was queued cancels the need - then it's a no-op.
                     if self._live_worker_count() > self._target_concurrency:
                         current = asyncio.current_task()
                         self._workers = [w for w in self._workers if w is not current]
@@ -615,7 +773,7 @@ class JobRuntime:
                 log.warning("job_runtime.missing_job", job_id=job_id)
                 return
             if job.status == "cancelled":
-                # Cancelled while queued — already handled in `cancel()`.
+                # Cancelled while queued - already handled in `cancel()`.
                 return
             handler = self._handlers.get(job.type)
             if handler is None:
@@ -675,11 +833,16 @@ class JobRuntime:
 
         handler_task = asyncio.create_task(self._handlers[handle_type](handle))
         self._running_tasks[job_id] = handler_task
+        self._running_handles[job_id] = handle
         try:
             await handler_task
-        except (JobCancelled, asyncio.CancelledError):
-            if not token.cancelled:
-                # Shutdown cancellation — propagate so the worker exits cleanly.
+        except _COOPERATIVE_CANCEL_EXC as exc:
+            # A genuine task-cancel with no cooperative token set is a shutdown
+            # signal (stop() cancels every running task) - propagate it so the
+            # worker exits cleanly. JobCancelled / SDK Cancelled, by contrast,
+            # only ever mean "this job was cancelled", so they always record the
+            # cancelled outcome even if the token flip hasn't been observed yet.
+            if isinstance(exc, asyncio.CancelledError) and not token.cancelled:
                 handler_task.cancel()
                 with contextlib.suppress(Exception, asyncio.CancelledError):
                     await handler_task
@@ -721,7 +884,14 @@ class JobRuntime:
             return
         finally:
             self._running_tasks.pop(job_id, None)
+            self._running_handles.pop(job_id, None)
             self._cancel_tokens.pop(job_id, None)
+            # The job ended (any outcome) - cancel its grace watchdog so a
+            # cooperatively-cancelled (or just-completed) subprocess worker is
+            # never hard-killed after the fact, and a reused worker isn't poisoned.
+            escalation = self._escalation_tasks.pop(job_id, None)
+            if escalation is not None:
+                escalation.cancel()
 
         async with sm() as session:
             await session.execute(
@@ -752,5 +922,5 @@ def set_job_runtime(rt: JobRuntime | None) -> None:
 
 def get_job_runtime() -> JobRuntime:
     if _runtime is None:
-        raise RuntimeError("Job runtime is not initialised — startup did not run.")
+        raise RuntimeError("Job runtime is not initialised - startup did not run.")
     return _runtime

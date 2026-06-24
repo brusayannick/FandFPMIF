@@ -1,4 +1,4 @@
-"""Admin jobs — cross-user job monitoring + control gated by the ``admin`` role.
+"""Admin jobs - cross-user job monitoring + control gated by the ``admin`` role.
 
 Mirrors ``test_admin_insights``: the default test user holds only ``user`` (403
 path), ``admin_client`` re-overrides ``get_current_user`` with an admin (200

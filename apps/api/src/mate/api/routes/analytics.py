@@ -1,4 +1,4 @@
-"""/api/v1/usage — opt-in user behaviour tracking.
+"""/api/v1/usage - opt-in user behaviour tracking.
 
 The single ``UserSetting`` row under key ``analytics.config`` is the source of
 truth for whether capture is on. The frontend gate is a best-effort UX
@@ -76,7 +76,7 @@ def _effective(cfg: AnalyticsConfigPayload) -> AnalyticsConfigPayload:
 
     ``onboarding_mode`` always reflects ``USER_TRACKING_ONBOARDING`` rather
     than anything the client stored. Under ``force`` tracking is enabled
-    unconditionally — the user cannot opt out, so the stored ``enabled`` flag
+    unconditionally - the user cannot opt out, so the stored ``enabled`` flag
     is irrelevant and we report (and gate ingestion on) ``True``.
     """
     mode = get_settings().user_tracking_onboarding
@@ -90,7 +90,7 @@ async def _save_config(
     session: SessionDep, cfg: AnalyticsConfigPayload, user_id: str
 ) -> AnalyticsConfigPayload:
     row = await session.get(UserSetting, (user_id, ANALYTICS_CONFIG_KEY))
-    # ``onboarding_mode`` is server policy, not user state — never persist it.
+    # ``onboarding_mode`` is server policy, not user state - never persist it.
     data = cfg.model_dump(mode="json", exclude={"onboarding_mode"})
     if row is None:
         session.add(UserSetting(user_id=user_id, key=ANALYTICS_CONFIG_KEY, value_json=data))
@@ -140,7 +140,7 @@ async def record_server_event(
     No-op when the user's tracking config is disabled (so it respects opt-out
     under ``on``/``off`` and is always-on under ``force``). Wrapped so a
     tracking failure can never break the request or job it describes. Commits
-    on the passed session — callers should hand it a session they own.
+    on the passed session - callers should hand it a session they own.
     """
     try:
         cfg_row = await session.get(UserSetting, (user_id, ANALYTICS_CONFIG_KEY))
@@ -212,7 +212,7 @@ async def ingest_events(request: Request, session: SessionDep, user: CurrentUser
 
     Accepts ``application/json`` and ``text/plain`` (so ``navigator.sendBeacon``
     works without triggering a CORS preflight). Rejects with 204 if analytics
-    is disabled — this is the privacy safety net independent of the client.
+    is disabled - this is the privacy safety net independent of the client.
     """
     cfg_row = await session.get(UserSetting, (user.id, ANALYTICS_CONFIG_KEY))
     cfg = _effective(_load_config(cfg_row))
@@ -235,7 +235,7 @@ async def ingest_events(request: Request, session: SessionDep, user: CurrentUser
     if len(payload.events) > MAX_BATCH_EVENTS:
         raise HTTPException(status_code=413, detail=f"Batch exceeds {MAX_BATCH_EVENTS} events")
 
-    # Reject events claiming a different anon id than the configured seed —
+    # Reject events claiming a different anon id than the configured seed -
     # prevents replay from clients with stale state after a wipe.
     if payload.session.anon_user_id != cfg.anon_user_id_seed:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -244,7 +244,7 @@ async def ingest_events(request: Request, session: SessionDep, user: CurrentUser
 
     sess_row = await session.get(AnalyticsSession, payload.session.id)
     if sess_row is not None and sess_row.user_id != user.id:
-        # Another user's session id collision — refuse silently.
+        # Another user's session id collision - refuse silently.
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     if sess_row is None:
         sess_row = AnalyticsSession(
@@ -411,7 +411,7 @@ async def wipe_events(session: SessionDep, user: CurrentUserDep) -> WipeResponse
 def event_to_dict(ev: AnalyticsEvent) -> dict[str, Any]:
     """Flatten one ``AnalyticsEvent`` row into a JSON-serialisable dict.
 
-    The single source of truth for the export row shape — reused by the per-user
+    The single source of truth for the export row shape - reused by the per-user
     NDJSON dump here and the admin cross-user NDJSON/CSV exports
     (``routes/admin.py``) so the two never drift. ``user_id`` is included because
     admin exports span users; the per-user export simply emits its own id.
@@ -465,7 +465,7 @@ async def export_events(session: SessionDep, user: CurrentUserDep) -> StreamingR
 
 
 # --------------------------------------------------------------------------
-# Retention sweeper — called from main.py lifespan loop
+# Retention sweeper - called from main.py lifespan loop
 # --------------------------------------------------------------------------
 
 

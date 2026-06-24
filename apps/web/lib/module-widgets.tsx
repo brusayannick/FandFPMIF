@@ -106,7 +106,7 @@ async function loadWidget(moduleId: string, widgetId: string): Promise<WidgetCom
 
 /**
  * Resolve a widget by `(sourceModuleId, widgetId)`. Returns a component
- * that's safe to render immediately — it shows a Skeleton while the bundle
+ * that's safe to render immediately – it shows a Skeleton while the bundle
  * streams in, then renders the resolved widget; if the source module is
  * missing or the fetch fails, renders an inline placeholder.
  */

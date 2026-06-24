@@ -18,8 +18,8 @@ const METRIC_KEY = "normalized_sequence_entropy";
 const METRIC_LABELS: Record<string, string> = {
   normalized_sequence_entropy: "Sequence entropy (norm.)",
   normalized_variant_entropy: "Variant entropy (norm.)",
-  normalized_sequence_entropy_linear: "Sequence entropy — linear (norm.)",
-  normalized_sequence_entropy_exponential: "Sequence entropy — exponential (norm.)",
+  normalized_sequence_entropy_linear: "Sequence entropy – linear (norm.)",
+  normalized_sequence_entropy_exponential: "Sequence entropy – exponential (norm.)",
   lempel_ziv: "Lempel–Ziv",
   magnitude: "Magnitude",
   variety: "Variety",

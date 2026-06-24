@@ -85,7 +85,7 @@ const DRIFT_COLORS: Record<string, string> = {
   incremental: "rgb(255, 0, 255)", // magenta
   recurring: "rgb(0, 255, 255)", // aqua
 };
-const DRIFT_FALLBACK_COLOR = "rgb(255, 255, 0)"; // yellow — cv4cdd's default
+const DRIFT_FALLBACK_COLOR = "rgb(255, 255, 0)"; // yellow – cv4cdd's default
 
 // Shared by the chart bands and the legend swatches so they always match.
 const DRIFT_FILL_OPACITY = 0.18;
@@ -625,6 +625,6 @@ function KpiTooltip({
 }
 
 function fmt(v: number | null): string {
-  if (v === null || !Number.isFinite(v)) return "—";
+  if (v === null || !Number.isFinite(v)) return "–";
   return Number.isInteger(v) ? String(v) : v.toFixed(3);
 }

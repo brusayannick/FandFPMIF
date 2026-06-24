@@ -3,7 +3,7 @@
 Module code lives once on shared disk and loads once into the process; these
 helpers track *who* installed each module so listing, availability, and
 deletion are per-user. The physical artifact is only removed when the last
-owner uninstalls — callers use :func:`owner_count` to decide.
+owner uninstalls - callers use :func:`owner_count` to decide.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ async def module_owned_by_other(session: AsyncSession, user_id: str, module_id: 
     """True if *module_id* is installed by any user other than *user_id*.
 
     Used to reject an upload whose id collides with another user's custom
-    module — module *code* is shared in-process, so two users can't own
+    module - module *code* is shared in-process, so two users can't own
     different code under the same id.
     """
     result = await session.execute(

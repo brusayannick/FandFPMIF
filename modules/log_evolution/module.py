@@ -1,4 +1,4 @@
-"""Log evolution — how the event log develops over time.
+"""Log evolution - how the event log develops over time.
 
 Turns a log into per-period volume series (case arrivals, completions,
 work-in-progress, activity mix) plus a dotted chart, so you can see growth,
@@ -6,9 +6,9 @@ backlog build-up, seasonality and drift at a glance.
 
 Routes
 ------
-GET ``/timeseries`` — arrivals / completions / WIP / events / activity-mix for a
+GET ``/timeseries`` - arrivals / completions / WIP / events / activity-mix for a
 chosen calendar granularity (cached, offloaded to a worker thread).
-GET ``/dotted`` — dotted-chart points (x = time, y = case rank), down-sampled
+GET ``/dotted`` - dotted-chart points (x = time, y = case rank), down-sampled
 above ``max_points`` (cached).
 
 Precompute
@@ -133,7 +133,7 @@ class LogEvolutionModule(Module):
         return await _cached_or_compute(ctx, f"dotted_{max_points}", _compute)
 
     @on_event("log.imported")
-    @job(progress=True, title="Log evolution — precompute")
+    @job(progress=True, title="Log evolution - precompute")
     async def precompute(self, ctx: ModuleContext, payload: dict[str, Any]) -> None:
         await ctx.progress.update(0.0, "Loading log")
         async with ctx.event_log as log:

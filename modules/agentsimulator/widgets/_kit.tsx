@@ -16,7 +16,7 @@ export const COLORS = { real: "#6366f1", sim: "#f59e0b" } as const;
 export function CardShell({
   loading,
   empty,
-  emptyText = "No simulation yet — run one from the AgentSimulator panel.",
+  emptyText = "No simulation yet – run one from the AgentSimulator panel.",
   children,
 }: {
   loading?: boolean;
@@ -37,7 +37,7 @@ export function CardShell({
 /** One fidelity measure: short code + mean, with ± std and the full name. */
 export function MetricTile({ code, cell }: { code: string; cell?: MetricCell }) {
   const mean = cell?.mean;
-  const value = mean == null ? "—" : mean < 10 ? mean.toFixed(3) : mean.toFixed(2);
+  const value = mean == null ? "–" : mean < 10 ? mean.toFixed(3) : mean.toFixed(2);
   return (
     <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
       <div className="flex items-center justify-between gap-2">

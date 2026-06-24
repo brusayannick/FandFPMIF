@@ -1,4 +1,4 @@
-"""Complexity v2 — the thesis's full event-log complexity suite.
+"""Complexity v2 - the thesis's full event-log complexity suite.
 
 Implements every metric in scope of Langer's *Understanding Business Process
 Complexity* (Table 3.3) against the platform's normalised event table. See
@@ -6,10 +6,10 @@ Complexity* (Table 3.3) against the platform's normalised event table. See
 
 Routes
 ------
-GET ``/metrics``            — the 28-metric suite, grouped by category (cached).
-GET ``/transition-matrix``  — directly-follows transition-probability matrix
+GET ``/metrics``            - the 28-metric suite, grouped by category (cached).
+GET ``/transition-matrix``  - directly-follows transition-probability matrix
                               (``prob-act-pairs``) for the heatmap (cached).
-GET ``/enriched-available`` — quick yes/no for the enriched-entropy view.
+GET ``/enriched-available`` - quick yes/no for the enriched-entropy view.
 
 Precompute
 ----------
@@ -153,7 +153,7 @@ class ComplexityV2Module(Module):
         return {"available": bool(is_enriched_supported(_read_detected_schema(ctx)))}
 
     @on_event("log.imported")
-    @job(progress=True, title="Complexity v2 — precompute")
+    @job(progress=True, title="Complexity v2 - precompute")
     async def precompute(self, ctx: ModuleContext, payload: dict[str, Any]) -> None:
         await ctx.progress.update(0.0, "Loading log")
         async with ctx.event_log as log:

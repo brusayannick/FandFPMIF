@@ -1,4 +1,4 @@
-"""Filesystem watchdog for `modules/` — dev-only hot reload (§5.3 #7).
+"""Filesystem watchdog for `modules/` - dev-only hot reload (§5.3 #7).
 
 Watches every `modules/<id>/manifest.yaml`, `module.py`, and `.dist/` for
 changes; on debounced change, calls `ModuleLoader.load_one()` for the
@@ -54,7 +54,7 @@ class _ModuleEventHandler(FileSystemEventHandler):
         if not parts:
             return
         module_id = parts[0]
-        # Ignore changes inside `.venv/`, `.dist/`, and `node_modules/` — they
+        # Ignore changes inside `.venv/`, `.dist/`, and `node_modules/` - they
         # churn during installs and would loop us forever.
         if len(parts) > 1 and parts[1] in {".venv", ".dist", "node_modules"}:
             return

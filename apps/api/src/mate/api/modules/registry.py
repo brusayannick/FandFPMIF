@@ -1,4 +1,4 @@
-"""Capability registry — typed RPC over module `provides`/`consumes` (§5.7)."""
+"""Capability registry - typed RPC over module `provides`/`consumes` (§5.7)."""
 
 from __future__ import annotations
 

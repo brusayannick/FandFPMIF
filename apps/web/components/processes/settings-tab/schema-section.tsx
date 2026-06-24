@@ -65,11 +65,11 @@ export function SchemaSection({ logId, log }: { logId: string; log: EventLogDeta
       description="Where this log came from and what's inside it."
     >
       <dl className="mb-5 grid gap-y-2 gap-x-6 text-sm sm:grid-cols-2">
-        <DetailRow label="Source format" value={log.source_format ?? "—"} />
-        <DetailRow label="Original filename" value={log.source_filename ?? "—"} />
+        <DetailRow label="Source format" value={log.source_format ?? "–"} />
+        <DetailRow label="Original filename" value={log.source_filename ?? "–"} />
         <DetailRow
           label="Imported"
-          value={log.imported_at ? formatRelative(log.imported_at) : "—"}
+          value={log.imported_at ? formatRelative(log.imported_at) : "–"}
         />
         <DetailRow label="Date range" value={formatDateRange(log.date_min, log.date_max)} />
       </dl>

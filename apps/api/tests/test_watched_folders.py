@@ -24,7 +24,7 @@ async def _wait_until_ready(client: AsyncClient, log_id: str, timeout: float = 5
         if last["status"] == "failed":
             raise AssertionError(f"Import failed: {last.get('error')}")
         await asyncio.sleep(0.05)
-    raise AssertionError(f"Import did not finish in {timeout}s — last state: {last}")
+    raise AssertionError(f"Import did not finish in {timeout}s - last state: {last}")
 
 
 @pytest.mark.asyncio

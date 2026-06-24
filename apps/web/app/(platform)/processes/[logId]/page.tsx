@@ -24,7 +24,7 @@ import { OcelRelationshipsTab } from "@/components/processes/ocel/ocel-relations
 import { useEventLog } from "@/lib/queries";
 import { formatDateRange, formatNumber, formatRelative } from "@/lib/format";
 
-// Case-centric and object-centric (OCEL) logs get fully separate tab sets — the
+// Case-centric and object-centric (OCEL) logs get fully separate tab sets – the
 // two models never mix.
 type TabId =
   | "overview"

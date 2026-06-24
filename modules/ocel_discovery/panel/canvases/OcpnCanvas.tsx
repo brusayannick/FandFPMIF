@@ -14,8 +14,8 @@ import type { OcpnNet } from "../queries";
 const nodeTypes = { place: PlaceNode, transition: TransitionNode } as const;
 
 /** Object-centric Petri net for a single object type: places (circles),
- *  transitions (activity boxes, silent ones dark), and arcs. Variable arcs —
- *  where an activity consumes / produces a variable number of objects — are
+ *  transitions (activity boxes, silent ones dark), and arcs. Variable arcs –
+ *  where an activity consumes / produces a variable number of objects – are
  *  drawn thicker, mirroring pm4py's own OCPN visualiser. */
 export function OcpnCanvas({ net }: { net: OcpnNet | null }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);

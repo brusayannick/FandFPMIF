@@ -31,7 +31,7 @@ class ResultCache:
         self.dir = base / log_id / module_id
         # ``variant`` isolates an ephemeral dataset view (a dashboard's
         # column/time filter) into its own sub-namespace. Without it a
-        # filtered request would collide with — and serve — the unfiltered
+        # filtered request would collide with - and serve - the unfiltered
         # cache, since the freshness check only watches the (unchanged)
         # parquet mtime. ``None`` keeps the canonical, committed-filter cache
         # at the module root, and ``clear()``'s rmtree still wipes variants.
@@ -41,7 +41,7 @@ class ResultCache:
 
     def _candidate(self, key: str) -> Path:
         if "/" in key or ".." in key:
-            raise ValueError(f"Invalid cache key {key!r} — must be a flat name.")
+            raise ValueError(f"Invalid cache key {key!r} - must be a flat name.")
         return self.dir / key
 
     async def get(self, key: str) -> Any:
@@ -74,7 +74,7 @@ class ResultCache:
         # Pick the encoding by type.
         try:
             import pandas as pd
-        except ModuleNotFoundError:  # pragma: no cover — pandas is a platform dep
+        except ModuleNotFoundError:  # pragma: no cover - pandas is a platform dep
             pd = None  # type: ignore[assignment]
 
         if pd is not None and hasattr(pd, "DataFrame") and isinstance(value, pd.DataFrame):

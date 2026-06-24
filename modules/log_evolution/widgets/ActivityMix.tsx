@@ -17,7 +17,7 @@ import { ChartFrame, LegendDot } from "./_kit";
 const OTHER = "Other";
 
 // Keep the first `topN` activities as their own band and fold the rest (incl.
-// the backend's own trailing "Other") into a single "Other" band — so the
+// the backend's own trailing "Other") into a single "Other" band – so the
 // widget's `top_n` stays accurate even though the backend bundles up to 12.
 function foldMix(mix: LogEvolution["activity_mix"], periods: string[], topN: number) {
   const named = mix.activities.filter((a) => a !== OTHER);

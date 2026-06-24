@@ -12,7 +12,7 @@ export function AttributeBreakdowns({ breakdowns }: { breakdowns: AttributeBreak
     );
   }
 
-  // Skip purely empty columns so the panel doesn't fill with "—".
+  // Skip purely empty columns so the panel doesn't fill with "–".
   const filtered = breakdowns.filter((b) => b.top.length > 0);
   if (filtered.length === 0) {
     return (

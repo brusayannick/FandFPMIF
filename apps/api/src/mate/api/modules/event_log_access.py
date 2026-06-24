@@ -1,4 +1,4 @@
-"""EventLogAccess — lazy view of an imported log's Parquet (§5.5).
+"""EventLogAccess - lazy view of an imported log's Parquet (§5.5).
 
 Also hosts the read-only helpers behind the Events tab: `column_specs()`
 infers column types from a small parquet sample and `data_quality()`
@@ -44,7 +44,7 @@ class EventLogAccess:
     """Async-context-manager view of a single log.
 
     Construction is cheap; readers (``pandas()`` / ``polars()`` / ``pm4py()`` /
-    ``duckdb_fetch``) materialise on demand and cache nothing — keeping memory
+    ``duckdb_fetch``) materialise on demand and cache nothing - keeping memory
     usage explicit. polars/pm4py are best-effort: if the module didn't
     inherit them, the call raises a clear error.
     """
@@ -58,8 +58,8 @@ class EventLogAccess:
         self.log_id = log_id
         self.user_id = user_id
         # The applied Events-tab filter (``EventLog.active_filter``). When set,
-        # every read — the DuckDB ``events`` view and the pandas/polars/pm4py
-        # frames — is transparently restricted to the matching rows, so modules
+        # every read - the DuckDB ``events`` view and the pandas/polars/pm4py
+        # frames - is transparently restricted to the matching rows, so modules
         # and analytics see exactly the dataset the user committed. The events
         # *editor* and cell-edit paths construct with ``None`` to stay on the
         # raw rows.
@@ -73,7 +73,7 @@ class EventLogAccess:
         await storage_sync.hydrate_log(self.user_id, self.log_id)
         if not self._paths.events.exists():
             raise FileNotFoundError(
-                f"Event log {self.log_id} has no events.parquet — import not finished?"
+                f"Event log {self.log_id} has no events.parquet - import not finished?"
             )
         return self
 
@@ -111,7 +111,7 @@ class EventLogAccess:
             import polars as pl
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "polars is not available — declare it in your manifest's "
+                "polars is not available - declare it in your manifest's "
                 "dependencies.python.inherit or .packages."
             ) from exc
         if not self._active_filter:
@@ -129,7 +129,7 @@ class EventLogAccess:
             import pm4py  # noqa: F401
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "pm4py is not available — declare it in your manifest's "
+                "pm4py is not available - declare it in your manifest's "
                 "dependencies.python.inherit or .packages."
             ) from exc
 
@@ -160,7 +160,7 @@ class EventLogAccess:
     async def duckdb_fetch_with_columns(
         self, sql: str, params: list | tuple | None = None
     ) -> tuple[list[str], list[tuple]]:
-        """Like `duckdb_fetch` but also returns column names — used by the
+        """Like `duckdb_fetch` but also returns column names - used by the
         events route to map rows to dicts without a second metadata call.
         """
 
@@ -177,7 +177,7 @@ class EventLogAccess:
         if self._conn is not None:
             return
         self._conn = duckdb.connect(":memory:")
-        # DuckDB rejects parameter binding in CREATE VIEW — interpolate
+        # DuckDB rejects parameter binding in CREATE VIEW - interpolate
         # the path. Safe: paths are derived from validated log_ids (UUIDs).
         events_path = str(self._paths.events).replace("'", "''")
         self._conn.execute(
@@ -203,7 +203,7 @@ class EventLogAccess:
         """Inspect events.parquet's schema (and a small distinct sample) to
         emit `ColumnSpec`s for every column in the events table. The
         per-column override JSON from `EventLog.column_overrides` can rename
-        labels and reorder columns — the editor still treats the canonical
+        labels and reorder columns - the editor still treats the canonical
         `name` as authoritative.
         """
 

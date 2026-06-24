@@ -13,7 +13,7 @@ export interface JobProgress {
 /**
  * Derive the progress bar + label for a job. Three modes:
  *  - count   (`total` known):       "12,340 / 50,000 (24%)"
- *  - fraction (`total === 100`):     "24%"  — modules reporting a 0–1 fraction
+ *  - fraction (`total === 100`):     "24%"  – modules reporting a 0–1 fraction
  *      are mapped to 0–100 by the backend; we drop the redundant "n / 100".
  *      (A genuine 100-count job collides here cosmetically only.)
  *  - running counter (no `total`):   "12,340 processed" / "Estimating…"

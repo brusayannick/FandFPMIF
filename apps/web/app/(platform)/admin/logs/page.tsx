@@ -215,7 +215,7 @@ export default function AdminLogsPage() {
                         <StatusBadge status={row.status} />
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
-                        {row.source_format ?? "—"}
+                        {row.source_format ?? "–"}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
                         {row.log_model === "object_centric" ? "OCEL" : "Case"}

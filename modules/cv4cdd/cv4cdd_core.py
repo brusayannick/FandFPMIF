@@ -50,7 +50,7 @@ def log_to_windowed_dfg_count(
     trace id, first timestamp)`` lookup used to translate detection
     bounding boxes back into wall-clock time.
     """
-    from pm4py import discover_dfg_typed  # inherited dep — always available
+    from pm4py import discover_dfg_typed  # inherited dep - always available
 
     activities = sorted(df["activity"].astype(str).unique())
     act_idx = {a: i for i, a in enumerate(activities)}
@@ -58,7 +58,7 @@ def log_to_windowed_dfg_count(
 
     # Sort events by timestamp to get traces in chronological order,
     # mirroring pm4py's TIMESTAMP_SORT behaviour in the reference repo.
-    # Must use mergesort (stable) — quicksort (pandas default) breaks ties
+    # Must use mergesort (stable) - quicksort (pandas default) breaks ties
     # arbitrarily, producing a different trace order from the reference for
     # the ~17 traces that all start at 2017-01-01 00:00:00.
     df_ts = df.sort_values("timestamp", kind="mergesort").reset_index(drop=True)
@@ -114,7 +114,7 @@ def similarity_calculation(windowed_dfg: np.ndarray) -> np.ndarray:
     """Compute pairwise cosine-distance between window DFG matrices and
     return a uint8 similarity image (255 = identical, 0 = max distance).
 
-    Vectorised cosine distance — `1 - (X @ X.T) / (||X|| * ||X||.T)` — so
+    Vectorised cosine distance - `1 - (X @ X.T) / (||X|| * ||X||.T)` - so
     we don't need scipy here. The compute is O(n²·d) regardless.
     """
     n = len(windowed_dfg)
@@ -212,7 +212,7 @@ def _matrix_to_model_jpeg(matrix: np.ndarray) -> bytes:
     Using PNG or pre-resizing to 256×256 changes the pixel statistics enough
     that some drift classes fall below the 0.5 detection threshold.
     """
-    coloured = _VIRIDIS[matrix]  # (H, W, 3) uint8  — natural matrix size
+    coloured = _VIRIDIS[matrix]  # (H, W, 3) uint8  - natural matrix size
     buf = io.BytesIO()
     Image.fromarray(coloured).save(buf, format="JPEG")  # default quality=75
     return buf.getvalue()
@@ -223,14 +223,14 @@ def _matrix_to_model_jpeg(matrix: np.ndarray) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def _resize_for_model(jpeg_bytes: bytes) -> "Any":  # noqa: F821 — tf is imported lazily
+def _resize_for_model(jpeg_bytes: bytes) -> "Any":  # noqa: F821 - tf is imported lazily
     """PIL-decode JPEG → TF bilinear resize → uint8 batch tensor (1, 256, 256, 3).
 
     Matches the reference repo exactly:
       utils.load_image  →  np.array(Image.open(path))          (PIL decode)
       build_inputs_for_object_detection  →  resize_and_crop_image  (TF bilinear)
     Using tf.io.decode_jpeg instead of PIL gives different DCT rounding and
-    shifts detection boxes by 1–15 windows.
+    shifts detection boxes by 1-15 windows.
     """
     import tensorflow as tf
 
@@ -357,14 +357,14 @@ def render_overlay(image_bytes: bytes, drifts: list[dict[str, Any]]) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Model cache — loaded once per process, reused across all detection runs.
+# Model cache - loaded once per process, reused across all detection runs.
 # ---------------------------------------------------------------------------
 
 _MODEL_CACHE: dict[str, Any] = {}
 
 # Detection runs inside `asyncio.to_thread` workers. Two concurrent cv4cdd jobs
 # (e.g. two logs imported close together) would otherwise import TensorFlow from
-# two worker threads at once — a first-time cross-thread import that can trip
+# two worker threads at once - a first-time cross-thread import that can trip
 # CPython's import-lock deadlock detector. Serialise the import so only one
 # thread ever loads it; once it's in sys.modules the lock is effectively free.
 _TF_IMPORT_LOCK = threading.Lock()
@@ -372,7 +372,7 @@ _TF_IMPORT_LOCK = threading.Lock()
 
 def _get_model(model_path: Path) -> Any:
     with _TF_IMPORT_LOCK:
-        import tensorflow as tf  # lazy — only loaded on actual run
+        import tensorflow as tf  # lazy - only loaded on actual run
 
     key = str(model_path)
     if key not in _MODEL_CACHE:
@@ -409,7 +409,7 @@ def run_detection(
         if progress is not None:
             try:
                 progress(p, msg)
-            except Exception:  # noqa: BLE001 — progress is best-effort
+            except Exception:  # noqa: BLE001 - progress is best-effort
                 pass
 
     _emit(0.15, "Windowing the event log")

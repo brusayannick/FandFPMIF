@@ -14,7 +14,7 @@ import { useAgentSimResults } from "../panel/queries";
 import { CardShell, COLORS, LegendDots } from "./_kit";
 
 /** New cases started over elapsed time (each log measured from its own start),
- * real vs simulated — shows whether the arrival process is reproduced. */
+ * real vs simulated – shows whether the arrival process is reproduced. */
 export default function ArrivalsComparison({
   logId,
 }: {

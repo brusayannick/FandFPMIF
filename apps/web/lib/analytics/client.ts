@@ -7,7 +7,7 @@ import { deriveUaClass } from "@/lib/analytics/dnt";
 import type { EventName } from "@/lib/analytics/events";
 
 /**
- * Tracking client — a thin queue that batches events and POSTs to
+ * Tracking client – a thin queue that batches events and POSTs to
  * `/api/v1/usage/sync`. The server is the source of truth for
  * whether ingestion is on; this client gates as a UX shortcut.
  */
@@ -39,7 +39,7 @@ let warnedIngestFailure = false;
 
 // The ingest endpoint requires a bearer token (same as every other API call).
 // We cache the most recent access token so the synchronous unload path can
-// authenticate too — `navigator.sendBeacon` can't set an Authorization header.
+// authenticate too – `navigator.sendBeacon` can't set an Authorization header.
 let cachedToken: string | null = null;
 
 async function accessToken(): Promise<string | null> {
@@ -142,7 +142,7 @@ export async function flush(): Promise<void> {
       const token = await accessToken();
       if (!token) {
         // Session token not ready yet (e.g. just after load). Re-queue the
-        // batch and try again next tick rather than POST unauthenticated —
+        // batch and try again next tick rather than POST unauthenticated –
         // the endpoint requires a bearer token and would 401 the events away.
         queue = batch.concat(queue);
         return;
@@ -181,7 +181,7 @@ export async function flush(): Promise<void> {
 
 /**
  * Last-ditch flush on unload. Must be synchronous, so we can't fetch a fresh
- * token here — we reuse the one cached by the periodic `flush()` (which runs
+ * token here – we reuse the one cached by the periodic `flush()` (which runs
  * every few seconds and on tab-hide, so it's normally current). An
  * authenticated `keepalive` fetch survives the unload and, unlike
  * `sendBeacon`, can carry the bearer token the ingest endpoint requires;

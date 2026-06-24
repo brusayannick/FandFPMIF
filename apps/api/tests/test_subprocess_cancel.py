@@ -1,7 +1,7 @@
 """Cancellation of subprocess-isolated module jobs (kill + respawn).
 
-Subprocess handlers — especially native/threaded ones like AgentSimulator's
-pm4py/Mesa pipeline run via `asyncio.to_thread` — can't be stopped by the
+Subprocess handlers - especially native/threaded ones like AgentSimulator's
+pm4py/Mesa pipeline run via `asyncio.to_thread` - can't be stopped by the
 cooperative `CancelToken`: a Python thread can't be interrupted and the
 upstream call has no poll point. The only reliable stop is to SIGKILL the
 worker's process group and respawn it. These tests cover that path:
@@ -87,7 +87,7 @@ async def test_fail_all_pending_rejects_outstanding_requests() -> None:
 @pytest.mark.asyncio
 async def test_kill_worker_group_kills_grandchildren(tmp_path: Path) -> None:
     """`_kill_worker_group` must take down the worker's whole process group, so
-    a simulation that forked helper processes dies with it — not just the
+    a simulation that forked helper processes dies with it - not just the
     worker leader."""
     bridge = SubprocessBridge(_manifest(), tmp_path)
     # Parent (group leader, own session) spawns a child sleeper in the SAME
@@ -182,62 +182,114 @@ async def test_cancel_active_is_a_noop_during_teardown(monkeypatch, tmp_path: Pa
     await bridge.cancel_active()  # returns immediately, never spawns
 
 
-@pytest.mark.asyncio
-async def test_runtime_cancel_invokes_canceller_for_subprocess_job() -> None:
-    """A running job owned by a subprocess module routes through the canceller
-    hook (kill+respawn); an in-process job (no `module_id`) does not — it stays
-    on the cooperative token path."""
+async def _add_running_job(module_id: str | None) -> str:
+    """Insert a running Job row and return its id."""
     from mate.api.db.engine import get_sessionmaker
     from mate.api.db.models import Job
-    from mate.api.jobs.runtime import JobRuntime
 
     from .conftest import TEST_USER_ID
 
-    rt = JobRuntime()
-    calls: list[tuple[str, str]] = []
-
-    async def canceller(job_id: str, module_id: str) -> None:
-        calls.append((job_id, module_id))
-
-    rt.set_subprocess_canceller(canceller)
+    job_id = uuid.uuid4().hex
     sm = get_sessionmaker()
-
-    sub_id = uuid.uuid4().hex
     async with sm() as s:
         s.add(
             Job(
-                id=sub_id,
+                id=job_id,
                 user_id=TEST_USER_ID,
-                type="module.agentsimulator.simulate",
-                title="sim",
+                type="module.agentsimulator.simulate" if module_id else "ingest.import",
+                title="sim" if module_id else "import",
                 status="running",
-                module_id="agentsimulator",
+                module_id=module_id,
                 payload_json={},
             )
         )
         await s.commit()
+    return job_id
+
+
+@pytest.mark.asyncio
+async def test_runtime_cancel_soft_immediate_then_hard_after_grace() -> None:
+    """A running subprocess job is asked to wind down cooperatively (soft hook,
+    fired immediately); the hard kill+respawn hook only fires after the grace
+    window elapses and the job is still running."""
+    from mate.api.jobs.runtime import JobRuntime
+
+    rt = JobRuntime()
+    # Shrink the grace window so the escalation watchdog fires fast in the test.
+    rt.settings = rt.settings.model_copy(update={"subprocess_cancel_grace_seconds": 0.05})
+    soft_calls: list[tuple[str, str]] = []
+    hard_calls: list[tuple[str, str]] = []
+
+    async def soft(job_id: str, module_id: str) -> None:
+        soft_calls.append((job_id, module_id))
+
+    async def hard(job_id: str, module_id: str) -> None:
+        hard_calls.append((job_id, module_id))
+
+    rt.set_subprocess_soft_canceller(soft)
+    rt.set_subprocess_hard_canceller(hard)
+
+    sub_id = await _add_running_job("agentsimulator")
+    # Stand in for the still-running host-side handler task so the watchdog has a
+    # live target to escalate against.
+    rt._running_tasks[sub_id] = asyncio.get_running_loop().create_future()  # type: ignore[assignment]
 
     assert await rt.cancel(sub_id) is True
-    assert calls == [(sub_id, "agentsimulator")]
+    assert soft_calls == [(sub_id, "agentsimulator")]  # soft fired at once
+    assert hard_calls == []  # still inside the grace window
 
-    # In-process job: module_id is NULL → canceller must not fire.
-    calls.clear()
-    plain_id = uuid.uuid4().hex
-    async with sm() as s:
-        s.add(
-            Job(
-                id=plain_id,
-                user_id=TEST_USER_ID,
-                type="ingest.import",
-                title="import",
-                status="running",
-                module_id=None,
-                payload_json={},
-            )
-        )
-        await s.commit()
+    await asyncio.sleep(0.15)  # let the grace window elapse
+    assert hard_calls == [(sub_id, "agentsimulator")]  # escalated to hard kill
 
+    rt._running_tasks.pop(sub_id, None)
+    await rt.stop()
+
+
+@pytest.mark.asyncio
+async def test_runtime_no_escalation_when_job_finished() -> None:
+    """If the handler task is gone by the time the grace window elapses (it wound
+    down cooperatively after the soft signal), the hard hook must NOT fire."""
+    from mate.api.jobs.runtime import JobRuntime
+
+    rt = JobRuntime()
+    rt.settings = rt.settings.model_copy(update={"subprocess_cancel_grace_seconds": 0.05})
+    hard_calls: list[tuple[str, str]] = []
+
+    async def soft(job_id: str, module_id: str) -> None:
+        return None
+
+    async def hard(job_id: str, module_id: str) -> None:
+        hard_calls.append((job_id, module_id))
+
+    rt.set_subprocess_soft_canceller(soft)
+    rt.set_subprocess_hard_canceller(hard)
+
+    sub_id = await _add_running_job("agentsimulator")
+    # No entry in _running_tasks → the handler is already gone; the watchdog must
+    # short-circuit before calling hard.
+    assert await rt.cancel(sub_id) is True
+    await asyncio.sleep(0.15)
+    assert hard_calls == []
+
+    await rt.stop()
+
+
+@pytest.mark.asyncio
+async def test_runtime_cancel_inprocess_job_skips_subprocess_hooks() -> None:
+    """An in-process job (no `module_id`) takes neither cancel hook - it stays on
+    the cooperative token path."""
+    from mate.api.jobs.runtime import JobRuntime
+
+    rt = JobRuntime()
+    soft_calls: list[tuple[str, str]] = []
+
+    async def soft(job_id: str, module_id: str) -> None:
+        soft_calls.append((job_id, module_id))
+
+    rt.set_subprocess_soft_canceller(soft)
+
+    plain_id = await _add_running_job(None)
     assert await rt.cancel(plain_id) is True
-    assert calls == []
+    assert soft_calls == []
 
     await rt.stop()

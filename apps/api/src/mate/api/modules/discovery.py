@@ -1,4 +1,4 @@
-"""Module discovery — filesystem + Python entry points (§5.3 step 1).
+"""Module discovery - filesystem + Python entry points (§5.3 step 1).
 
 Two sources, both pointing at a folder with a `manifest.yaml`:
 
@@ -49,11 +49,11 @@ def discover(*roots: Path) -> list[DiscoveredModule]:
     `id`, the entry-point copy is ignored with a warning (lets a developer
     override an installed module by dropping a folder in `modules/`).
 
-    ``roots`` are filesystem roots scanned in order — typically the repo
+    ``roots`` are filesystem roots scanned in order - typically the repo
     ``modules/`` defaults root first, then the persistent uploads root. The
     first copy of an id wins; a later duplicate (e.g. a leftover upload
     colliding with a bundled default) is skipped with a warning rather than
-    aborting the whole load — one stray module must fail itself, not brick
+    aborting the whole load - one stray module must fail itself, not brick
     every module at boot. Rejecting an id collision is the upload path's job.
     """
 
@@ -81,7 +81,7 @@ def discover(*roots: Path) -> list[DiscoveredModule]:
                 # Roots are scanned defaults-first, so the first-seen copy wins
                 # and a later duplicate (almost always a leftover upload sitting
                 # next to the bundled default) is skipped. Skipping with a
-                # warning — instead of raising — keeps one stray module from
+                # warning - instead of raising - keeps one stray module from
                 # aborting the entire load and silently leaving the platform
                 # with no modules at all.
                 log.warning(
@@ -117,7 +117,7 @@ def discover_entry_points() -> list[DiscoveredModule]:
     Each entry point's value is an importable package name; we locate that
     package's directory via `find_spec()` and read `manifest.yaml` from it.
     A package that lacks a manifest is skipped with a warning rather than
-    crashing — the missing-manifest case usually means the package wasn't
+    crashing - the missing-manifest case usually means the package wasn't
     built as a Mate module.
     """
 

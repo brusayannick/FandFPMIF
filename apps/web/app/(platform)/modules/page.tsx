@@ -27,13 +27,21 @@ import {
 import type { ModuleSummary } from "@/lib/api-types";
 
 // Section order on the page; unknown categories are appended alphabetically.
-const CATEGORY_ORDER = ["foundation", "attribute", "external_input", "advanced", "other"];
+const CATEGORY_ORDER = [
+  "foundation",
+  "attribute",
+  "external_input",
+  "advanced",
+  "comparison",
+  "other",
+];
 
 const CATEGORY_LABELS: Record<string, string> = {
   foundation: "Foundation",
   attribute: "Attribute",
   external_input: "External input",
   advanced: "Advanced",
+  comparison: "Comparison",
   other: "Other",
 };
 
@@ -101,7 +109,7 @@ function ModuleActions() {
 
 function ModuleCard({ m }: { m: ModuleSummary }) {
   // The PUT replaces the stored config wholesale, so we must read the saved
-  // config first and hand it back unchanged when flipping `enabled` — toggling
+  // config first and hand it back unchanged when flipping `enabled` – toggling
   // with an empty config would wipe the module's settings. The switch stays
   // disabled until the config loads to keep that invariant.
   const { data: cfg } = useModuleConfig(m.id);

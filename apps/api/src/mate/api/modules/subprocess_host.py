@@ -39,13 +39,20 @@ from mate.sdk.manifest import Manifest
 
 log = structlog.get_logger(__name__)
 
+# Sentinel message carried by the RPC error the host raises for every ctx call
+# made by a soft-cancelled job. The worker recognises it (see
+# `subprocess_worker.WireConnection.run`) and rejects the pending future with
+# `Cancelled` instead of a plain `RuntimeError`, so the handler unwinds even
+# under a broad `except Exception`. Must stay in sync across host + worker.
+CANCEL_RPC_MSG = "__ff_job_cancelled__"
+
 
 class SubprocessHostError(RuntimeError):
     pass
 
 
 class SubprocessModule:
-    """Stand-in for the actual `Module` instance — the worker holds the real
+    """Stand-in for the actual `Module` instance - the worker holds the real
     one. We synthesise stub methods carrying the same decorator metadata so
     the loader's `_collect_handlers` walk picks them up untouched.
 
@@ -113,12 +120,12 @@ class SubprocessModule:
             setattr(type(self), attr, stub)
 
     def _make_handler_stub(self, attr: str):
-        """One stub for @route/@job/@on_event alike — forwards the call (with
+        """One stub for @route/@job/@on_event alike - forwards the call (with
         any positional payload + kwargs) to the worker over the bridge."""
         bridge = self._bridge
 
         # The stub is stored on the *instance* dict (see `_install_stubs`), so
-        # attribute access returns it **unbound** — Python does not strip a
+        # attribute access returns it **unbound** - Python does not strip a
         # leading `self`. Its first parameter must therefore be `ctx`, matching
         # what the loader's `_extra_handler_params` drops. A leading `_self` here
         # shifts everything by one, leaking `ctx` into the forwarded request
@@ -145,16 +152,33 @@ class SubprocessBridge:
         self._ready_evt = asyncio.Event()
         self._handlers_meta: list[dict[str, Any]] = []
         self._ctx_registry: dict[str, Any] = {}
+        # Soft-cancel bookkeeping. `_cancelled_job_ids` holds jobs asked to wind
+        # down; `_token_job` maps a per-call RPC token → its job id so a ctx RPC
+        # can tell whether *its* job is cancelled. Cleared when a job ends so a
+        # reused worker isn't poisoned by a stale flag.
+        self._cancelled_job_ids: set[str] = set()
+        self._token_job: dict[str, str] = {}
         # Set once `stop()` is called so a concurrent cancel-triggered respawn
         # doesn't resurrect the worker during teardown.
         self._stopping = False
         # Hold the respawn task so it isn't garbage-collected mid-flight.
         self._respawn_task: asyncio.Task[None] | None = None
 
+    def worker_pid(self) -> int | None:
+        """PID of the live worker process, or None if not running/exited.
+
+        Read-only - used by the admin resource sampler to attribute measured
+        CPU/RAM to this module's subprocess worker.
+        """
+        proc = self._proc
+        if proc is None or proc.returncode is not None:
+            return None
+        return proc.pid
+
     async def start(self) -> SubprocessModule:
         # Spawn the worker, wait for its `ready` (which carries the handler
         # list), then hand back a SubprocessModule whose stubs the loader binds
-        # like any in_process module — @route, @job and @on_event all work.
+        # like any in_process module - @route, @job and @on_event all work.
         self._server = await asyncio.start_unix_server(
             self._on_connect, path=str(self._socket_path), limit=RPC_STREAM_LIMIT
         )
@@ -175,12 +199,12 @@ class SubprocessBridge:
         """Spawn (or respawn) the worker process against the live socket.
 
         `start_new_session=True` puts the worker in its own process group, so
-        `cancel_active()` can `killpg` the whole subtree — the worker *and* any
-        grandchildren it forked — without touching the API process group.
+        `cancel_active()` can `killpg` the whole subtree - the worker *and* any
+        grandchildren it forked - without touching the API process group.
         """
         worker_py = _worker_python(self.folder)
         # Run the worker by file path (not `-m`) so we don't import the whole
-        # `mate.api` package chain under the module's venv Python — the worker
+        # `mate.api` package chain under the module's venv Python - the worker
         # only needs `mate.sdk`, which the installer installs into the venv.
         worker_script = Path(__file__).with_name("subprocess_worker.py")
         cmd = [
@@ -205,9 +229,9 @@ class SubprocessBridge:
         """Hard-stop whatever the worker is running by killing its process
         group, then respawn a fresh worker.
 
-        Subprocess handlers — especially native/threaded ones like
+        Subprocess handlers - especially native/threaded ones like
         AgentSimulator's pm4py/Mesa pipeline, which runs via
-        `asyncio.to_thread` with no poll point — cannot be cancelled
+        `asyncio.to_thread` with no poll point - cannot be cancelled
         cooperatively: a Python thread can't be interrupted and the upstream
         call never yields. Killing the OS process is the only reliable stop.
 
@@ -243,7 +267,7 @@ class SubprocessBridge:
     def _kill_worker_group(self) -> None:
         """SIGKILL the worker's whole process group. SIGKILL (not TERM) because
         a thread deep in a native numpy/pm4py call won't service a handler in
-        time — only an unconditional kill guarantees the CPU stops now."""
+        time - only an unconditional kill guarantees the CPU stops now."""
         proc = self._proc
         if proc is None or proc.returncode is not None:
             return
@@ -296,7 +320,7 @@ class SubprocessBridge:
 
         await conn.run()
 
-        # The connection ended — the worker exited (cancel kill, crash, or
+        # The connection ended - the worker exited (cancel kill, crash, or
         # clean shutdown). Fail outstanding calls so awaiting handler tasks
         # don't hang; if this was the live worker and we're not deliberately
         # stopping, drop ready so the next call waits for a respawn.
@@ -310,7 +334,7 @@ class SubprocessBridge:
         return True
 
     async def call_handler(self, attr: str, ctx, args: tuple, kwargs: dict[str, Any]) -> Any:
-        # A cancel may be mid-respawn — wait for the fresh worker rather than
+        # A cancel may be mid-respawn - wait for the fresh worker rather than
         # dispatching onto a dead connection.
         if not self._ready_evt.is_set():
             try:
@@ -323,6 +347,11 @@ class SubprocessBridge:
             raise SubprocessHostError(f"Worker for {self.manifest.id!r} is not connected.")
         token = uuid.uuid4().hex
         self._ctx_registry[token] = ctx
+        # Map this call's token → job id (when the loader tagged the ctx) so a
+        # soft cancel of that job makes every ctx RPC on this token raise.
+        job_id = getattr(ctx, "_ff_job_id", None)
+        if job_id is not None:
+            self._token_job[token] = job_id
         try:
             ctx_meta = {
                 "log_id": ctx.log_id,
@@ -345,6 +374,12 @@ class SubprocessBridge:
             )
         finally:
             self._ctx_registry.pop(token, None)
+            self._token_job.pop(token, None)
+            # The call returned (completed, cooperatively cancelled, or killed):
+            # drop the job's cancel flag so a later call reusing this worker
+            # isn't immediately rejected by a stale flag.
+            if job_id is not None:
+                self._cancelled_job_ids.discard(job_id)
 
     def _ctx_handlers(self) -> dict[str, Callable]:
         """Wire ctx.* RPC names to real ModuleContext methods."""
@@ -407,7 +442,13 @@ class SubprocessBridge:
             event = payload.pop("event", "")
             getattr(ctx.logger, level, ctx.logger.info)(event, **payload)
 
-        return {
+        async def cancel_check(params: dict[str, Any]) -> bool:
+            # Dedicated, side-effect-free poll for ctx.check_cancelled() on a
+            # new-SDK worker. The guard below raises CANCEL_RPC_MSG when flagged;
+            # if not flagged this just returns False.
+            return False
+
+        handlers = {
             "ctx.event_log.duckdb_fetch": event_log_duckdb_fetch,
             "ctx.event_log.materialize": event_log_materialize,
             "ctx.bus.emit": bus_emit,
@@ -418,19 +459,47 @@ class SubprocessBridge:
             "ctx.registry.call": registry_call,
             "ctx.progress.update": progress_update,
             "ctx.logger.log": logger_log,
+            "ctx.cancel.check": cancel_check,
         }
+        # Wrap every ctx RPC so it raises the cancel sentinel the moment its
+        # job is soft-cancelled - making *each* ctx touch (progress/cache/duckdb/
+        # registry/bus/logger/cancel-check) a cooperative poll point. The worker
+        # reconstructs the sentinel as `Cancelled` and unwinds the handler.
+        return {name: self._guard_cancel(fn) for name, fn in handlers.items()}
+
+    def _guard_cancel(self, fn: Callable) -> Callable:
+        async def wrapped(params: dict[str, Any]) -> Any:
+            job_id = self._token_job.get(params.get("ctx_token", ""))
+            if job_id is not None and job_id in self._cancelled_job_ids:
+                raise SubprocessHostError(CANCEL_RPC_MSG)
+            result = fn(params)
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
+
+        return wrapped
+
+    async def soft_cancel(self, job_id: str) -> None:
+        """Phase-1 cancel: flag *job_id* so its worker's next ctx RPC raises the
+        cancel sentinel (cooperative wind-down). Returns immediately - no kill."""
+        self._cancelled_job_ids.add(job_id)
+
+    def clear_cancel(self, job_id: str) -> None:
+        """Drop a job's soft-cancel flag (e.g. after a hard escalation) so a
+        worker reused for a later call isn't poisoned by the stale flag."""
+        self._cancelled_job_ids.discard(job_id)
 
 
 def _worker_python(folder: Path) -> Path:
     """Path to the module's venv python (with platform sdk available via the
-    MetaPathFinder shim during in_process — for subprocess we use the venv
+    MetaPathFinder shim during in_process - for subprocess we use the venv
     python directly since it's isolated)."""
     candidates = [folder / ".venv" / "bin" / "python3", folder / ".venv" / "bin" / "python"]
     for c in candidates:
         if c.exists():
             return c
     raise SubprocessHostError(
-        f"No .venv/bin/python3 under {folder} — install must run before starting the subprocess."
+        f"No .venv/bin/python3 under {folder} - install must run before starting the subprocess."
     )
 
 

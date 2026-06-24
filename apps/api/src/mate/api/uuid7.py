@@ -1,4 +1,4 @@
-"""UUID v7 generator (RFC 9562) — time-ordered identifiers.
+"""UUID v7 generator (RFC 9562) - time-ordered identifiers.
 
 Used as the canonical identity for event logs and jobs. UUID v7 sorts naturally
 by creation time, which is convenient for indexing and listings while still

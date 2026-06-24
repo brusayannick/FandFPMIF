@@ -123,7 +123,7 @@ export function temporalSwimlaneLayout<TNodeData extends Record<string, unknown>
   }
 
   // Compute band heights and offsets.
-  // Height = N * nodeSize + (N-1) * spacing — the last lane has no trailing gap.
+  // Height = N * nodeSize + (N-1) * spacing – the last lane has no trailing gap.
   const bandHeight = (count: number) =>
     count === 0 ? 0 : count * perpSize + (count - 1) * microLaneSpacing;
 

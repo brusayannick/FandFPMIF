@@ -1,6 +1,6 @@
 """Pydantic v2 schemas for the /watched-folders API surface.
 
-A watched folder is a persistent, auto-scanned import source — see
+A watched folder is a persistent, auto-scanned import source - see
 ``mate.api.routes.watched_folders`` and ``mate.api.ingest.watch``.
 """
 
@@ -42,7 +42,7 @@ class WatchedFolderUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     mode: WatchMode | None = None
     interval_seconds: int | None = Field(default=None, ge=MIN_INTERVAL_SECONDS)
-    # Pause/resume — only the two user-settable states (never "error").
+    # Pause/resume - only the two user-settable states (never "error").
     status: Literal["active", "paused"] | None = None
     default_mapping: dict[str, Any] | None = None
 

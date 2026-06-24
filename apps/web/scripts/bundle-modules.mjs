@@ -22,7 +22,7 @@ const WEB_ROOT = resolve(__dirname, "..");
 const REPO_ROOT = resolve(WEB_ROOT, "..", "..");
 
 // Modules dir + runtime externals are env-overridable so the script works
-// both from the repo root (dev — `pnpm dev`) and from a flat install dir
+// both from the repo root (dev – `pnpm dev`) and from a flat install dir
 // inside the production Docker image (the runner stage drops the script at
 // /opt/ff-bundler/ alongside its own node_modules, with no apps/web parent).
 const MODULES_DIR = process.env.FF_MODULES_DIR
@@ -94,7 +94,7 @@ function entriesForModule(folder, manifest) {
   return out.filter((e) => existsSync(e.path));
 }
 
-/** Aliases mirror apps/web/tsconfig.json — module source can use `@/...`. */
+/** Aliases mirror apps/web/tsconfig.json – module source can use `@/...`. */
 const ALIAS = {
   "@/": resolve(WEB_ROOT) + "/",
 };
@@ -104,7 +104,7 @@ const aliasPlugin = {
   setup(b) {
     for (const [prefix, target] of Object.entries(ALIAS)) {
       b.onResolve({ filter: new RegExp(`^${prefix.replace(/[/]/g, "\\/")}`) }, (args) => {
-        // Workspace alias hits — but if the requested path matches one of
+        // Workspace alias hits – but if the requested path matches one of
         // the runtime externals, we let esbuild's `external` list handle it
         // (which it will, since externals are matched before plugins).
         if (RUNTIME_EXTERNALS.includes(args.path)) {
@@ -132,7 +132,7 @@ function commonOptions(entry, outdir) {
     // Runtime externals stay as require() calls; the frontend loader resolves
     // them against window.__FF_RUNTIME__.
     external: RUNTIME_EXTERNALS,
-    // Fallback resolve roots for bundled (non-externalised) npm deps — see
+    // Fallback resolve roots for bundled (non-externalised) npm deps – see
     // NODE_PATHS above. Empty in dev (normal resolution already succeeds).
     nodePaths: NODE_PATHS,
     plugins: [aliasPlugin],
@@ -177,12 +177,12 @@ async function main() {
   if (!WATCH) {
     // Surface the resolve fallbacks + whether the bundled (non-externalised)
     // bpmn deps are actually present in this image. If bpmn-js shows NOT FOUND
-    // here, the runner image was built without them (stale/cached build) — the
+    // here, the runner image was built without them (stale/cached build) – the
     // discovery panel will then fail to bundle.
     const bpmnProbe = NODE_PATHS.map((p) => join(p, "bpmn-js")).find((p) => existsSync(p));
     console.log(
       `[bundle-modules] nodePaths=${JSON.stringify(NODE_PATHS)} ` +
-        `bpmn-js=${bpmnProbe ?? "NOT FOUND — discovery panel will fail to bundle"}`,
+        `bpmn-js=${bpmnProbe ?? "NOT FOUND – discovery panel will fail to bundle"}`,
     );
   }
   const allTasks = [];
@@ -197,7 +197,7 @@ async function main() {
   }
   if (!WATCH) return;
   // Keep the process alive while watch contexts run. A never-resolving promise
-  // alone does NOT keep Node's event loop alive — Node 22 then exits with code
+  // alone does NOT keep Node's event loop alive – Node 22 then exits with code
   // 13 ("unsettled top-level await") once no active handles remain, which
   // crash-loops the dev container. Hold an explicit ref'd timer handle so the
   // esbuild watchers keep running.

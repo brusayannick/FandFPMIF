@@ -85,13 +85,13 @@ export function ShareDialog({
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (targets.data ?? []).length === 0 ? (
           <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-            You're not in any team yet. Ask an admin to add you to a team — you can then share
+            You're not in any team yet. Ask an admin to add you to a team – you can then share
             with your teammates.
           </p>
         ) : (
           <div className="flex items-center gap-2">
             <Select value={selected} onValueChange={setSelected}>
-              <SelectTrigger className="flex-1">
+              <SelectTrigger className="min-w-0 flex-1">
                 <SelectValue placeholder="Pick a member or team…" />
               </SelectTrigger>
               <SelectContent>
@@ -118,7 +118,7 @@ export function ShareDialog({
                 )}
               </SelectContent>
             </Select>
-            <Button onClick={onAdd} disabled={!selected || add.isPending}>
+            <Button onClick={onAdd} disabled={!selected || add.isPending} className="shrink-0">
               {add.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
               Share
             </Button>

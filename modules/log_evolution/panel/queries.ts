@@ -8,7 +8,7 @@ const STALE_TIME = 30_000;
 
 export type Granularity = "auto" | "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
 
-// Per-period volume bundle — one payload feeds the arrivals/WIP/activity-mix
+// Per-period volume bundle – one payload feeds the arrivals/WIP/activity-mix
 // widgets so they share a single cached fetch. Mirrors the backend
 // `compute_evolution` schema (modules/log_evolution/evolution.py).
 export interface ActivityMix {

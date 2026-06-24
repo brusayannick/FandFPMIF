@@ -1,17 +1,17 @@
-"""analytics export indexes — cross-user occurred_at / (event_type, occurred_at)
+"""analytics export indexes - cross-user occurred_at / (event_type, occurred_at)
 
 Revision ID: 0004_analytics_export_indexes
 Revises: 0003_dashboard_sharing
 Create Date: 2026-06-21
 
 The admin behaviour-export filters (``routes/admin.py``) read ``analytics_events``
-WITHOUT a leading ``user_id`` — every existing index on the table is
+WITHOUT a leading ``user_id`` - every existing index on the table is
 ``(user_id, ...)``-leading and so can't serve those scans. Two additive indexes
 cover the cross-user filter/sort paths:
 
-  - ``ix_analytics_events_occurred``       on ``(occurred_at)``           — date
+  - ``ix_analytics_events_occurred``       on ``(occurred_at)``           - date
     windowing + the export's oldest-first ordering across all users.
-  - ``ix_analytics_events_type_occurred``  on ``(event_type, occurred_at)`` —
+  - ``ix_analytics_events_type_occurred``  on ``(event_type, occurred_at)`` -
     the common "one event type over a date range" filter.
 
 Additive and idempotent (guarded on the live schema like the squashed baseline)

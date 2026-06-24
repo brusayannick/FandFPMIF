@@ -151,7 +151,7 @@ export function useUpdateModuleConfig() {
     onSuccess: () => {
       // Invalidate every namespaced query for this module (`config`,
       // `config-schema`, viz queries). Default `refetchType: "active"` only
-      // refetches what's currently mounted — inactive tabs refresh lazily
+      // refetches what's currently mounted – inactive tabs refresh lazily
       // when the user opens them. The previous "all" setting cascaded
       // expensive recomputes (ILP, process-tree) on every save and brought
       // the API down via OOM / recursion errors.

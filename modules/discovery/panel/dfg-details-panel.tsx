@@ -249,14 +249,14 @@ function EdgeDetails({ edge, data }: { edge: DfgEdge; data: DfgData }) {
         {sourceFreq > 0 && (
           <Stat
             label="Of source events"
-            value={percent(edge.frequency, sourceFreq) ?? "—"}
+            value={percent(edge.frequency, sourceFreq) ?? "–"}
             hint={`${formatNumber(sourceFreq)} total`}
           />
         )}
         {targetFreq > 0 && (
           <Stat
             label="Of target events"
-            value={percent(edge.frequency, targetFreq) ?? "—"}
+            value={percent(edge.frequency, targetFreq) ?? "–"}
             hint={`${formatNumber(targetFreq)} total`}
           />
         )}
@@ -277,7 +277,7 @@ function EdgeDetails({ edge, data }: { edge: DfgEdge; data: DfgData }) {
           <Section title="Dependency (Heuristics)">
             <Stat label="Score" value={edge.dependency.toFixed(3)} />
             <p className="text-[11px] leading-snug text-muted-foreground">
-              How strongly this transition is preferred over its reverse — closer to 1 means a
+              How strongly this transition is preferred over its reverse – closer to 1 means a
               dominant direction.
             </p>
           </Section>

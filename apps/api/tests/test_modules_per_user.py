@@ -204,7 +204,7 @@ async def test_restore_defaults_re_adds_removed_default(
 async def test_uninstall_default_keeps_repo_files(
     client_with_sample_mod: AsyncClient,
 ) -> None:
-    """Uninstalling a default drops only the user's row — repo code survives."""
+    """Uninstalling a default drops only the user's row - repo code survives."""
     from mate.api.config import get_settings
 
     module_py = get_settings().modules_dir / "sample_mod" / "module.py"

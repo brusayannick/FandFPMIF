@@ -1,7 +1,7 @@
 """Unit tests for the time-slicing + per-slice metric series.
 
 Exercises the pure functions in :mod:`modules.complexity_over_time.slicing`
-against a synthetic log spanning several months — no ``ModuleContext`` needed.
+against a synthetic log spanning several months - no ``ModuleContext`` needed.
 """
 
 from __future__ import annotations

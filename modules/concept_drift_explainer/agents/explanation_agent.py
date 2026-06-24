@@ -1,4 +1,4 @@
-"""Explanation agent — synthesise the ranked, evidence-backed causes.
+"""Explanation agent - synthesise the ranked, evidence-backed causes.
 
 Adapted from the original `backend/agents/explanation_agent.py`. Same drift-
 type-specific prompts, same confidence-score calculation, same two-pass draft
@@ -108,7 +108,7 @@ Prioritize evidence that points to a single, discrete event with a specific date
 - **Drift Type:** {drift_type}
 - **Drift Period:** {start_timestamp} to {end_timestamp}
 
-**## 2. Reference Glossary (for your eyes only — DO NOT cite)**
+**## 2. Reference Glossary (for your eyes only - DO NOT cite)**
 {formatted_glossary}
 
 **## 3. Evidence from Context Documents**
@@ -129,7 +129,7 @@ Prioritize evidence suggesting a transition, coexistence of old/new processes, o
 - **Drift Type:** {drift_type}
 - **Drift Period:** {start_timestamp} to {end_timestamp}
 
-**## 2. Reference Glossary (for your eyes only — DO NOT cite)**
+**## 2. Reference Glossary (for your eyes only - DO NOT cite)**
 {formatted_glossary}
 
 **## 3. Evidence from Context Documents**
@@ -150,7 +150,7 @@ Prioritize evidence of multiple small adjustments, iterative improvements, or ag
 - **Drift Type:** {drift_type}
 - **Drift Period:** {start_timestamp} to {end_timestamp}
 
-**## 2. Reference Glossary (for your eyes only — DO NOT cite)**
+**## 2. Reference Glossary (for your eyes only - DO NOT cite)**
 {formatted_glossary}
 
 **## 3. Evidence from Context Documents**
@@ -171,7 +171,7 @@ Prioritize evidence of seasonal activities, cyclical patterns, or temporary proc
 - **Drift Type:** {drift_type}
 - **Drift Period:** {start_timestamp} to {end_timestamp}
 
-**## 2. Reference Glossary (for your eyes only — DO NOT cite)**
+**## 2. Reference Glossary (for your eyes only - DO NOT cite)**
 {formatted_glossary}
 
 **## 3. Evidence from Context Documents**
@@ -194,7 +194,7 @@ REFINE_PROMPT_TEMPLATE = """You are a senior editor reviewing an analysis from a
 Your task is to critique and refine the provided "Draft Explanation" based on the original "Evidence" and "Reference Glossary".
 Ensure the final summary is concise, the cause descriptions are logical, and that every claim is strongly supported by the cited evidence.
 
-**## Original Reference Glossary (for your eyes only — DO NOT cite)**
+**## Original Reference Glossary (for your eyes only - DO NOT cite)**
 {formatted_glossary}
 
 **## Original Evidence**
@@ -209,7 +209,7 @@ Critique and refine the draft explanation, ensuring the final wording is cautiou
 
 
 # Append schema descriptions to each prompt. With `method="json_mode"` the
-# LLM is told to return JSON but is NOT given the schema — so we have to spell
+# LLM is told to return JSON but is NOT given the schema - so we have to spell
 # it out in the prompt or the model invents its own shape.
 SUDDEN_DRIFT_PROMPT += CAUSE_SCHEMA_SECTION
 GRADUAL_DRIFT_PROMPT += CAUSE_SCHEMA_SECTION
@@ -329,7 +329,7 @@ def make_explanation_agent(
                 raw_text[:1000] if isinstance(raw_text, str) else raw_text,
             )
             raise RuntimeError(
-                f"LLM produced no parseable {schema_name} output — "
+                f"LLM produced no parseable {schema_name} output - "
                 "the selected model may not support structured tool calling. "
                 "Try a different chat model in Module settings → AI models."
             )

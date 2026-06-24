@@ -1,4 +1,4 @@
-"""dashboard sharing — teams, team members, dashboard shares
+"""dashboard sharing - teams, team members, dashboard shares
 
 Revision ID: 0003_dashboard_sharing
 Revises: 0002_system_settings
@@ -6,9 +6,9 @@ Create Date: 2026-06-21
 
 Adds the three tables behind dashboard sharing:
 
-  - ``teams``            — admin-managed groups used as a coarse share target.
-  - ``team_members``     — membership edges (composite PK).
-  - ``dashboard_shares`` — a read grant for one dashboard to one user or team.
+  - ``teams``            - admin-managed groups used as a coarse share target.
+  - ``team_members``     - membership edges (composite PK).
+  - ``dashboard_shares`` - a read grant for one dashboard to one user or team.
 
 A share is the only sanctioned cross-account path (see ``mate.api.sharing``);
 everything else stays strictly per-user. Guarded on the live schema in the same

@@ -66,7 +66,7 @@ function detect(file: File): DetectedFormat {
 }
 
 async function readFirstLine(file: File): Promise<string> {
-  // Read up to 4KB — far more than we need for headers, less than what would
+  // Read up to 4KB – far more than we need for headers, less than what would
   // hurt to slurp synchronously into memory.
   const blob = file.slice(0, 4096);
   const text = await blob.text();
@@ -81,7 +81,7 @@ async function readSampleLines(file: File, lineCount: number): Promise<string[]>
 }
 
 function parseCsvHeader(line: string, delimiter: string): string[] {
-  // Minimal split — quoted commas in headers are vanishingly rare; the
+  // Minimal split – quoted commas in headers are vanishingly rare; the
   // backend revalidates on import and the wizard is otherwise advisory.
   return line.split(delimiter).map((c) => c.replace(/^"(.*)"$/, "$1").trim());
 }
@@ -180,7 +180,7 @@ function autoMap(headers: string[]): Partial<CsvMapping> {
     return null;
   };
 
-  // Pass 1 — exact normalised match. Strongest signal: the user wrote
+  // Pass 1 – exact normalised match. Strongest signal: the user wrote
   // "Case ID" or "case-id" intending the canonical case_id column.
   for (const key of CANONICAL_FIELDS) {
     const found = findFor(key, (h, c) => h === c);
@@ -190,7 +190,7 @@ function autoMap(headers: string[]): Partial<CsvMapping> {
     }
   }
 
-  // Pass 2 — substring containment for whatever's still unclaimed. So
+  // Pass 2 – substring containment for whatever's still unclaimed. So
   // "registered_case_id" still resolves to case_id, but only if no exact
   // match was found for any other field first.
   for (const key of CANONICAL_FIELDS) {
@@ -275,7 +275,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
   const [xmlMapping, setXmlMapping] = useState<Partial<XmlMapping>>({});
   const [xmlError, setXmlError] = useState<string | null>(null);
 
-  // JSON wizard state — same shape as XML. `jsonProbe.format_hint === "ocel"`
+  // JSON wizard state – same shape as XML. `jsonProbe.format_hint === "ocel"`
   // means the server will auto-route it object-centric, so no mapping is shown.
   const [jsonProbe, setJsonProbe] = useState<JsonProbeResponse | null>(null);
   const [jsonMapping, setJsonMapping] = useState<Partial<JsonMapping>>({});
@@ -367,7 +367,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
 
         // Best-effort AI fill for fields autoMap left blank. Silently no-ops
         // if the user hasn't configured AI; surfaces nothing if the call
-        // fails — autoMap's coverage is fine on its own.
+        // fails – autoMap's coverage is fine on its own.
         if (aiConfigured && cols.length > 0) {
           const sampleRows = sample
             .slice(1, 11)
@@ -393,7 +393,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
               setAiSuggested(newlySuggested);
             }
           } catch {
-            // Drop silently — autoMap is the source of truth and the user
+            // Drop silently – autoMap is the source of truth and the user
             // can map manually below.
           }
         }
@@ -411,7 +411,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
       return Boolean(mapping.case_id && mapping.activity && mapping.timestamp);
     }
     if (fmt === "xml") {
-      // XES-shaped or OCEL .xml is handled server-side — no mapping needed.
+      // XES-shaped or OCEL .xml is handled server-side – no mapping needed.
       // For generic XML we require the four canonical fields.
       if (xmlProbe?.format_hint === "xes" || xmlProbe?.format_hint === "ocel") return true;
       return Boolean(
@@ -423,7 +423,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
     }
     if (fmt === "json") {
       // OCEL .json auto-routes server-side. Generic JSON needs the three
-      // mandatory roles (event_path is optional — top-level arrays have none).
+      // mandatory roles (event_path is optional – top-level arrays have none).
       if (jsonProbe?.format_hint === "ocel") return true;
       return Boolean(jsonMapping.case_id && jsonMapping.activity && jsonMapping.timestamp);
     }
@@ -749,7 +749,7 @@ function WatchImportForm() {
         <div className="rounded-md border border-dashed border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
           A watched folder scans a location in your storage backend and imports new event-log
           files automatically. Drop files there from an upstream pipeline (an S3 prefix when S3
-          storage is connected, otherwise a server directory) — nothing is uploaded from your
+          storage is connected, otherwise a server directory) – nothing is uploaded from your
           browser here.
         </div>
 
@@ -992,21 +992,21 @@ function CsvMappingFields({
           label="end_timestamp"
           value={mapping.end_timestamp ?? "__none__"}
           onChange={set("end_timestamp")}
-          options={[{ value: "__none__", label: "—" }, ...headers.map((h) => ({ value: h, label: h }))]}
+          options={[{ value: "__none__", label: "–" }, ...headers.map((h) => ({ value: h, label: h }))]}
           aiSuggested={aiSuggested.has("end_timestamp")}
         />
         <FieldSelect
           label="resource"
           value={mapping.resource ?? "__none__"}
           onChange={set("resource")}
-          options={[{ value: "__none__", label: "—" }, ...headers.map((h) => ({ value: h, label: h }))]}
+          options={[{ value: "__none__", label: "–" }, ...headers.map((h) => ({ value: h, label: h }))]}
           aiSuggested={aiSuggested.has("resource")}
         />
         <FieldSelect
           label="cost"
           value={mapping.cost ?? "__none__"}
           onChange={set("cost")}
-          options={[{ value: "__none__", label: "—" }, ...headers.map((h) => ({ value: h, label: h }))]}
+          options={[{ value: "__none__", label: "–" }, ...headers.map((h) => ({ value: h, label: h }))]}
           aiSuggested={aiSuggested.has("cost")}
         />
       </div>
@@ -1222,7 +1222,7 @@ function XmlMappingSection({
           value={mapping.end_timestamp ?? "__none__"}
           onChange={set("end_timestamp")}
           options={[
-            { value: "__none__", label: "—" },
+            { value: "__none__", label: "–" },
             ...fieldNames.map((h) => ({ value: h, label: h })),
           ]}
         />
@@ -1231,7 +1231,7 @@ function XmlMappingSection({
           value={mapping.resource ?? "__none__"}
           onChange={set("resource")}
           options={[
-            { value: "__none__", label: "—" },
+            { value: "__none__", label: "–" },
             ...fieldNames.map((h) => ({ value: h, label: h })),
           ]}
         />
@@ -1240,7 +1240,7 @@ function XmlMappingSection({
           value={mapping.cost ?? "__none__"}
           onChange={set("cost")}
           options={[
-            { value: "__none__", label: "—" },
+            { value: "__none__", label: "–" },
             ...fieldNames.map((h) => ({ value: h, label: h })),
           ]}
         />
@@ -1371,7 +1371,7 @@ function JsonMappingSection({
           value={mapping.end_timestamp ?? "__none__"}
           onChange={set("end_timestamp")}
           options={[
-            { value: "__none__", label: "—" },
+            { value: "__none__", label: "–" },
             ...fieldNames.map((h) => ({ value: h, label: h })),
           ]}
         />
@@ -1380,7 +1380,7 @@ function JsonMappingSection({
           value={mapping.resource ?? "__none__"}
           onChange={set("resource")}
           options={[
-            { value: "__none__", label: "—" },
+            { value: "__none__", label: "–" },
             ...fieldNames.map((h) => ({ value: h, label: h })),
           ]}
         />
@@ -1389,7 +1389,7 @@ function JsonMappingSection({
           value={mapping.cost ?? "__none__"}
           onChange={set("cost")}
           options={[
-            { value: "__none__", label: "—" },
+            { value: "__none__", label: "–" },
             ...fieldNames.map((h) => ({ value: h, label: h })),
           ]}
         />
@@ -1425,7 +1425,7 @@ type SchemaKind =
   | "error";
 
 interface SchemaGroup {
-  id: string; // signature — also the React key
+  id: string; // signature – also the React key
   kind: SchemaKind;
   itemIndices: number[];
   // CSV-only:
@@ -1488,7 +1488,7 @@ function jsonSignature(probe: JsonProbeResponse): string {
   return `json:${probe.event_path ?? "?"}:${fields}`;
 }
 
-// Bounded-concurrency map (lightweight — only used during folder scan).
+// Bounded-concurrency map (lightweight – only used during folder scan).
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -1532,7 +1532,7 @@ function collectFolderItems(files: FileList): SelectedFolder | null {
     if (fmt === "unsupported") continue; // silently skip non-log files (READMEs, .DS_Store…)
     items.push({ file: f, relativePath: rel, format: fmt, status: "pending" });
   }
-  // Stable order — by relative path so subdirs cluster.
+  // Stable order – by relative path so subdirs cluster.
   items.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
   return { rootName, items };
 }
@@ -1630,7 +1630,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
               };
             }
             if (item.format === "ocel") {
-              // Explicit OCEL extension (.jsonocel / .xmlocel / .sqlite) — no
+              // Explicit OCEL extension (.jsonocel / .xmlocel / .sqlite) – no
               // mapping, server reads it directly.
               return { index, signature: "ocel", kind: "ocel" };
             }
@@ -1638,7 +1638,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
           } catch (err) {
             return {
               index,
-              signature: `error:${index}`, // unique — each error is its own group
+              signature: `error:${index}`, // unique – each error is its own group
               kind: "error",
               error: (err as Error).message || "Scan failed",
             };
@@ -1828,7 +1828,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
         const item = picked.items[i];
         const g = item.groupId ? groupById.get(item.groupId) : undefined;
 
-        // Files whose schema scan failed get marked skipped — we don't have a
+        // Files whose schema scan failed get marked skipped – we don't have a
         // valid mapping to send so there's nothing useful to attempt.
         if (g?.kind === "error") {
           skipped++;

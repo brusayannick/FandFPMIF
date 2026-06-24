@@ -1,4 +1,4 @@
-"""Document ingestion — chunk, embed, and upsert per-log corpora.
+"""Document ingestion - chunk, embed, and upsert per-log corpora.
 
 Adapted from the original repo's `backend/utils/ingest_documents.py`. Key
 differences from the original:
@@ -215,7 +215,7 @@ def process_glossary_file(
     namespace: str = KB_NS,
 ) -> int:
     """Embed the BPM glossary into the `bpm-kb` namespace."""
-    import pandas as pd  # local — pandas is inherited from the platform
+    import pandas as pd  # local - pandas is inherited from the platform
 
     if not glossary_path.exists():
         return 0

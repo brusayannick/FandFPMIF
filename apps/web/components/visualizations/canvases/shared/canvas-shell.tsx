@@ -38,14 +38,14 @@ interface CanvasShellProps {
   showGrid?: boolean;
   toolbarSlot?: ReactNode;
   /** Optional content rendered as an absolute-positioned overlay on top of
-   *  the canvas — used for the click-to-inspect details panel. */
+   *  the canvas – used for the click-to-inspect details panel. */
   overlay?: ReactNode;
   proOptions?: ReactFlowProps["proOptions"];
   onNodeClick?: NodeMouseHandler;
   onEdgeClick?: EdgeMouseHandler;
   onPaneClick?: (event: React.MouseEvent) => void;
   // The canvas component (DfgCanvas, etc.) parameterises its own state with
-  // a specific `Node<TData>` — the shell doesn't need to know which, so we
+  // a specific `Node<TData>` – the shell doesn't need to know which, so we
   // accept the generic-erased forms.
   onNodesChange?: OnNodesChange<Node>;
   onEdgesChange?: OnEdgesChange<Edge>;
@@ -61,7 +61,7 @@ interface CanvasShellProps {
 
 // All minimap nodes use a single neutral grey so the minimap reads as a
 // structural overview rather than adding a second colour legend.
-// Pre-resolved RGB — CSS vars and oklch() in SVG presentation attributes are
+// Pre-resolved RGB – CSS vars and oklch() in SVG presentation attributes are
 // inconsistent across browsers.
 const minimapNodeColor = (_node: Node): string => "rgb(148, 163, 184)"; // slate-400
 

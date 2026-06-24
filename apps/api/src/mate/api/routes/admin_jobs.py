@@ -1,8 +1,8 @@
-"""/api/v1/admin/jobs — cross-user job monitoring + control (admin role).
+"""/api/v1/admin/jobs - cross-user job monitoring + control (admin role).
 
 Unlike ``/api/v1/jobs/*`` (strictly per-user, ownership-enforced via
 ``get_owned_job``), this surface lets an admin see and control EVERY user's
-jobs — the operator view behind the admin "Jobs" tab. Listing joins each job to
+jobs - the operator view behind the admin "Jobs" tab. Listing joins each job to
 its owner and, when the payload carries a ``log_id``, to its event log so the UI
 can group by user or by event log. Control reuses the exact ``JobRuntime``
 primitives the per-user routes use (cancel / retry / cancel-all / per-user
@@ -89,7 +89,7 @@ class AdminJobList(BaseModel):
 def _payload_log_id(payload: object) -> str | None:
     """Pull the affiliated event-log id out of a job payload, if any.
 
-    Jobs don't carry an indexed ``log_id`` column — the affiliation lives in
+    Jobs don't carry an indexed ``log_id`` column - the affiliation lives in
     ``payload_json["log_id"]`` (same convention as ``runtime.cancel_for_logs``).
     """
     if isinstance(payload, dict):
@@ -241,7 +241,7 @@ async def list_jobs(
 
 
 # --------------------------------------------------------------------------
-# Control — cross-user mutations (admin only)
+# Control - cross-user mutations (admin only)
 # --------------------------------------------------------------------------
 
 
@@ -252,7 +252,7 @@ async def cancel_job(job_id: str, user: AdminUserDep) -> None:
     if not ok:
         raise HTTPException(
             status_code=409,
-            detail="Job cannot be cancelled — already finished or unknown.",
+            detail="Job cannot be cancelled - already finished or unknown.",
         )
     log.info("admin_job_cancel", admin_id=user.id, job_id=job_id)
 
@@ -297,7 +297,7 @@ class QueueBody(BaseModel):
 
 @router.post("/queue/pause", status_code=status.HTTP_204_NO_CONTENT)
 async def pause_queue(body: QueueBody, user: AdminUserDep) -> None:
-    """Pause a specific user's queue — other tenants keep flowing."""
+    """Pause a specific user's queue - other tenants keep flowing."""
     await get_job_runtime().pause_queue(body.user_id)
     log.info("admin_queue_pause", admin_id=user.id, target=body.user_id)
 

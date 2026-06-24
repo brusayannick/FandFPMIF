@@ -1,4 +1,4 @@
-"""Dashboard sharing + teams — access control across users.
+"""Dashboard sharing + teams - access control across users.
 
 Drives several identities through one app by swapping the ``get_current_user``
 override mid-test, so we can assert owner / recipient / admin / stranger each see
@@ -136,7 +136,7 @@ async def test_direct_share_dedup_and_revoke() -> None:
         _act_as(state, OWNER_ID)
         dash_id = (await c.post("/api/v1/dashboards", json={"name": "Direct"})).json()["id"]
 
-        # A direct share is only allowed with a teammate — set up a shared team.
+        # A direct share is only allowed with a teammate - set up a shared team.
         _act_as(state, ADMIN_ID, roles=("admin",))
         team_id = (await c.post("/api/v1/admin/teams", json={"name": "T"})).json()["id"]
         for uid in (OWNER_ID, RECIPIENT_ID):
@@ -196,7 +196,7 @@ async def test_user_can_read_log_follows_share() -> None:
         log_id, dash_id = uuid7_str(), uuid7_str()
         sm = get_sessionmaker()
         async with sm() as s:
-            # A real log row — the dashboard's event_log_id FK is enforced.
+            # A real log row - the dashboard's event_log_id FK is enforced.
             # Flush it before the dashboard so the parent INSERT lands first.
             s.add(EventLog(id=log_id, user_id=OWNER_ID, name="L", created_at=_now()))
             await s.flush()
@@ -230,5 +230,5 @@ async def test_user_can_read_log_follows_share() -> None:
         async with sm() as s:
             assert await user_can_read_log(s, log_id, RECIPIENT_ID) is True
             assert await user_can_read_log(s, log_id, STRANGER_ID) is False
-            # The owner isn't a "share recipient" — the predicate is cross-account only.
+            # The owner isn't a "share recipient" - the predicate is cross-account only.
             assert await user_can_read_log(s, log_id, OWNER_ID) is False

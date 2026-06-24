@@ -82,7 +82,7 @@ export function formatMetric(
   values: Record<string, number | null>,
 ): string {
   if (key === "n_acyclic_paths") return formatAcyclicPaths(value, values);
-  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "–";
 
   if (key === "avg_td_e") return formatSeconds(value);
   if (key === "perc_unique_seq") return `${value.toFixed(2)} %`;
@@ -103,7 +103,7 @@ function formatAcyclicPaths(
   if (log10 !== null && log10 !== undefined && Number.isFinite(log10)) {
     return `≈10^${log10.toFixed(1)}`;
   }
-  return "—";
+  return "–";
 }
 
 function formatSeconds(s: number): string {

@@ -2,7 +2,7 @@
 :mod:`modules.agentsimulator.metrics`.
 
 These exercise input preparation, the real-vs-simulated comparison summaries,
-the numpy+scipy fidelity scoring, and column alignment against synthetic logs —
+the numpy+scipy fidelity scoring, and column alignment against synthetic logs -
 no simulator venv and no ``ModuleContext`` needed. They run against the
 platform's pandas + scipy.
 """
@@ -43,7 +43,7 @@ def _canonical_log(n_cases: int = 25) -> pd.DataFrame:
 
 def _agentsim_shapes(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Convert a canonical log into the (test_preprocessed, simulated_log) shapes
-    AgentSimulator writes — the inputs to the comparison helpers."""
+    AgentSimulator writes - the inputs to the comparison helpers."""
     test_df = df.rename(columns={"activity": "activity_name", "timestamp": "start_timestamp"})[
         ["case_id", "activity_name", "resource", "start_timestamp", "end_timestamp"]
     ]
@@ -207,8 +207,8 @@ def _real_sim_shapes(n_cases: int = 25) -> tuple[pd.DataFrame, pd.DataFrame]:
     - ``simulated_log_i.csv``: case_id, agent, activity_name, start_timestamp,
       end_timestamp, TimeStep, resource
 
-    with **degenerate timestamps** — single-timestamp / zero-duration events, as
-    real source logs carry — round-tripped through CSV so the timestamp columns
+    with **degenerate timestamps** - single-timestamp / zero-duration events, as
+    real source logs carry - round-tripped through CSV so the timestamp columns
     arrive as tz-aware ISO strings (not pd.Timestamp), exactly like ``read_csv``
     of the simulator's output. The clean ``_agentsim_shapes`` fixture (distinct
     start/end, native datetimes) doesn't exercise this path.
@@ -242,7 +242,7 @@ def _real_sim_shapes(n_cases: int = 25) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def test_compute_summaries_real_sim_shapes_all_five_populate():
     """All five distributions must populate on the real simulated-log schema with
-    degenerate (zero-duration) timestamps — the bug was an old cache with only
+    degenerate (zero-duration) timestamps - the bug was an old cache with only
     `handover` set, leaving the other four tabs blank."""
     test_df, sim = _real_sim_shapes()
     summ = adapter.compute_summaries(test_df, [sim, sim])

@@ -19,14 +19,14 @@ import type { FilterEntry } from "@/lib/api-types";
  *
  * A dashboard can narrow what every one of its widgets sees via a global
  * column-filter bar (top) and a time-range slider (bottom). That scope is
- * *ephemeral* — it never mutates the log's committed Events-tab filter
+ * *ephemeral* – it never mutates the log's committed Events-tab filter
  * (`EventLog.active_filter`). It travels to module endpoints as the
  * `X-FF-Event-Filter` request header (set on the ambient registry in
  * `lib/api.ts`); the backend's module-route dispatch decodes it and *replaces*
  * the committed filter for that request (see the dashboards plan + loader.py).
  *
  * To make every widget re-render with a skeleton and refetch when the filter
- * changes — without touching any widget's own fetch code — widget queries run
+ * changes – without touching any widget's own fetch code – widget queries run
  * inside a *dedicated* `QueryClient` (`<DashboardWidgetScope>`). On commit we
  * update the header, then `resetQueries()` on that client: each widget drops
  * to its loading state and refetches, now carrying the new header. The blast
@@ -39,7 +39,7 @@ interface DashboardFilterContextValue {
   /** Global column filters (the top bar). */
   columnFilters: FilterEntry[];
   setColumnFilters: (next: FilterEntry[]) => void;
-  /** Time-range filters — 0–2 synthetic `timestamp` gte/lte entries (bottom). */
+  /** Time-range filters – 0–2 synthetic `timestamp` gte/lte entries (bottom). */
   timeFilters: FilterEntry[];
   setTimeFilters: (next: FilterEntry[]) => void;
   /** The dedicated client widget queries live in. */
@@ -56,7 +56,7 @@ export function useDashboardFilter(): DashboardFilterContextValue {
   return ctx;
 }
 
-/** UTF-8-safe base64 — `btoa` alone breaks on non-Latin1 filter values. */
+/** UTF-8-safe base64 – `btoa` alone breaks on non-Latin1 filter values. */
 function encodeFilterHeader(entries: FilterEntry[]): string {
   const json = JSON.stringify({ filter: entries });
   const bytes = new TextEncoder().encode(json);
@@ -70,13 +70,13 @@ export function DashboardFilterProvider({
   initialColumnFilters = [],
 }: {
   children: ReactNode;
-  /** Column filters to load with — the board's active saved filter, if any.
+  /** Column filters to load with – the board's active saved filter, if any.
    * Read once on mount; later preset switches flow through `setColumnFilters`. */
   initialColumnFilters?: FilterEntry[];
 }) {
   const [columnFilters, setColumnFilters] = useState<FilterEntry[]>(initialColumnFilters);
   const [timeFilters, setTimeFilters] = useState<FilterEntry[]>([]);
-  // One client per provider instance — widget queries are isolated here.
+  // One client per provider instance – widget queries are isolated here.
   const [widgetQueryClient] = useState(
     () =>
       new QueryClient({
@@ -103,7 +103,7 @@ export function DashboardFilterProvider({
       return;
     }
     // resetQueries (not removeQueries): it puts every widget query back to its
-    // pending state — so each card drops to a skeleton — AND refetches the
+    // pending state – so each card drops to a skeleton – AND refetches the
     // active ones with the new header. removeQueries only evicts the cache
     // entry; a mounted widget's observer keeps showing its last result and
     // never refetches, so the filter would appear to do nothing.

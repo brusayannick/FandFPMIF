@@ -30,12 +30,12 @@ interface ServerConfig {
 /**
  * Mounts the auto-tracking listeners (page views, clicks, errors,
  * web-vitals) and keeps the analytics store synchronised with the server
- * config row. Always renders its children — the gates are entirely inside
+ * config row. Always renders its children – the gates are entirely inside
  * the effects.
  */
 export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
   // Sync server config into the store once on mount. The server seed wins
-  // — local opt-in is honoured only if the seed matches.
+  // – local opt-in is honoured only if the seed matches.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -59,7 +59,7 @@ export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
           store.setEnabled(cfg.enabled);
         }
       } catch {
-        // Backend unreachable — leave the store as-is. The next flush will
+        // Backend unreachable – leave the store as-is. The next flush will
         // simply drop on the floor.
       }
     })();
@@ -99,12 +99,12 @@ function AutoTrackers() {
   const searchParams = useSearchParams();
   const lastPathRef = useRef<string | null>(null);
 
-  // Page views — pathname only; we intentionally do NOT pass query params
+  // Page views – pathname only; we intentionally do NOT pass query params
   // since they often carry identifiers we don't want to capture.
   useEffect(() => {
     if (!pathname) return;
     if (lastPathRef.current === pathname) return;
-    // The path we're navigating away from — lets dashboards reconstruct
+    // The path we're navigating away from – lets dashboards reconstruct
     // "clicked on X → landed on Y" from the from_path → path transition.
     const fromPath = lastPathRef.current;
     lastPathRef.current = pathname;
@@ -120,7 +120,7 @@ function AutoTrackers() {
     });
   }, [pathname, searchParams]);
 
-  // Delegated click capture — every click on the document is recorded, not
+  // Delegated click capture – every click on the document is recorded, not
   // just interactive elements. We attach the nearest button/link if one
   // exists in the ancestor chain so dashboards can still group by action,
   // but raw target metadata is always present. Left-click (`click`),
@@ -133,7 +133,7 @@ function AutoTrackers() {
       const target = e.target;
       if (!(target instanceof Element)) return;
       if (target.closest("[data-no-track]")) return;
-      // `contextmenu` fires for keyboard-menu / touch-hold too — coerce the
+      // `contextmenu` fires for keyboard-menu / touch-hold too – coerce the
       // discrete event types to a stable label for grouping.
       const kind =
         e.type === "auxclick"
@@ -291,7 +291,7 @@ function AutoTrackers() {
     };
   }, []);
 
-  // Visibility-driven flush — when the tab is hidden, push any pending
+  // Visibility-driven flush – when the tab is hidden, push any pending
   // events so we don't lose them if the browser kills the tab.
   useEffect(() => {
     const onVis = () => {

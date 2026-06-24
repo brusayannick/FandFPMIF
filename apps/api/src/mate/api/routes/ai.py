@@ -1,4 +1,4 @@
-"""/api/v1/ai — AI chat configuration and provider proxies.
+"""/api/v1/ai - AI chat configuration and provider proxies.
 
 The API keys and system prompt live as a single JSON blob in
 ``user_settings`` under the ``ai.config`` key. The provider model and
@@ -12,7 +12,6 @@ pricing endpoints proxy through the backend so that:
 from __future__ import annotations
 
 import asyncio
-import datetime as _dt
 import json
 import time
 from collections.abc import AsyncGenerator
@@ -26,12 +25,18 @@ from pydantic import BaseModel
 
 from mate.api.ai_config import (
     AI_CONFIG_KEY,
+    AiConfigOut,
     AiConfigPayload,
     Provider,
     ProviderConfig,
     _load_config,
     _provider_creds,
+    ai_control_state,
+    load_ai_config,
+    mask_config,
+    merge_ai_payload,
 )
+from mate.api.ai_models import FetchModelsResponse, ModelInfo, fetch_provider_models
 from mate.api.ai_nav import (
     RoutingResult,
     build_user_destinations,
@@ -46,11 +51,15 @@ from mate.api.db.session import SessionDep
 # `routes.ai` still works. The real definitions live in `_ai_config`.
 __all__ = [
     "AI_CONFIG_KEY",
+    "AiConfigOut",
     "AiConfigPayload",
+    "FetchModelsResponse",
+    "ModelInfo",
     "Provider",
     "ProviderConfig",
     "_load_config",
     "_provider_creds",
+    "load_ai_config",
     "router",
 ]
 
@@ -63,60 +72,42 @@ LITELLM_PRICING_URL = (
 _PRICING_TTL_SECONDS = 3600
 
 
-@router.get("/config", response_model=AiConfigPayload)
-async def get_config(session: SessionDep, user: CurrentUserDep) -> AiConfigPayload:
-    row = await session.get(UserSetting, (user.id, AI_CONFIG_KEY))
-    return _load_config(row)
+@router.get("/config", response_model=AiConfigOut)
+async def get_config(session: SessionDep, user: CurrentUserDep) -> AiConfigOut:
+    controlled = await ai_control_state(session, user.id)
+    cfg = await load_ai_config(session, user.id)
+    return mask_config(cfg, controlled_by_admin=controlled)
 
 
-@router.put("/config", response_model=AiConfigPayload)
+@router.put("/config", response_model=AiConfigOut)
 async def put_config(
     payload: AiConfigPayload,
     session: SessionDep,
     user: CurrentUserDep,
-) -> AiConfigPayload:
+) -> AiConfigOut:
+    if await ai_control_state(session, user.id):
+        raise HTTPException(
+            status_code=403,
+            detail="AI settings are controlled by your administrator.",
+        )
     row = await session.get(UserSetting, (user.id, AI_CONFIG_KEY))
-    data = payload.model_dump()
+    existing = _load_config(row)
+    # Masked GET means the browser sends blank keys to mean "keep the stored
+    # one"; merge so a save never wipes a key the user can't see.
+    merged = merge_ai_payload(payload, existing)
+    data = merged.model_dump()
     if row is None:
         session.add(UserSetting(user_id=user.id, key=AI_CONFIG_KEY, value_json=data))
     else:
         row.value_json = data
     await session.commit()
-    return payload
+    return mask_config(merged, controlled_by_admin=False)
 
 
 # --------------------------------------------------------------------------
-# Provider model listing — proxied so keys stay server-side and CORS is moot
+# Provider model listing - proxied so keys stay server-side and CORS is moot
+# (logic lives in ``ai_models`` so the admin AI route can reuse it).
 # --------------------------------------------------------------------------
-
-
-class ModelInfo(BaseModel):
-    id: str
-    display_name: str | None = None
-    created: int | None = None
-
-
-class FetchModelsResponse(BaseModel):
-    models: list[ModelInfo]
-
-
-def _iso_to_epoch(s: Any) -> int | None:
-    if not isinstance(s, str):
-        return None
-    try:
-        return int(_dt.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
-    except ValueError:
-        return None
-
-
-def _openai_compat_models_url(base_url: str) -> str:
-    """Construct the /models endpoint URL for an OpenAI-compatible backend.
-
-    Follows OpenAI SDK convention: base_url is the versioned API prefix (e.g.,
-    https://api.openai.com/v1 or https://gpt.uni-muenster.de/v1), and only
-    the endpoint path (/models) is appended.
-    """
-    return f"{base_url.rstrip('/')}/models"
 
 
 @router.post("/models/{provider}", response_model=FetchModelsResponse)
@@ -126,109 +117,7 @@ async def fetch_models(
     user: CurrentUserDep,
 ) -> FetchModelsResponse:
     api_key, base_url = await _provider_creds(session, provider, user.id)
-
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            if provider == "anthropic":
-                url = "https://api.anthropic.com/v1/models"
-                r = await client.get(
-                    url,
-                    headers={
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                    },
-                )
-                _raise_provider_error(provider, r, url=url)
-                data = _parse_json(r, provider=provider, url=url)
-                return FetchModelsResponse(
-                    models=[
-                        ModelInfo(
-                            id=m["id"],
-                            display_name=m.get("display_name"),
-                            created=_iso_to_epoch(m.get("created_at")),
-                        )
-                        for m in data.get("data", [])
-                        if isinstance(m, dict) and "id" in m
-                    ]
-                )
-
-            if provider == "openai":
-                url = "https://api.openai.com/v1/models"
-                r = await client.get(
-                    url,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                )
-                _raise_provider_error(provider, r, url=url)
-                data = _parse_json(r, provider=provider, url=url)
-                return FetchModelsResponse(
-                    models=[
-                        ModelInfo(id=m["id"], created=m.get("created"))
-                        for m in data.get("data", [])
-                        if isinstance(m, dict) and "id" in m
-                    ]
-                )
-
-            # UniGPT / LibreChat / Custom — treat as an OpenAI-compatible
-            # backend at the user-supplied base URL.
-            if not base_url:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{provider!r} requires a base URL in addition to the API key.",
-                )
-            url = _openai_compat_models_url(base_url)
-            r = await client.get(
-                url,
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            _raise_provider_error(provider, r, url=url)
-            data = _parse_json(r, provider=provider, url=url)
-            items = data.get("data", []) if isinstance(data, dict) else data
-            return FetchModelsResponse(
-                models=[
-                    ModelInfo(id=m["id"], created=m.get("created"))
-                    for m in items
-                    if isinstance(m, dict) and "id" in m
-                ]
-            )
-    except httpx.HTTPError as exc:
-        log.warning("ai.models.proxy_failed", provider=provider, error=str(exc))
-        raise HTTPException(status_code=502, detail=f"Provider request failed: {exc}") from exc
-
-
-def _parse_json(response: httpx.Response, provider: str, url: str | None = None) -> Any:
-    try:
-        return response.json()
-    except ValueError:
-        snippet = response.text[:300]
-        error_detail: dict[str, Any] = {
-            "provider": provider,
-            "upstream": f"Non-JSON response: {snippet!r}",
-        }
-        if url:
-            error_detail["url"] = url
-        raise HTTPException(status_code=502, detail=error_detail)
-
-
-def _raise_provider_error(provider: str, response: httpx.Response, url: str | None = None) -> None:
-    if response.is_success:
-        return
-    # Forward the upstream status so the frontend can distinguish auth (401),
-    # rate-limit (429), etc. We always wrap the body in a string detail.
-    body: Any = None
-    try:
-        body = response.json()
-    except ValueError:
-        body = response.text
-    detail = (
-        body if isinstance(body, str) else (body.get("error") if isinstance(body, dict) else body)
-    )
-    error_detail: dict[str, Any] = {"provider": provider, "upstream": detail}
-    if url:
-        error_detail["url"] = url
-    raise HTTPException(
-        status_code=response.status_code,
-        detail=error_detail,
-    )
+    return await fetch_provider_models(provider, api_key, base_url)
 
 
 # --------------------------------------------------------------------------
@@ -245,7 +134,7 @@ _pricing_lock = asyncio.Lock()
 async def get_pricing(user: CurrentUserDep) -> dict[str, Any]:
     """Return the litellm price catalog keyed by model id.
 
-    Cached in-process for one hour. The shape is whatever litellm publishes —
+    Cached in-process for one hour. The shape is whatever litellm publishes -
     the frontend reads ``input_cost_per_token`` / ``output_cost_per_token`` /
     ``max_tokens`` / ``litellm_provider`` per entry.
     """
@@ -277,7 +166,7 @@ async def get_pricing(user: CurrentUserDep) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
-# Chat — streaming endpoint
+# Chat - streaming endpoint
 # --------------------------------------------------------------------------
 
 
@@ -326,7 +215,7 @@ _CONTEXT_CHAR_BUDGET = 12_000
 # Always prepended to the chat system prompt so the model behaves as MATE's
 # in-app assistant. The platform separately renders clickable navigation
 # shortcuts beneath replies, so the model must NOT disclaim ("I can't open the
-# settings") — but it also must NOT mention those shortcuts in its text (it would
+# settings") - but it also must NOT mention those shortcuts in its text (it would
 # echo "Jump to" even when no shortcut is shown). The reply must read naturally
 # on its own; the UI handles navigation.
 BASE_CHAT_SYSTEM_PROMPT = (
@@ -335,21 +224,21 @@ BASE_CHAT_SYSTEM_PROMPT = (
     "process, or settings page from here.\n\n"
     "Guidelines:\n"
     "- Do NOT state or guess which page the user is currently on, and NEVER tell them "
-    "they are 'already' on or at a page/module — you cannot reliably know their current "
+    "they are 'already' on or at a page/module - you cannot reliably know their current "
     "location. Just help with what they asked.\n"
     "- Never claim you are unable to navigate, open settings/modules, or act inside "
-    "the app, and never ask which app or platform the user means — you are already "
+    "the app, and never ask which app or platform the user means - you are already "
     "inside MATE.\n"
     "- Answer concisely and helpfully. When the user wants to go somewhere they are "
     "not, briefly describe the destination and give one useful tip about what they can "
     "do there; do not write step-by-step 'how to find it' instructions.\n"
     "- Do NOT mention navigation buttons, shortcuts, links, or 'Jump to', and do not "
     "tell the user to click anything below. The interface adds clickable shortcuts "
-    "automatically — your text must read naturally on its own and never reference them.\n"
+    "automatically - your text must read naturally on its own and never reference them.\n"
     "- For analytical questions, answer concisely and use any process data or "
     "context provided below. If a 'Your processes' list is given, use it to answer "
     "questions like how many variants/cases/events a named process has. If it is not "
-    "given, you do not have access to process data — say so briefly instead of guessing."
+    "given, you do not have access to process data - say so briefly instead of guessing."
 )
 
 
@@ -370,7 +259,7 @@ def _process_summary_block(processes: list[Any]) -> str:
             stats.append(f"{p.object_types_count} object types")
         if p.date_min and p.date_max:
             stats.append(f"{p.date_min[:10]} → {p.date_max[:10]}")
-        suffix = f" — {', '.join(stats)}" if stats else ""
+        suffix = f" - {', '.join(stats)}" if stats else ""
         lines.append(f'- "{p.name}" (id {p.id}, {p.log_model}){suffix}')
     return "\n".join(lines)
 
@@ -389,7 +278,7 @@ async def _build_context_block(context: ChatContext | None, user_id: str) -> str
         return ""
 
     # An empty module_ids list means "every module the loader knows about that
-    # exposes guidance_payload" — the natural default when the frontend just
+    # exposes guidance_payload" - the natural default when the frontend just
     # detected it's on a process page.
     module_ids = context.module_ids or [
         mid
@@ -460,9 +349,7 @@ class RouteRequest(BaseModel):
 
 
 @router.post("/route")
-async def route(
-    payload: RouteRequest, session: SessionDep, user: CurrentUserDep
-) -> RoutingResult:
+async def route(payload: RouteRequest, session: SessionDep, user: CurrentUserDep) -> RoutingResult:
     """Classify a chat message and return navigation suggestions (if any).
 
     Runs in parallel with ``/chat`` from the frontend: the chat answer streams
@@ -470,16 +357,15 @@ async def route(
     failure (no AI configured, provider error) we return an empty, no-op result
     so navigation never blocks or breaks the chat.
     """
-    row = await session.get(UserSetting, (user.id, AI_CONFIG_KEY))
-    cfg = _load_config(row)
+    cfg = await load_ai_config(session, user.id)
 
-    # If the user hasn't configured a usable provider, the LLM leg can't run —
+    # If the user hasn't configured a usable provider, the LLM leg can't run -
     # but the deterministic pre-filter still can, so we proceed regardless and
     # let route_intent degrade gracefully when it needs the model.
     log_id = payload.context.log_id if payload.context else None
     current_path = payload.context.current_path if payload.context else None
     destinations = await build_user_destinations(session, user.id)
-    # Navigation to a named process is always allowed — the classifier only sees
+    # Navigation to a named process is always allowed - the classifier only sees
     # process names+ids (build_process_catalog strips stats). The sensitive
     # analytical data (variant/case counts) is gated separately, in /chat.
     processes = await list_user_processes(session, user.id)
@@ -497,8 +383,7 @@ async def route(
 async def chat(
     payload: ChatRequest, session: SessionDep, user: CurrentUserDep
 ) -> StreamingResponse:
-    row = await session.get(UserSetting, (user.id, AI_CONFIG_KEY))
-    cfg = _load_config(row)
+    cfg = await load_ai_config(session, user.id)
 
     if not cfg.selected_provider or not cfg.selected_model:
         raise HTTPException(
@@ -527,7 +412,7 @@ async def chat(
     # reply tight and don't re-explain the navigation the chip already handles.
     if payload.nav_hint is not None:
         parts.append(
-            f"A clickable shortcut to \"{payload.nav_hint.label}\" is already shown to the "
+            f'A clickable shortcut to "{payload.nav_hint.label}" is already shown to the '
             "user. Do not describe how to navigate and do not mention the shortcut; answer "
             "the substance of the question in 1-2 short sentences."
         )

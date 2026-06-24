@@ -21,7 +21,7 @@ import type {
  * Settings form for one placed card, rendered in the card's edit-mode popover.
  * Always offers a Title field; the rest is generated from the widget's
  * `config_schema` (the same JSON-Schema dialect modules use for their own
- * settings) — select / slider / number / switch / text. Changes are applied
+ * settings) – select / slider / number / switch / text. Changes are applied
  * live so the user sees the widget update as they tweak.
  */
 export function CardConfigForm({

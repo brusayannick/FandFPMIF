@@ -94,7 +94,7 @@ export const queryKeys = {
 };
 
 /** Matches only event-log *list* caches (key `["event-logs", params]`), never
- *  detail or sub-resource keys — so optimistic list edits don't touch them. */
+ *  detail or sub-resource keys – so optimistic list edits don't touch them. */
 function isEventLogListKey(queryKey: readonly unknown[]): boolean {
   return (
     queryKey[0] === "event-logs" &&
@@ -267,7 +267,7 @@ export interface XmlProbeField {
 }
 
 export interface XmlProbeResponse {
-  // "ocel": object-centric — auto-routed server-side, skip the wizard.
+  // "ocel": object-centric – auto-routed server-side, skip the wizard.
   format_hint: "generic" | "xes" | "ocel";
   event_element: string | null;
   events_sampled: number;
@@ -588,9 +588,12 @@ export function useModuleConfig(moduleId: string) {
   return useQuery({
     queryKey: queryKeys.moduleConfig(moduleId),
     queryFn: () =>
-      api<{ config: Record<string, unknown>; enabled: boolean }>(
-        `/api/v1/modules/${moduleId}/config`,
-      ),
+      api<{
+        config: Record<string, unknown>;
+        enabled: boolean;
+        /** When true, an admin has locked this module's config for all users. */
+        controlled_by_admin?: boolean;
+      }>(`/api/v1/modules/${moduleId}/config`),
   });
 }
 
@@ -722,7 +725,7 @@ export function useUploadModuleModel(moduleId: string) {
   });
 }
 
-/** Delete an installed model — removes it for every account on the platform. */
+/** Delete an installed model – removes it for every account on the platform. */
 export function useDeleteModuleModel(moduleId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -820,7 +823,7 @@ export function useBulkFillEventRows(logId: string) {
   });
 }
 
-/** Distinct values + counts for one column — backs the filter checklist. */
+/** Distinct values + counts for one column – backs the filter checklist. */
 export function useColumnValues(
   logId: string,
   field: string,

@@ -15,7 +15,7 @@ export interface PlaceNodeData extends Record<string, unknown> {
 
 export type PlaceNode = Node<PlaceNodeData, "place">;
 
-/** A Petri-net place — a small circle. Initial / final places get a ring and a
+/** A Petri-net place – a small circle. Initial / final places get a ring and a
  *  token dot so the marking is legible without a legend. */
 export function PlaceNode({ data, selected }: NodeProps<PlaceNode>) {
   const { source, target } = handlePositions(data.direction);

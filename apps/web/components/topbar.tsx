@@ -97,7 +97,7 @@ export function Topbar() {
       <Breadcrumb className="min-w-0 flex-1">
         <BreadcrumbList>
           {crumbs.map((c, i) => (
-            // Item and separator must be siblings inside the list — nesting the
+            // Item and separator must be siblings inside the list – nesting the
             // separator <li> inside the item <li> is invalid HTML (hydration error).
             <Fragment key={c.href}>
               <BreadcrumbItem>

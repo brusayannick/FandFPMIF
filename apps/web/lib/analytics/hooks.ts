@@ -7,7 +7,7 @@ import type { EventName } from "@/lib/analytics/events";
 
 /**
  * Returns a stable `track(name, props?)` function. Safe to call before the
- * provider has resolved — the client gates on the store internally.
+ * provider has resolved – the client gates on the store internally.
  */
 export function useTrack() {
   return useCallback(

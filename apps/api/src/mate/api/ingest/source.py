@@ -3,9 +3,9 @@
 A watched folder points at a location in the *active* storage backend. This
 module hides the local-disk vs S3 split behind two operations the scanner needs:
 
-  - ``list_source`` — enumerate the importable files (name + fingerprint) under
+  - ``list_source`` - enumerate the importable files (name + fingerprint) under
     a watch's ``source_path``.
-  - ``stage_source`` — copy/download one source file onto local disk so the
+  - ``stage_source`` - copy/download one source file onto local disk so the
     normal import pipeline (which works from a staged ``original.<ext>``) can run.
 
 ``source_path`` is interpreted against the backend and used *literally* (no admin
@@ -81,7 +81,7 @@ def list_source(source_path: str) -> list[SourceFile]:
     """List importable files under ``source_path`` on the active backend.
 
     Raises ``s3.StorageError`` (S3) or ``OSError`` (local) on an unreachable
-    source — callers decide whether that's fatal (route validation) or recorded
+    source - callers decide whether that's fatal (route validation) or recorded
     (poller).
     """
     if is_s3():

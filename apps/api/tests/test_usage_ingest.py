@@ -1,11 +1,11 @@
-"""/api/v1/usage ingest gate — the server-side privacy safety net.
+"""/api/v1/usage ingest gate - the server-side privacy safety net.
 
 ``POST /usage/sync`` only persists events when the caller's tracking config is
 effectively enabled. Two policies are exercised:
 
-* ``force`` (the repo default) — tracking is on for every user regardless of the
+* ``force`` (the repo default) - tracking is on for every user regardless of the
   stored ``enabled`` flag, so a batch is always accepted.
-* ``off`` — tracking is opt-in; a user who hasn't opted in is rejected with 204,
+* ``off`` - tracking is opt-in; a user who hasn't opted in is rejected with 204,
   and a batch whose ``anon_user_id`` doesn't match the configured seed is dropped
   even after opting in (stale-client replay guard).
 """
@@ -91,7 +91,7 @@ async def _seed(client: AsyncClient) -> str:
 
 @pytest.mark.asyncio
 async def test_ingest_accepted_under_force(client: AsyncClient) -> None:
-    # Default policy is `force` — tracking is on for everyone, batch persists.
+    # Default policy is `force` - tracking is on for everyone, batch persists.
     seed = await _seed(client)
     resp = await client.post("/api/v1/usage/sync", json=_batch(seed, event_name="forced.click"))
     assert resp.status_code == 202
@@ -109,7 +109,7 @@ async def test_ingest_rejected_when_disabled(client: AsyncClient, tracking_off: 
 
 @pytest.mark.asyncio
 async def test_ingest_anon_seed_mismatch_dropped(client: AsyncClient, tracking_off: None) -> None:
-    # Opt in so the gate is open, then POST with a stale anon id — the replay
+    # Opt in so the gate is open, then POST with a stale anon id - the replay
     # guard silently drops it (204) without persisting.
     await _seed(client)
     put = await client.put(
@@ -126,7 +126,7 @@ async def test_ingest_anon_seed_mismatch_dropped(client: AsyncClient, tracking_o
     assert resp.status_code == 204
     assert await _count("mismatch.click") == 0
 
-    # The matching seed is accepted — proves the gate itself was open.
+    # The matching seed is accepted - proves the gate itself was open.
     ok = await client.post(
         "/api/v1/usage/sync",
         json=_batch("00000000-0000-0000-0000-00000000seed", event_name="match.click"),

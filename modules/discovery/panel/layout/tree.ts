@@ -10,7 +10,7 @@ export interface TreeLayoutOptions {
 /**
  * Lay out a process-tree hierarchy using d3-hierarchy's tidy-tree algorithm
  * (Reingold-Tilford / Buchheim). Properly balances subtrees with no
- * horizontal overlap — replaces the naive width-summing recursion that left
+ * horizontal overlap – replaces the naive width-summing recursion that left
  * deep trees lopsided.
  */
 export function treeLayout<T extends { id: string; children: T[] }>(

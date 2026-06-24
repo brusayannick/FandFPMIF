@@ -11,14 +11,16 @@ import { useCardCatalog, type DashboardCard, type LogModel } from "@/lib/dashboa
 
 /**
  * Left-rail palette of every card exposed by the user's installed modules,
- * grouped into a clearly delineated, collapsible section per module. Cards are
- * HTML5-draggable onto the grid (the canvas reads `setPendingCard` on drop).
+ * grouped into a clearly delineated, collapsible section per module. Pressing a
+ * card starts a pointer-drag onto the canvas (`onStartAdd`); the canvas tracks
+ * the cursor and drops it. A press without dragging adds it at the bottom.
  */
 export function CardPalette({
-  onDragCard,
+  onStartAdd,
   logModel,
 }: {
-  onDragCard: (card: DashboardCard | null) => void;
+  /** Begin a palette→canvas add at the pointer's position. */
+  onStartAdd: (card: DashboardCard, e: React.PointerEvent) => void;
   /** Only cards whose `log_models` include the board's model are shown. */
   logModel: LogModel;
 }) {
@@ -119,21 +121,17 @@ export function CardPalette({
                       return (
                         <div
                           key={`${card.module_id}:${card.widget_id}`}
-                          // RGL droppable: any element with draggable=true
-                          // dropped over the grid fires its onDrop; we stash the
-                          // card so the canvas knows which one landed.
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.effectAllowed = "copy";
-                            e.dataTransfer.setData(
-                              "text/plain",
-                              `${card.module_id}:${card.widget_id}`,
-                            );
-                            onDragCard(card);
+                          // Pointer-drag (not HTML5 DnD, which the prod proxy
+                          // strips): press to start, the canvas tracks the cursor
+                          // and drops. `touch-none` stops the scroll-area from
+                          // hijacking the gesture on touch.
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            e.preventDefault();
+                            onStartAdd(card, e);
                           }}
-                          onDragEnd={() => onDragCard(null)}
                           className={cn(
-                            "group flex w-full items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-left",
+                            "group flex w-full touch-none items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-left",
                             "cursor-grab hover:border-border hover:bg-card active:cursor-grabbing",
                           )}
                         >

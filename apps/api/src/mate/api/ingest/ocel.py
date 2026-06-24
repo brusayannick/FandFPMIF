@@ -1,7 +1,7 @@
 """OCEL (Object-Centric Event Log) parsing via pm4py.
 
 Reads a ``.jsonocel`` / ``.xmlocel`` / OCEL 2.0 ``.sqlite`` file into the four
-canonical tables the platform persists under ``ocel/`` — events, objects,
+canonical tables the platform persists under ``ocel/`` - events, objects,
 relations (the flattened event↔object map), and o2o (object↔object). Kept
 entirely separate from the case-centric XES/CSV/XML pipeline: nothing here
 produces a ``case_id`` or touches the root ``events.parquet`` / ``cases.parquet``.
@@ -46,12 +46,12 @@ def _read_ocel(path: Path, flavor: str) -> Any:
     if flavor == "sqlite":
         return pm4py.read_ocel2_sqlite(spath)
     if flavor == "xml":
-        # XML can be OCEL 1.0 or 2.0 — try 2.0 first, fall back to 1.0.
+        # XML can be OCEL 1.0 or 2.0 - try 2.0 first, fall back to 1.0.
         try:
             return pm4py.read_ocel2_xml(spath)
         except Exception:
             return pm4py.read_ocel_xml(spath)
-    # json (and anything else) — prefer 2.0, fall back to 1.0.
+    # json (and anything else) - prefer 2.0, fall back to 1.0.
     try:
         return pm4py.read_ocel2_json(spath)
     except Exception:

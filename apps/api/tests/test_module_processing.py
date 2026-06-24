@@ -1,4 +1,4 @@
-"""Task 8 — a freshly imported log stays disabled (`status="processing"`) until
+"""Task 8 - a freshly imported log stays disabled (`status="processing"`) until
 every subscribing module has finished precomputing against it.
 
 Exercises the `ModuleProcessingCoordinator` directly (expected-set derivation,
@@ -32,7 +32,7 @@ async def _precompute_mod_app(tmp_path: Path) -> AsyncIterator[AsyncClient]:
     """App with `precompute_mod` as a default module, test user pre-seeded.
 
     Mirrors ``conftest._sample_mod_client`` but for the fixture that subscribes
-    to ``log.imported`` with a ``@job`` — so an import lands a log in
+    to ``log.imported`` with a ``@job`` - so an import lands a log in
     ``processing`` and produces a child precompute job under the import job.
     """
     src = FIXTURES / "modules" / "precompute_mod"
@@ -263,7 +263,7 @@ async def test_failed_child_counts_as_terminal(tmp_path: Path) -> None:
         log_id = await _make_log_row()
         import_job_id = await _insert_import_job(log_id)
         await _set_processing(log_id, import_job_id, ["precompute_mod"])
-        # A failed module job must not strand the log — counts as terminal.
+        # A failed module job must not strand the log - counts as terminal.
         await _insert_child_job(import_job_id, "precompute_mod", "failed")
 
         async with sm() as session:
@@ -336,7 +336,7 @@ async def test_reconcile_boot_flips_completed_processing_log(tmp_path: Path) -> 
         log_id = await _make_log_row()
         import_job_id = await _insert_import_job(log_id)
         await _set_processing(log_id, import_job_id, ["precompute_mod"])
-        # The child finished while the API was "down" — reconcile picks it up.
+        # The child finished while the API was "down" - reconcile picks it up.
         await _insert_child_job(import_job_id, "precompute_mod", "completed")
 
         async with sm() as session:
@@ -410,7 +410,7 @@ async def test_import_with_subscriber_lands_processing(tmp_path: Path) -> None:
             f"expected `processing` with a subscriber installed, saw {detail['status']!r}"
         )
 
-        # Data routes reject a non-ready log (409) — the log is genuinely
+        # Data routes reject a non-ready log (409) - the log is genuinely
         # disabled while processing.
         gated = await c.get(f"/api/v1/event-logs/{log_id}/events")
         assert gated.status_code == 409

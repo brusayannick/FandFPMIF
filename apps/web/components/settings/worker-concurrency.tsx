@@ -17,7 +17,7 @@ interface JobsConfig {
  * Settings → General → Jobs worker-concurrency control.
  *
  * Reads the live value from `GET /api/v1/system/jobs` (any user) and, for
- * admins, writes it back on commit via `PUT` — the backend resizes the worker
+ * admins, writes it back on commit via `PUT` – the backend resizes the worker
  * pool immediately (running jobs are never interrupted) and persists the value.
  * Non-admins see a read-only slider.
  */

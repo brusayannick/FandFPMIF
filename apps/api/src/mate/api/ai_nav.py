@@ -1,19 +1,19 @@
 """Intent-based navigation routing for MATE AI.
 
-Turns a free-text chat message into zero or more *navigation suggestions* —
+Turns a free-text chat message into zero or more *navigation suggestions* -
 clickable targets that drop the user inside a module panel or a platform page.
 
 Pipeline (see ``route_intent``):
 
 1. Build a per-user **destination registry** (``build_user_destinations``): the
    static platform pages plus every module the user has *enabled*. Tenant
-   isolation is preserved — only the requesting user's installs are visible.
+   isolation is preserved - only the requesting user's installs are visible.
 2. A cheap **local keyword pre-filter** (``prefilter``) provides a single fast
    path: an explicit navigation verb *and* exactly one matching destination →
    navigate straight there without an LLM call.
 3. Every other message goes to the **LLM classifier** (``classify_intent``).
-   We deliberately do *not* short-circuit "pure chat" on keyword absence —
-   that misses non-English wording and paraphrases — so recall is prioritised
+   We deliberately do *not* short-circuit "pure chat" on keyword absence -
+   that misses non-English wording and paraphrases - so recall is prioritised
    over saving a (cheap) classifier call. It reuses ``structured_completion``
    so UniGPT/custom backends get the prompted-JSON fallback for free, and runs
    on ``classifier_model`` (a cheaper model, same provider) when configured.
@@ -40,7 +40,7 @@ from mate.api.ai_guidance import GuidanceError, structured_completion
 
 log = structlog.get_logger(__name__)
 
-# A suggestion below this confidence is dropped — navigation is additive, so we
+# A suggestion below this confidence is dropped - navigation is additive, so we
 # err towards *not* nagging the user with a low-confidence guess.
 NAV_CONFIDENCE_THRESHOLD = 0.7
 # Confidence we assign to a deterministic (non-LLM) pre-filter hit.
@@ -70,7 +70,7 @@ class NavTarget(BaseModel):
     label: str
     kind: str
     href: str
-    # True when the target needs a process/log that the current context lacks —
+    # True when the target needs a process/log that the current context lacks -
     # the frontend renders it as a hint ("open a process first") rather than a
     # dead link, and falls back ``href`` to the module's config page.
     requires_log: bool
@@ -281,7 +281,7 @@ def build_destination_catalog(destinations: list[NavDestination]) -> str:
     return "\n".join(lines)
 
 
-# ── Processes (sensitive — only used when the user enables process-data access) ─
+# ── Processes (sensitive - only used when the user enables process-data access) ─
 
 # Cap how many processes we send to the LLM, newest first, to bound prompt size.
 _MAX_PROCESSES = 50
@@ -340,7 +340,7 @@ async def list_user_processes(session: AsyncSession, user_id: str) -> list[Proce
 def build_process_catalog(processes: list[ProcessInfo]) -> str:
     """Compact process list for the classifier so it can fill the 'process' field.
 
-    Only id + name — never stats. Navigation by process name is always allowed,
+    Only id + name - never stats. Navigation by process name is always allowed,
     so this is sent regardless of the process-data toggle; the sensitive stats
     (variants/cases/…) are gated separately and never appear here.
     """
@@ -354,7 +354,7 @@ def match_process(hint: str | None, processes: list[ProcessInfo]) -> ProcessInfo
     if not hint:
         return None
     h = hint.strip().strip('"').lower()
-    # The model sometimes echoes the catalog's framing — strip leading labels.
+    # The model sometimes echoes the catalog's framing - strip leading labels.
     for prefix in ("internal id:", "id=", "id:", "name=", "name:"):
         if h.startswith(prefix):
             h = h[len(prefix):].strip().strip('"')
@@ -376,10 +376,10 @@ def match_process(hint: str | None, processes: list[ProcessInfo]) -> ProcessInfo
 # ── Settings actions (whitelisted, applied client-side on click) ─────────────
 
 # Canonical setting id -> spec. ONLY settings listed here can ever be produced;
-# the frontend has a matching explicit setter map. Anything sensitive — API keys,
+# the frontend has a matching explicit setter map. Anything sensitive - API keys,
 # system prompt, provider/model, allow_process_data, analytics/privacy consent,
 # onboarding completion, account/email/password, data wipe/export, module
-# install/uninstall — is deliberately ABSENT here and rejected, so the AI can
+# install/uninstall - is deliberately ABSENT here and rejected, so the AI can
 # never change it.
 _BOOL_TRUE = {"true", "on", "yes", "enable", "enabled", "1", "mute", "muted",
               "collapse", "collapsed", "show", "shown"}
@@ -470,7 +470,7 @@ def resolve_action(raw: Any) -> ActionTarget | None:
     """Validate a classifier 'action' against the whitelist; None on any failure.
 
     This is the security boundary: a setting not in SETTING_WHITELIST (blocked or
-    hallucinated) or a value outside its domain yields no action — so the AI can
+    hallucinated) or a value outside its domain yields no action - so the AI can
     only ever offer safe, well-formed changes.
     """
     if not isinstance(raw, dict):
@@ -644,7 +644,7 @@ Rules:
 - "both": the message is a question AND implies a place to work on it.
 - Only use destination ids from the list below. Never invent ids.
 - "targets" MUST contain the module/page the user wants to open. Always fill it
-  when navigating — even if the user also names a process. The process belongs in
+  when navigating - even if the user also names a process. The process belongs in
   "process", NEVER in "targets".
     Example: "open the process discovery module of the helpdesk process"
       -> targets=["discovery"], process="helpdesk"
@@ -765,7 +765,7 @@ def resolve_targets(
         if d.requires_log:
             target_log = matched.id if matched else log_id
             # Name the process in the chip label when it isn't the current one.
-            label = f"{d.label} — {matched.name}" if matched else d.label
+            label = f"{d.label} - {matched.name}" if matched else d.label
             if target_log:
                 out.append(
                     NavTarget(
@@ -778,7 +778,7 @@ def resolve_targets(
                     )
                 )
             else:
-                # No process named or in context — fall back to the module's
+                # No process named or in context - fall back to the module's
                 # config page and flag that a process is needed for the panel.
                 out.append(
                     NavTarget(
@@ -845,7 +845,7 @@ async def route_intent(
 
     ``processes`` is only passed when the user has enabled process-data access;
     it lets the classifier resolve a named process and the resolver build a
-    cross-process module link. Never raises on provider failure — navigation is
+    cross-process module link. Never raises on provider failure - navigation is
     additive, so on any error we degrade to a plain chat result.
     """
     message = message.strip()
@@ -864,7 +864,7 @@ async def route_intent(
 
     # Fast path: an explicit navigation verb + exactly one matching destination
     # is unambiguous, so we navigate without paying for the LLM. (No named-process
-    # resolution here — that needs the classifier; the fast path uses the current
+    # resolution here - that needs the classifier; the fast path uses the current
     # process context only.)
     if pf.has_cue and len(pf.matches) == 1:
         targets = _strip_current(
@@ -876,15 +876,15 @@ async def route_intent(
             )
 
     # Otherwise always ask the classifier. Keyword absence is an unreliable
-    # signal of "pure chat" — non-English wording (e.g. "Complexität") or
-    # paraphrases would be missed — so we accept one (cheap) classifier call
+    # signal of "pure chat" - non-English wording (e.g. "Complexität") or
+    # paraphrases would be missed - so we accept one (cheap) classifier call
     # rather than risk a false negative. Provider failure degrades to chat.
     try:
         raw = await classify_intent(
             cfg, message=message, destinations=destinations, processes=processes
         )
     except Exception as exc:
-        # Navigation is additive — a failed classifier must never break chat.
+        # Navigation is additive - a failed classifier must never break chat.
         log.info("ai.route.classify_failed", error=str(exc))
         return RoutingResult(intent="chat", confidence=0.0, targets=[])
 

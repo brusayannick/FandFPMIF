@@ -95,7 +95,7 @@ class ShareTarget(BaseModel):
 
 
 class SharedDashboard(BaseModel):
-    """A dashboard another user shared with me — summary + owner label."""
+    """A dashboard another user shared with me - summary + owner label."""
 
     id: str
     name: str

@@ -120,7 +120,7 @@ function buildGraph(modules: Mod[], focusedId: string): { nodes: Node[]; edges: 
     }
   }
   // Layered layout: providers on the left, consumers on the right. Simple
-  // greedy ranking based on edges — good enough for the typical handful of
+  // greedy ranking based on edges – good enough for the typical handful of
   // modules a single install has.
   const rank = new Map<string, number>();
   for (const m of modules) rank.set(m.id, 0);

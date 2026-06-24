@@ -127,7 +127,7 @@ export function ModuleOpenAiCard({
           OpenAI API key
         </Label>
         <p className="text-xs text-muted-foreground">
-          Stored with this module only — never shared with the platform&apos;s
+          Stored with this module only – never shared with the platform&apos;s
           global Settings → AI. Created at platform.openai.com.
         </p>
         <div className="flex max-w-xl items-center gap-2">
@@ -158,7 +158,7 @@ export function ModuleOpenAiCard({
         </div>
         {checked && (
           <p className="text-[11px] text-emerald-600 dark:text-emerald-500">
-            Key verified — {models!.length} models available.
+            Key verified – {models!.length} models available.
           </p>
         )}
       </div>

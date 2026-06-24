@@ -2,7 +2,7 @@
 object-centric Petri net (and OC-DFG / summary) for an OCEL log.
 
 The default test client points MODULES_DIR at an empty dir, so this test copies
-the real `ocel_discovery` module into a tmp MODULES_DIR and loads it — it is an
+the real `ocel_discovery` module into a tmp MODULES_DIR and loads it - it is an
 ``in_process`` module with no private packages, so no venv is built (cheap)."""
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ async def test_ocpn_route_serves_object_centric_petri_net(ocel_client: AsyncClie
     assert all(p["id"].startswith("order::") for p in order["places"])
 
     # Degenerate single-event object types still serialize (possibly empty),
-    # never 500 — the per-object-type guard in _serialize_ocpn.
+    # never 500 - the per-object-type guard in _serialize_ocpn.
     for ot in ("item", "customer"):
         assert ot in by_ot
         assert isinstance(by_ot[ot]["places"], list)

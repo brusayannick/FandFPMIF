@@ -14,7 +14,7 @@ import pandas as pd
 
 
 def variant_id_for(activities: tuple[str, ...]) -> str:
-    """Stable, short hash of an activity sequence — same scheme as v1 import.
+    """Stable, short hash of an activity sequence - same scheme as v1 import.
 
     Kept as a module-level helper so other code (e.g. variant lookups) can
     derive the id from a sequence without re-loading cases.parquet.
@@ -25,7 +25,7 @@ def variant_id_for(activities: tuple[str, ...]) -> str:
 def compute_cases(df: pd.DataFrame) -> pd.DataFrame:
     """Roll the events frame up to a per-case row.
 
-    Expects a frame already sorted by (case_id, timestamp) — `dispatch.py`
+    Expects a frame already sorted by (case_id, timestamp) - `dispatch.py`
     sorts before calling, and the editor re-sorts after every write.
     """
     grouped = df.groupby("case_id", sort=False)

@@ -2,12 +2,15 @@ id: log_evolution
 name: Log evolution
 version: 1.0.0
 category: advanced
-description: Shows how the event log develops over time - case arrivals vs. completions, work-in-progress (open cases), the shifting activity mix, and a dotted chart (one dot per event, x = time, y = case). Reveals growth, backlog build-up, seasonality and drift at a glance.
+description: >-
+  Shows how your log grows and shifts over time: case arrivals versus
+  completions, work in progress, the changing activity mix, and a dotted chart
+  of every event. Makes growth, backlogs, seasonality, and drift easy to spot.
 keywords: ["log evolution", "over time", "case arrivals", "work in progress", "wip", "dotted chart", "backlog", "seasonality"]
 author: Mate
 license: MIT
 default_enabled: true
-# Runs entirely locally — safe to use against confidential event logs.
+# Runs entirely locally – safe to use against confidential event logs.
 isConfidentialSafe: true
 
 requirements:
@@ -48,6 +51,8 @@ frontend:
       icon: TrendingUp
       default_w: 8
       default_h: 7
+      min_w: 6
+      min_h: 7
       config_schema:
         properties:
           granularity:
@@ -67,6 +72,8 @@ frontend:
       icon: Activity
       default_w: 6
       default_h: 7
+      min_w: 5
+      min_h: 7
       config_schema:
         properties:
           granularity:
@@ -85,6 +92,8 @@ frontend:
       icon: Layers
       default_w: 8
       default_h: 7
+      min_w: 6
+      min_h: 7
       config_schema:
         properties:
           granularity:
@@ -113,6 +122,8 @@ frontend:
       icon: ScatterChart
       default_w: 8
       default_h: 9
+      min_w: 6
+      min_h: 8
       config_schema:
         properties:
           max_points:

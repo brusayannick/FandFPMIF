@@ -1,4 +1,4 @@
-"""/api/v1/admin/storage — connect & manage the storage backend (admin only).
+"""/api/v1/admin/storage - connect & manage the storage backend (admin only).
 
 Lets an administrator switch the platform between local-disk storage (dev/test)
 and an S3/Ceph-RGW bucket as the durable primary store (prod), enter the bucket
@@ -42,7 +42,7 @@ class StorageConfigOut(BaseModel):
     bucket: str | None = None
     region: str | None = None
     access_key: str | None = None
-    # We never return the secret — only whether one is stored. The form shows a
+    # We never return the secret - only whether one is stored. The form shows a
     # "leave blank to keep" placeholder when this is true.
     secret_set: bool = False
     path_style: bool = True
@@ -118,7 +118,7 @@ async def get_config(user: CurrentUserDep, session: SessionDep) -> StorageConfig
     """Current storage config (secret never returned), plus ``is_admin``.
 
     Uses ``CurrentUserDep`` (not admin) so the page can render a "needs admin"
-    state instead of a hard 403 for non-admins — mirrors ``admin.export_info``.
+    state instead of a hard 403 for non-admins - mirrors ``admin.export_info``.
     """
     if ADMIN_ROLE not in user.roles:
         return StorageConfigOut(is_admin=False)

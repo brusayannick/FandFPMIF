@@ -2,12 +2,15 @@ id: discovery
 name: Discovery
 version: 1.0.0
 category: foundation
-description: Process discovery - DFG, Petri nets (Alpha / Inductive miners), Process Tree, Heuristics Net, BPMN.
+description: >-
+  Turns your event log into a process model and shows it as a directly-follows
+  graph, Petri net (Alpha or Inductive miner), process tree, heuristics net, or
+  BPMN diagram.
 keywords: ["process model", "discover", "discovery", "dfg", "petri net", "bpmn", "process tree", "model", "variants", "paths"]
 author: van der Aalst
 license: MIT
 default_enabled: true
-# Runs entirely locally — safe to use against confidential event logs.
+# Runs entirely locally – safe to use against confidential event logs.
 isConfidentialSafe: true
 
 requirements:
@@ -53,6 +56,8 @@ frontend:
       icon: Workflow
       default_w: 5
       default_h: 5
+      min_w: 4
+      min_h: 4
     - id: activity-frequency
       entry: ./widgets/ActivityFrequency.tsx
       title: Activity frequency
@@ -60,6 +65,8 @@ frontend:
       icon: BarChart3
       default_w: 6
       default_h: 9
+      min_w: 5
+      min_h: 6
       config_schema:
         properties:
           top_n:
@@ -79,6 +86,8 @@ frontend:
       icon: Network
       default_w: 8
       default_h: 12
+      min_w: 6
+      min_h: 10
 
 permissions:
   - read:event_log

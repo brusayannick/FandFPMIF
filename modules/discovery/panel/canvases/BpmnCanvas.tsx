@@ -1,7 +1,7 @@
 "use client";
 
 // bpmn-js / diagram-js-minimap CSS is loaded by the host app (apps/web)
-// rather than imported here — the module bundler (esbuild) has no loaders
+// rather than imported here – the module bundler (esbuild) has no loaders
 // for the .woff/.ttf/.eot/.svg font assets the BPMN font CSS references.
 // See apps/web/app/layout.tsx for the actual imports.
 
@@ -13,13 +13,13 @@ import { EmptyState } from "@/components/empty-state";
 import { formatNumber } from "@/lib/format";
 
 // bpmn-js / bpmn-auto-layout / diagram-js-minimap are bundled straight into
-// this panel — they are intentionally NOT in runtime-externals.json. The host
+// this panel – they are intentionally NOT in runtime-externals.json. The host
 // runs `next dev --turbo`, and Turbopack mis-bundles bpmn-moddle so its parser
 // stops recognising the `bpmn:Definitions` root: every importXML/layoutProcess
 // then fails with "failed to parse document as <bpmn:Definitions>" on valid
 // BPMN. esbuild (this panel's bundler) handles bpmn-moddle correctly, so we
 // bundle here and never touch the host copy. Do NOT re-externalise these to
-// "share" the host instance — that reintroduces the parse failure.
+// "share" the host instance – that reintroduces the parse failure.
 //
 // NavigatedViewer is the strictly view-only bpmn-js entry: pan + scroll-zoom +
 // keyboard-pan, and NO editing services (no palette / context-pad /
@@ -53,7 +53,7 @@ export interface BpmnDecor {
 }
 
 export interface BpmnCanvasProps {
-  /** Initial BPMN XML. Updates after mount are ignored — re-mount the
+  /** Initial BPMN XML. Updates after mount are ignored – re-mount the
    *  component via a `key` prop to swap models. */
   xml: string;
   /** DFG-derived frequency maps driving the heatmap / badges. */
@@ -117,7 +117,7 @@ export function BpmnCanvas({
         try {
           modeler.get<{ open: () => void }>("minimap").open();
         } catch {
-          // minimap module already initialised in some other state — ignore.
+          // minimap module already initialised in some other state – ignore.
         }
       } catch (err) {
         // A blank canvas with no signal hid genuine import failures. Surface
@@ -138,7 +138,7 @@ export function BpmnCanvas({
       try {
         modeler?.destroy();
       } catch {
-        /* ignore — destroy can throw if import never completed */
+        /* ignore – destroy can throw if import never completed */
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

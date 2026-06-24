@@ -67,7 +67,7 @@ export function ConceptDriftExplainerPanel({
       <EmptyState
         icon={Sparkles}
         title="No drifts to explain yet"
-        description="The CDE explains drifts detected by the CV4CDD module. Run CV4CDD first — its auto-detection job kicks off on log import."
+        description="The CDE explains drifts detected by the CV4CDD module. Run CV4CDD first – its auto-detection job kicks off on log import."
       />
     );
   }

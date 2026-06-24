@@ -347,7 +347,7 @@ function OcpnTab({ logId }: { logId: string }) {
       {net && net.places.length > 0 ? (
         <OcpnCanvas key={activeOt} net={net} />
       ) : (
-        <CanvasError message="No Petri net for this object type — too few events to mine a model." />
+        <CanvasError message="No Petri net for this object type – too few events to mine a model." />
       )}
     </div>
   );

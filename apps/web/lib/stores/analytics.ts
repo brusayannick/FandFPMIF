@@ -60,7 +60,7 @@ export const useAnalytics = create<AnalyticsState>()(
       name: "ff.analytics",
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
-      // Bump when the persisted shape changes — Zustand discards stored
+      // Bump when the persisted shape changes – Zustand discards stored
       // state at older versions, so we avoid a stale `anonUserId: null`
       // (from the original v1 schema) silently dropping every event.
       version: 2,

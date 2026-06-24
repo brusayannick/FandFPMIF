@@ -252,8 +252,8 @@ function StructuralTable({ metrics }: { metrics: ComplexityMetrics }) {
 // ── Formatting helpers ───────────────────────────────────────────────────────
 
 function fmt(v: number | null | undefined, d: number): string {
-  if (v === null || v === undefined || Number.isNaN(v)) return "—";
-  if (!Number.isFinite(v)) return "—";
+  if (v === null || v === undefined || Number.isNaN(v)) return "–";
+  if (!Number.isFinite(v)) return "–";
   return v.toFixed(d);
 }
 

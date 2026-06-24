@@ -5,7 +5,7 @@ data/users/{user_id}/event_logs/{log_id}/
 ├── events.parquet     # case-centric: flat event table, sorted by (case_id, timestamp)
 ├── cases.parquet      # case-centric: cached case-level aggregates
 ├── original.{ext}     # original upload (audit / re-export)
-└── ocel/              # object-centric (OCEL) tables — present iff log_model
+└── ocel/              # object-centric (OCEL) tables - present iff log_model
     ├── events.parquet     #   == "object_centric". The case-centric root
     ├── objects.parquet     #   events.parquet/cases.parquet are then ABSENT
     ├── relations.parquet   #   (the two models never share storage).

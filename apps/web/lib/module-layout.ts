@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
  * Per-(user, log, module) widget layout persistence (§7.7).
  *
  * Backed by the `module_layouts` SQLite table on the API side. The shape of
- * the layout JSON is owned by the module itself — typically a
+ * the layout JSON is owned by the module itself – typically a
  * `react-grid-layout` array of `{i, x, y, w, h}` once a module adopts
  * widget composition, but the platform stores it opaquely so module
  * authors can evolve their schema without server churn.

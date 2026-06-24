@@ -36,6 +36,34 @@ from typing import Any
 # socket, so this only bounds JSON metadata.
 RPC_STREAM_LIMIT = 256 * 1024 * 1024  # 256 MiB
 
+# Must match `subprocess_host.CANCEL_RPC_MSG`. The host raises an RPC error
+# carrying this string for every ctx call made by a soft-cancelled job; the
+# worker turns it into `Cancelled` (below) so the handler unwinds cleanly.
+_CANCEL_RPC_MSG = "__ff_job_cancelled__"
+
+
+def _resolve_cancelled() -> type[BaseException]:
+    """The `Cancelled` type to raise for a soft cancel.
+
+    Prefer the SDK's `mate.sdk.Cancelled` (new workers). Fall back to a local
+    BaseException subclass so an *older* worker SDK - which predates `Cancelled`
+    - still unwinds under a broad `except Exception` (BaseException isn't caught
+    by it). Version-skew-proof either way.
+    """
+    try:
+        from mate.sdk import Cancelled as _Cancelled  # type: ignore[attr-defined]
+
+        return _Cancelled
+    except Exception:  # pragma: no cover - exercised only against an old SDK
+
+        class Cancelled(BaseException):
+            pass
+
+        return Cancelled
+
+
+Cancelled = _resolve_cancelled()
+
 
 def _import_module(folder: Path):
     """Import ``<folder>/module.py`` as a package so relative imports work."""
@@ -91,7 +119,7 @@ def _collect_handlers(instance) -> list[dict[str, Any]]:
             entry["on_event"] = {"topic": event_sub.topic}
         if job_spec is not None:
             # Serialize the static JobSpec fields so the host can rebuild it.
-            # Callable title/subtitle can't cross the socket — leave them null
+            # Callable title/subtitle can't cross the socket - leave them null
             # so the host falls back to a static label (loader's
             # `_resolve_dynamic`).
             entry["job"] = {
@@ -127,6 +155,13 @@ class _ProxyContext:
         self.config = _ConfigProxy(ctx_meta.get("config", {}))
         self.progress = _ProgressProxy(conn, token)
         self.logger = _LoggerProxy(conn, token)
+        self.cancellation = _CancellationProxy(conn, token)
+
+    def is_cancelled(self) -> bool:
+        return self.cancellation.is_cancelled()
+
+    async def check_cancelled(self) -> None:
+        await self.cancellation.check_cancelled()
 
 
 class _EventLogProxy:
@@ -283,6 +318,28 @@ class _ProgressProxy:
         )
 
 
+class _CancellationProxy:
+    """ctx.cancellation surface for a subprocess handler (new-SDK workers).
+
+    `check_cancelled()` makes a dedicated `ctx.cancel.check` RPC; the host's
+    cancel guard turns it into the cancel sentinel when the job is flagged, which
+    `WireConnection.run` reconstructs as `Cancelled` - so the call raises. When
+    not cancelled the RPC just returns False. `is_cancelled()` is best-effort
+    sync: it can't round-trip, so it reports False and authors should prefer the
+    async `check_cancelled()` (or simply report progress, which also polls).
+    """
+
+    def __init__(self, conn: WireConnection, token: str):
+        self._conn = conn
+        self._token = token
+
+    def is_cancelled(self) -> bool:
+        return False
+
+    async def check_cancelled(self) -> None:
+        await self._conn.send_request("ctx.cancel.check", {"ctx_token": self._token})
+
+
 class _LoggerProxy:
     """Minimal structlog-compatible logger that forwards to the host."""
 
@@ -376,7 +433,15 @@ class WireConnection:
                 fut = self._pending.pop(rid, None)
                 if fut and not fut.done():
                     if "error" in msg:
-                        fut.set_exception(RuntimeError(msg["error"].get("message", "remote error")))
+                        message = msg["error"].get("message", "remote error")
+                        # The host signals a soft cancel via an RPC error carrying
+                        # the cancel sentinel - turn it into `Cancelled` (a
+                        # BaseException) so the awaiting handler unwinds even under
+                        # a broad `except Exception`. Other errors stay RuntimeError.
+                        if _CANCEL_RPC_MSG in message:
+                            fut.set_exception(Cancelled())
+                        else:
+                            fut.set_exception(RuntimeError(message))
                     else:
                         fut.set_result(msg.get("result"))
 
@@ -393,6 +458,14 @@ class WireConnection:
             if inspect.isawaitable(result):
                 result = await result
             await self._write({"id": rid, "result": result})
+        except Cancelled:
+            # A handler unwound on a soft cancel (it raised Cancelled, or a ctx
+            # RPC reconstructed one). Report it back carrying the cancel sentinel
+            # so the host re-raises Cancelled too - the job records `cancelled`,
+            # not `failed`. (Cancelled is a BaseException, so the generic
+            # `except Exception` below would otherwise miss it and the host's
+            # `call` future would hang.)
+            await self._write({"id": rid, "error": {"message": _CANCEL_RPC_MSG}})
         except Exception as exc:
             await self._write(
                 {

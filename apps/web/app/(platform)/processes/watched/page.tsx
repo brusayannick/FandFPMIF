@@ -148,7 +148,7 @@ function WatchCard({ watch }: { watch: WatchedFolderSummary }) {
       } else if (res.failed > 0) {
         toast.warning(`${res.failed} file${res.failed === 1 ? "" : "s"} failed to import`);
       } else {
-        toast.success(`Scanned — nothing new (${res.found} file${res.found === 1 ? "" : "s"})`);
+        toast.success(`Scanned – nothing new (${res.found} file${res.found === 1 ? "" : "s"})`);
       }
     } catch (err: unknown) {
       toastError(`Scan failed: ${(err as Error).message}`);

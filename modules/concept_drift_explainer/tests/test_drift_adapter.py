@@ -1,7 +1,7 @@
 """Unit tests for the cv4cdd → CDE drift adapter.
 
 Exercises the pure-Python part of [agents/drift_agent.py](../agents/drift_agent.py)
-that needs no LLM and no Pinecone — the activity-binning logic that maps a
+that needs no LLM and no Pinecone - the activity-binning logic that maps a
 cv4cdd drift's window indices to representative activity labels.
 """
 
@@ -35,7 +35,7 @@ def _synthetic_events(n_per_activity: int = 40) -> pd.DataFrame:
 
 def test_dominant_activity_is_first_half_first():
     df = _synthetic_events()
-    # 4 windows of 20 events each — window 0 should be all 'submit', window 3 all 'approve'.
+    # 4 windows of 20 events each - window 0 should be all 'submit', window 3 all 'approve'.
     assert _dominant_activity_in_window(df, n_windows=4, window_idx=0) == "submit"
     assert _dominant_activity_in_window(df, n_windows=4, window_idx=3) == "approve"
 

@@ -2,7 +2,7 @@
 
 Schema follows INSTRUCTIONS.md §7.9.5 (Job model fields) and §3.3 (process logs
 metadata). Module-related tables are scaffolded here even though they are
-populated by phase 5 — the column shape is fixed in v1.
+populated by phase 5 - the column shape is fixed in v1.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ class EventLog(Base):
     source_format: Mapped[str | None] = mapped_column(String(32))
     source_filename: Mapped[str | None] = mapped_column(String(512))
 
-    # The log's data model — the single isolation switch between case-centric
+    # The log's data model - the single isolation switch between case-centric
     # (XES/CSV/XML → events.parquet keyed by case_id) and object-centric (OCEL →
     # ocel/*.parquet). A log is exactly one model; the two never mix. Defaults to
     # "case_centric" so every pre-OCEL row stays case-centric.
@@ -107,17 +107,17 @@ class EventLog(Base):
     # While `status == "processing"`, the log is held disabled until every
     # subscribing module finishes precomputing against it. The import job whose
     # children are the precompute jobs to wait on, and the module-id set frozen
-    # at import time (deterministic — avoids a "0/0 → flip early" race). Both are
+    # at import time (deterministic - avoids a "0/0 → flip early" race). Both are
     # cleared the moment the log goes `ready`. See `mate.api.modules.processing`.
     processing_import_job_id: Mapped[str | None] = mapped_column(String(36))
     expected_modules: Mapped[list[str] | None] = mapped_column(JSON)
 
     events_count: Mapped[int | None] = mapped_column(Integer)
-    # Case-centric counts — left NULL for object-centric logs (their NULLness is
+    # Case-centric counts - left NULL for object-centric logs (their NULLness is
     # itself a tell that the case-centric path never ran).
     cases_count: Mapped[int | None] = mapped_column(Integer)
     variants_count: Mapped[int | None] = mapped_column(Integer)
-    # Object-centric counts — left NULL for case-centric logs.
+    # Object-centric counts - left NULL for case-centric logs.
     objects_count: Mapped[int | None] = mapped_column(Integer)
     object_types_count: Mapped[int | None] = mapped_column(Integer)
     relations_count: Mapped[int | None] = mapped_column(Integer)
@@ -161,7 +161,7 @@ class EventLog(Base):
 
 
 class WatchedFolder(Base):
-    """A persistent import *source* — a storage location scanned over time.
+    """A persistent import *source* - a storage location scanned over time.
 
     Unlike the one-shot upload paths, a watched folder points at a location in
     the active storage backend (an S3 key prefix in S3 mode, a filesystem path in
@@ -250,7 +250,7 @@ class WatchedFolderFile(Base):
 
 
 class Job(Base):
-    """Persisted job — see §7.9.5 / §8.
+    """Persisted job - see §7.9.5 / §8.
 
     The drawer / dock / toasts in the frontend (phase 4 and beyond) read from
     this table; for phase 3 only `import` jobs are produced.
@@ -297,7 +297,7 @@ class Job(Base):
 
 
 class ModuleConfig(Base):
-    """Per-module per-user configuration — populated by Settings → Modules."""
+    """Per-module per-user configuration - populated by Settings → Modules."""
 
     __tablename__ = "module_configs"
 
@@ -316,7 +316,7 @@ class ModuleInstall(Base):
     """Per-user record of which modules a user has installed / made available.
 
     Module *code* lives once on shared disk (``modules/<id>/``) and is loaded
-    once into the process — true per-user code isolation is out of scope. This
+    once into the process - true per-user code isolation is out of scope. This
     table reference-counts *ownership* so listing, availability, and deletion
     are per-user: a user only sees and can manage modules they installed, and
     the on-disk artifact is removed only when its last owner uninstalls it.
@@ -372,7 +372,7 @@ class UserSetting(Base):
 
 
 class SystemSetting(Base):
-    """Free-form *system-wide* key/value settings — the singleton analogue of
+    """Free-form *system-wide* key/value settings - the singleton analogue of
     :class:`UserSetting`.
 
     Unlike per-user settings these apply platform-wide and are admin-controlled
@@ -392,8 +392,45 @@ class SystemSetting(Base):
     )
 
 
+class ControlPolicy(Base):
+    """Admin-vs-user control policy for a single server-side setting or module.
+
+    The generic backbone of the admin control framework: every controllable
+    thing (a server-side setting like ``ai.config``, or an installed module's
+    config) has one row keyed by ``(scope, key)``. ``control_mode="user"`` (the
+    default) means each user owns their own value as before; ``"admin"`` means
+    the single ``admin_value_json`` here is the shared value used for *all*
+    users, who then see a read-only "controlled by your administrator" state.
+
+    A ``None`` ``admin_value_json`` under ``control_mode="admin"`` means
+    "controlled, but the admin hasn't entered a value yet". Resolved at the
+    existing per-user read chokepoints via ``mate.api.policy.resolve``. Secrets
+    (e.g. AI API keys) live inside ``admin_value_json`` and are never serialized
+    back out - the routes mask them, exactly like the per-user path.
+    """
+
+    __tablename__ = "control_policies"
+
+    scope: Mapped[str] = mapped_column(String(16), primary_key=True)
+    key: Mapped[str] = mapped_column(String(160), primary_key=True)
+    control_mode: Mapped[str] = mapped_column(
+        String(8), default="user", server_default="user", nullable=False
+    )
+    admin_value_json: Mapped[dict[str, Any] | list[Any] | str | int | float | bool | None] = (
+        mapped_column(JSON)
+    )
+    updated_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    __table_args__ = (Index("ix_control_policies_scope", "scope"),)
+
+
 class StorageConfig(Base):
-    """Global (VM-wide) storage backend configuration — a single row.
+    """Global (VM-wide) storage backend configuration - a single row.
 
     Unlike :class:`UserSetting` this is *not* per-user: it selects where every
     user's event logs and module outputs are durably stored. ``mode="local"``
@@ -416,7 +453,7 @@ class StorageConfig(Base):
     bucket: Mapped[str | None] = mapped_column(String(255))
     region: Mapped[str | None] = mapped_column(String(64))
     access_key: Mapped[str | None] = mapped_column(String(255))
-    # Fernet ciphertext of the secret access key — never stored or returned in
+    # Fernet ciphertext of the secret access key - never stored or returned in
     # plaintext (see ``storage/config.py``).
     secret_key_enc: Mapped[str | None] = mapped_column(Text)
     # Ceph RGW and most non-AWS S3 need path-style addressing
@@ -426,7 +463,7 @@ class StorageConfig(Base):
     )
     use_ssl: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
     prefix: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
-    # Admin-entered total quota (bytes) for the storage-overview bar. Optional —
+    # Admin-entered total quota (bytes) for the storage-overview bar. Optional -
     # S3 itself doesn't report it back without admin caps the RGW user lacks.
     quota_bytes: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(
@@ -437,7 +474,7 @@ class StorageConfig(Base):
 class EventEdit(Base):
     """Audit trail for manual cell edits made via the Events tab.
 
-    Each row records one field change. We never delete rows from this table —
+    Each row records one field change. We never delete rows from this table -
     Settings → Edit history surfaces the most recent N for a given log.
     """
 
@@ -462,7 +499,7 @@ class EventEdit(Base):
 
 
 class AnalyticsSession(Base):
-    """Aggregate row per browser session — one per visit/idle-timeout window.
+    """Aggregate row per browser session - one per visit/idle-timeout window.
 
     Updated via UPSERT on each ingested batch so `GET /analytics/summary` can
     answer "sessions in the last 30 days" without scanning the events table.
@@ -490,7 +527,7 @@ class AnalyticsEvent(Base):
     """Append-only behaviour-tracking event row.
 
     Capture is gated by the ``analytics.config`` UserSetting on both client
-    and server. No PII is stored — see ``routes/analytics.py`` for the
+    and server. No PII is stored - see ``routes/analytics.py`` for the
     server-side enabled-gate and the explicit "never capture" list in the
     Privacy settings copy.
     """
@@ -528,7 +565,7 @@ class AnalyticsEvent(Base):
         Index("ix_analytics_events_user_session", "user_id", "session_id", "occurred_at"),
         Index("ix_analytics_events_user_type_name", "user_id", "event_type", "event_name"),
         Index("ix_analytics_events_user_occurred", "user_id", "occurred_at"),
-        # Cross-user (no leading user_id) — serve the admin behaviour-export
+        # Cross-user (no leading user_id) - serve the admin behaviour-export
         # filters in routes/admin.py (Alembic 0004).
         Index("ix_analytics_events_occurred", "occurred_at"),
         Index("ix_analytics_events_type_occurred", "event_type", "occurred_at"),
@@ -539,8 +576,8 @@ class Dashboard(Base):
     """A user-built dashboard: a grid of cards drawn from any installed module.
 
     A dashboard binds to a single event log (`event_log_id`); every card on it
-    renders against that log. `layout_json` holds the full board state — the
-    placed cards and their react-grid-layout geometry — as::
+    renders against that log. `layout_json` holds the full board state - the
+    placed cards and their react-grid-layout geometry - as::
 
         {"items": [{"i": "<uuid>", "module_id": "...", "widget_id": "...",
                     "title": "...", "x": 0, "y": 0, "w": 6, "h": 8,
@@ -582,7 +619,7 @@ class Team(Base):
     """A named group of users (a "workspace") used as a dashboard-share target.
 
     Teams are admin-managed: an operator creates a team and assigns members via
-    the admin panel. A team is the coarse share target — sharing a dashboard
+    the admin panel. A team is the coarse share target - sharing a dashboard
     with a team grants every current member read access. Soft-deleted
     (``deleted_at``) so historical shares keep a stable name to display.
     """
@@ -623,10 +660,10 @@ class DashboardShare(Base):
     """A grant of read access to one dashboard for one target.
 
     Exactly one of ``target_user_id`` (share with a single member) or
-    ``target_team_id`` (share with a whole team) is set — the route layer
+    ``target_team_id`` (share with a whole team) is set - the route layer
     enforces the xor. ``created_by`` is the sharer (the dashboard owner) for
-    audit. A share is the *only* sanctioned way a dashboard — and, transitively,
-    the data of its bound event log — crosses an account boundary; see
+    audit. A share is the *only* sanctioned way a dashboard - and, transitively,
+    the data of its bound event log - crosses an account boundary; see
     ``mate.api.sharing``. Read-only: recipients never mutate the dashboard or
     the log.
     """

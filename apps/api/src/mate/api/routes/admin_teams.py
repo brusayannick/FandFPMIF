@@ -1,4 +1,4 @@
-"""Admin-only team management + dashboard-share oversight — `/api/v1/admin/*`.
+"""Admin-only team management + dashboard-share oversight - `/api/v1/admin/*`.
 
 Gated by ``AdminUserDep`` (the ``admin`` realm role). Operators create teams,
 assign members, and can audit/revoke any dashboard share across all users.

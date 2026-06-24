@@ -155,7 +155,7 @@ function buildTree(
     list.sort((a, b) => a.position - b.position || b.created_at.localeCompare(a.created_at));
   }
 
-  // Folders first, then logs — each sorted by position within their parent.
+  // Folders first, then logs – each sorted by position within their parent.
   const build = (parentId: string | null): TreeNode[] => {
     const out: TreeNode[] = [];
     for (const f of folderChildren.get(parentId) ?? []) {
@@ -201,11 +201,11 @@ export function ProcessesTable({ rows }: ProcessesTableProps) {
   const tree = useMemo(() => buildTree(folders, rows), [folders, rows]);
 
   const [expanded, setExpanded] = useState<Set<string>>(() => {
-    // Start with everything expanded — folders are usually shallow.
+    // Start with everything expanded – folders are usually shallow.
     return new Set(folders.map((f) => f.id));
   });
   // Auto-expand newly created folders. Returns `prev` unchanged when nothing
-  // was added — otherwise this would emit a fresh Set on every render and, with
+  // was added – otherwise this would emit a fresh Set on every render and, with
   // `folders` being a new `[]` reference while the query loads, spin into an
   // infinite render loop (React error #185).
   useEffect(() => {
@@ -795,7 +795,7 @@ function LogRow({
           kind: "log",
           id: row.id,
           parent_id: folderId,
-          // Push to a high position so the backend places it last — the next
+          // Push to a high position so the backend places it last – the next
           // listing fetch will normalise it relative to existing siblings.
           position: 999999,
         },

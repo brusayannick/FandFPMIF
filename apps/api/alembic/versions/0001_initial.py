@@ -1,4 +1,4 @@
-"""initial schema — full consolidated baseline
+"""initial schema - full consolidated baseline
 
 Revision ID: 0001_initial
 Revises:
@@ -29,7 +29,7 @@ branch_labels = None
 depends_on = None
 
 
-# Reverse-dependency drop order — children before parents.
+# Reverse-dependency drop order - children before parents.
 _TABLES = (
     "watched_folder_files",
     "watched_folders",

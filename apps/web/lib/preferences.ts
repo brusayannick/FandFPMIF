@@ -28,6 +28,6 @@ export async function putPreference(
     // `keepalive` lets the final flush survive a tab close / navigation.
     await api(`/api/v1/preferences/${key}`, { method: "PUT", json: value, keepalive });
   } catch {
-    /* best-effort — a dropped preference save is non-fatal */
+    /* best-effort – a dropped preference save is non-fatal */
   }
 }

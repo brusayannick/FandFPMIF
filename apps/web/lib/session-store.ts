@@ -1,9 +1,9 @@
 /**
- * File-backed server-side session store (Option 3 — small auth cookie).
+ * File-backed server-side session store (Option 3 – small auth cookie).
  *
  * When `SESSION_STORE_DIR` is set, `auth.ts` keeps the Auth.js session JWT
- * (which holds the Keycloak access + refresh tokens) here on disk — one JSON
- * file per session — and the browser cookie carries only an opaque session id.
+ * (which holds the Keycloak access + refresh tokens) here on disk – one JSON
+ * file per session – and the browser cookie carries only an opaque session id.
  * That keeps the cookie at ~64 B so it can't overflow the upstream reverse
  * proxy's response-header buffer (the 502 on /api/auth/*).
  *

@@ -1,4 +1,4 @@
-"""Performance — KPIs, bottlenecks, performance DFG, cycle time distribution.
+"""Performance - KPIs, bottlenecks, performance DFG, cycle time distribution.
 
 Heavy DuckDB SQL for the bulk of the per-case stats; pm4py for per-activity
 sojourn / service time. Each result is cached under
@@ -128,7 +128,7 @@ class PerformanceModule(Module):
         bottlenecks = (
             await ctx.cache.get("bottlenecks") if await ctx.cache.exists("bottlenecks") else None
         )
-        # Trim the heavy histograms — the LLM only needs ranking + numbers.
+        # Trim the heavy histograms - the LLM only needs ranking + numbers.
         slim_bottlenecks: list[dict[str, Any]] = []
         if isinstance(bottlenecks, dict):
             for item in bottlenecks.get("items", [])[:10]:
@@ -181,7 +181,7 @@ class PerformanceModule(Module):
             throughput_per_day = compute_throughput_per_day(int(cases or 0), earliest, latest)
 
             per_activity = await _per_activity_sojourn(df, freq_rows)
-            # Trim sample arrays out of the response — they're internal.
+            # Trim sample arrays out of the response - they're internal.
             per_activity_payload = [
                 {
                     "activity": a["activity"],

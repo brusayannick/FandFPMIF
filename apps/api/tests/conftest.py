@@ -88,7 +88,7 @@ def _override_current_user_for_tests(app) -> None:
 
     All routes that depend on ``CurrentUserDep`` route through
     ``mate.api.auth.dependencies.get_current_user``. FastAPI's
-    ``dependency_overrides`` swaps it out at the app level — far cleaner than
+    ``dependency_overrides`` swaps it out at the app level - far cleaner than
     forging a token + JWKS for every test.
     """
     from mate.api.auth.dependencies import (
@@ -127,7 +127,7 @@ async def _seed_module_installs_for_test_user() -> None:
 
     Module visibility is per-user (``module_installs``); the loader loads the
     fixture module into the process but doesn't record ownership. Real installs
-    do that in the install job — here we seed it so the sample module shows up
+    do that in the install job - here we seed it so the sample module shows up
     in the test user's listing.
     """
     from mate.api.db.engine import get_sessionmaker
@@ -192,6 +192,6 @@ async def client_with_sample_mod(tmp_path: Path) -> AsyncIterator[AsyncClient]:
 
 @pytest.fixture
 async def client_with_sample_mod_fresh(tmp_path: Path) -> AsyncIterator[AsyncClient]:
-    """Test user NOT pre-seeded — exercises lazy default seeding."""
+    """Test user NOT pre-seeded - exercises lazy default seeding."""
     async with _sample_mod_client(tmp_path, seed=False) as c:
         yield c

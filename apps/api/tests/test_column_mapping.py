@@ -48,7 +48,7 @@ def test_exact_lowercase_match() -> None:
 
 def test_exact_is_case_and_punctuation_insensitive() -> None:
     # The travel-permit scenario: `Activity` should map to the activity role
-    # cleanly (no review needed) — this is the bug that broke modules.
+    # cleanly (no review needed) - this is the bug that broke modules.
     res = resolve_roles(["Case ID", "Activity", "Timestamp"])
     assert res.roles["activity"] == "Activity"
     assert res.quality["activity"] == "exact"

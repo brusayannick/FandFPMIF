@@ -1,4 +1,4 @@
-"""Module-processing coordinator — hold a freshly imported log disabled until
+"""Module-processing coordinator - hold a freshly imported log disabled until
 every subscribing module has finished precomputing against it.
 
 The lifecycle a log moves through is:
@@ -11,7 +11,7 @@ The lifecycle a log moves through is:
 
 "All modules" is the *importing user's* installed modules that subscribe to the
 import topic (modules are per-user via ``module_installs``). The expected set is
-frozen at import time so the decision is deterministic — querying it lazily would
+frozen at import time so the decision is deterministic - querying it lazily would
 risk a "0 subscribers seen yet → flip to ready early" race. Completion is derived
 from the ``Job`` rows (the per-module precompute jobs, linked to the import job by
 ``parent_job_id``) rather than an in-memory counter, so it survives an API
@@ -33,7 +33,7 @@ from mate.api.modules.loader import ModuleLoader
 
 log = structlog.get_logger(__name__)
 
-# A module precompute job is "done" — for the purpose of un-gating the log — once
+# A module precompute job is "done" - for the purpose of un-gating the log - once
 # it reaches any of these. A failed/cancelled module must not strand the log in
 # `processing` forever, so it counts as terminal just like a success.
 _TERMINAL_JOB_STATUSES = ("completed", "failed", "cancelled")
@@ -57,18 +57,46 @@ class ModuleProcessingCoordinator:
         self._bus = bus
         self._sessionmaker = sessionmaker
 
-    async def expected_modules(self, topic: str, user_id: str, session: AsyncSession) -> set[str]:
-        """The modules a log imported on ``topic`` must wait on for ``user_id``.
+    async def _closure(
+        self, topic: str, user_id: str, session: AsyncSession
+    ) -> tuple[set[str], dict[str, set[str]]]:
+        """The precompute closure ``(nodes, edges)`` for ``user_id`` on ``topic``.
 
-        Intersection of the loader's event subscribers for ``topic`` with the
-        modules the user has actually installed — a module loaded for another
+        The user's installed, job-backed subscribers to ``topic`` plus everything
+        chained off their ``<id>.completed`` events - a module loaded for another
         tenant never holds this user's log.
         """
-        subscribers = self._loader.event_subscriber_module_ids(topic)
-        if not subscribers:
-            return set()
         owned = await user_module_ids(session, user_id)
-        return subscribers & owned
+        return self._loader.precompute_closure(topic, owned)
+
+    async def expected_modules(self, topic: str, user_id: str, session: AsyncSession) -> set[str]:
+        """The transitive set of modules a log imported on ``topic`` must wait on.
+
+        The precompute closure (see ``ModuleLoader.precompute_closure``): the
+        modules triggered directly by the import event plus everything chained off
+        their ``<id>.completed`` events. Frozen at import time so the decision is
+        deterministic.
+        """
+        nodes, _edges = await self._closure(topic, user_id, session)
+        return nodes
+
+    async def precompute_plan(
+        self, topic: str, user_id: str, session: AsyncSession
+    ) -> tuple[set[str], list[dict[str, Any]]]:
+        """``(nodes, plan)`` for an import on ``topic``.
+
+        ``plan`` is ``[{"id", "after": [...]}]`` describing the precompute DAG for
+        the frontend: roots (direct import subscribers) carry an empty ``after``;
+        a chained module lists the upstream module-ids it waits on. Stored on the
+        import job's payload so the jobs UI can render waiting/skipped steps.
+        """
+        nodes, edges = await self._closure(topic, user_id, session)
+        roots = self._loader.precompute_subscriber_module_ids(topic) & nodes
+        plan = [
+            {"id": mid, "after": [] if mid in roots else sorted(edges.get(mid, set()))}
+            for mid in sorted(nodes)
+        ]
+        return nodes, plan
 
     async def check_and_finalize(self, log_id: str, session: AsyncSession) -> bool:
         """Flip a ``processing`` log to ``ready`` once its expected modules are done.
@@ -90,20 +118,25 @@ class ModuleProcessingCoordinator:
         import_job_id = row.processing_import_job_id
 
         # Defensive: a processing row with no expected set / no import job can
-        # never be un-gated by jobs — treat it as immediately complete so it
+        # never be un-gated by jobs - treat it as immediately complete so it
         # can't strand. (The ingest handler never writes this shape.)
         if not expected or not import_job_id:
             terminal_covering = True
         else:
             result = await session.execute(
-                select(Job.module_id).where(
+                select(Job.module_id, Job.status).where(
                     Job.parent_job_id == import_job_id,
                     Job.module_id.in_(expected),
                     Job.status.in_(_TERMINAL_JOB_STATUSES),
                 )
             )
-            terminal_module_ids = {mid for (mid,) in result.all() if mid is not None}
-            terminal_covering = expected <= terminal_module_ids
+            terminal_status = {mid: st for (mid, st) in result.all() if mid is not None}
+            succeeded = {mid for mid, st in terminal_status.items() if st == "completed"}
+            topic = "ocel.imported" if row.log_model == "object_centric" else "log.imported"
+            roots = self._loader.precompute_subscriber_module_ids(topic) & expected
+            edges = self._loader.precompute_edges(expected)
+            settled = self._settled_set(expected, roots, edges, set(terminal_status), succeeded)
+            terminal_covering = expected <= settled
 
         if not terminal_covering:
             return False
@@ -116,6 +149,42 @@ class ModuleProcessingCoordinator:
         await self._bus.publish("log.ready", {"user_id": row.user_id, "log_id": log_id})
         log.info("modules.processing.log_ready", log_id=log_id, user_id=row.user_id)
         return True
+
+    @staticmethod
+    def _settled_set(
+        expected: set[str],
+        roots: set[str],
+        edges: dict[str, set[str]],
+        terminal: set[str],
+        succeeded: set[str],
+    ) -> set[str]:
+        """Expected modules that have either finished (``terminal``) or can never run.
+
+        A chained module is only triggered when an upstream succeeds and emits
+        ``<upstream>.completed``. So a non-root module with no terminal job is
+        "settled" (skipped) once *every* upstream is settled-without-success - if
+        any upstream succeeded it will still be triggered, so we keep waiting.
+        Iterates to a fixpoint; every closure node is reachable from a root, so a
+        pure dependency cycle cannot strand the gate. A non-root with no known
+        producer edge carries no skip signal, so it is *waited on* (as under the
+        flat pre-closure semantics) rather than skipped.
+        """
+        settled = set(terminal)
+        changed = True
+        while changed:
+            changed = False
+            for mid in expected:
+                if mid in settled or mid in roots:
+                    continue
+                producers = edges.get(mid, set())
+                if not producers:
+                    continue  # no producer edge → no skip signal; wait like a root
+                if producers & succeeded:
+                    continue  # an upstream succeeded → this module will be triggered
+                if all(p in settled and p not in succeeded for p in producers):
+                    settled.add(mid)  # every upstream settled without success → skip
+                    changed = True
+        return settled
 
     async def on_terminal_job(self, payload: dict[str, Any]) -> None:
         """React to a terminal ``job.*`` event by re-checking the parent log.
@@ -137,6 +206,21 @@ class ModuleProcessingCoordinator:
             log_id = parent.payload_json.get("log_id")
             if not isinstance(log_id, str):
                 return
+            # A successful per-module precompute publishes the reserved
+            # `<module_id>.completed` event, carrying `import_job_id` so any
+            # chained module's job is parented to the same import group. Only on
+            # success: a failed/cancelled upstream emits nothing, so the gate
+            # cascade-skips its dependents (see `_settled_set`) instead of
+            # waiting on a job that will never be submitted.
+            if job.status == "completed" and job.module_id:
+                await self._bus.publish(
+                    f"{job.module_id}.completed",
+                    {
+                        "user_id": job.user_id,
+                        "log_id": log_id,
+                        "import_job_id": parent.id,
+                    },
+                )
             await self.check_and_finalize(log_id, session)
 
     async def reconcile_boot(self, session: AsyncSession) -> None:

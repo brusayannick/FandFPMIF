@@ -6,7 +6,7 @@ variants_count, date_min/max) stay coherent. Concurrent edits to the same
 log are serialised behind a per-log asyncio lock; different logs run in
 parallel.
 
-The user picked "rewrite parquet on every edit" over an overrides table —
+The user picked "rewrite parquet on every edit" over an overrides table -
 simpler, no stale-state UX, but every edit pays the cost of rewriting
 (usually sub-second; large logs may grow up to a few seconds).
 """
@@ -157,7 +157,7 @@ def _rewrite_with_edits(
     user_id: str,
     edits: list[tuple[int, str, Any]],
 ) -> CellEditOutcome:
-    """Synchronous parquet rewrite — runs on a worker thread."""
+    """Synchronous parquet rewrite - runs on a worker thread."""
     paths = log_paths(log_id, user_id)
     # Pull the log dir from S3 if the local cache is cold (no-op in local mode).
     storage_sync.hydrate_dir_sync(paths.root)

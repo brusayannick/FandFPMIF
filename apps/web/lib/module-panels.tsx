@@ -24,7 +24,7 @@ export interface ModulePanelProps {
  *
  * Panel discovery: prefer `module.exports.Panel`, then `.default`, then the
  * first React-component-looking named export. Authors should add
- * `export default Panel` or `export const Panel = ...` going forward — the
+ * `export default Panel` or `export const Panel = ...` going forward – the
  * fallback exists to keep current `DiscoveryPanel` / `PerformancePanel` /
  * `Cv4cddPanel` / `ComplexityPanel` named exports working.
  */

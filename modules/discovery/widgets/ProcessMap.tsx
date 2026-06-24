@@ -10,7 +10,7 @@ import { CardShell } from "./_kit";
  *
  * `useDiscoveryDfg` goes through the shared `@/lib/api` fetch wrapper, so the
  * dashboard's ephemeral `X-FF-Event-Filter` header (column filters + time
- * range) is attached automatically — the map re-renders against the filtered
+ * range) is attached automatically – the map re-renders against the filtered
  * slice with no extra plumbing. Wrapping the real `DfgCanvas` in the discovery
  * settings provider means the widget honours the same render settings (layout,
  * edge labels, sliders) the user configured in the discovery panel.

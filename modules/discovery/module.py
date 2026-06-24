@@ -1,4 +1,4 @@
-"""Discovery — DFG, Petri nets (Alpha / Inductive), Process Tree, Heuristics Net.
+"""Discovery - DFG, Petri nets (Alpha / Inductive), Process Tree, Heuristics Net.
 
 Each route runs the relevant pm4py discovery algorithm against the log's
 events.parquet, serialises the output to a JSON shape consumed by the
@@ -160,7 +160,7 @@ def _activity_mean_trace_position(renamed: Any) -> dict[str, float]:
     For each event we compute its 0..1 position inside its case (event index
     over trace length - 1), then average per activity. Single-event traces
     contribute 0.0. The result is the frontend's "when does this activity
-    tend to happen" sort key — lets the DFG canvas order within-layer nodes
+    tend to happen" sort key - lets the DFG canvas order within-layer nodes
     by real temporal execution rather than by frequency.
     """
     sorted_df = renamed.sort_values(["case:concept:name", "time:timestamp"], kind="mergesort")
@@ -555,7 +555,7 @@ class DiscoveryModule(Module):
     ) -> dict[str, Any]:
         """Resolve the algorithm-derived (cached) BPMN payload.
 
-        The BPMN view is read-only — there is no user-edited or uploaded model
+        The BPMN view is read-only - there is no user-edited or uploaded model
         to take precedence. The plain Inductive Miner is used by default;
         ``algo == "imf"`` re-mines with the Infrequent variant at
         ``noise_threshold`` to structurally prune the least-used behaviour.
@@ -595,7 +595,7 @@ class DiscoveryModule(Module):
     # -- precompute on import -------------------------------------------------
 
     @on_event("log.imported")
-    @job(progress=True, title="Discovery — precompute")
+    @job(progress=True, title="Discovery - precompute")
     async def precompute(self, ctx: ModuleContext, payload: dict[str, Any]) -> None:
         thresholds = _heuristics_thresholds(ctx.config)
         default_nt = 0.2

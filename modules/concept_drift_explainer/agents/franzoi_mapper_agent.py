@@ -1,4 +1,4 @@
-"""Franzoi mapper — classify each snippet against the Process Mining Context
+"""Franzoi mapper - classify each snippet against the Process Mining Context
 Taxonomy from Franzoi, Hartl et al. (2025).
 
 Adapted from the original `backend/agents/franzoi_mapper_agent.py`. Same

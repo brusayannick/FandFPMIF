@@ -1,4 +1,4 @@
-"""Admin behaviour-export — filtered cross-user export gated by ``admin``.
+"""Admin behaviour-export - filtered cross-user export gated by ``admin``.
 
 Mirrors ``test_admin_insights.py``: the default ``client`` user holds only the
 ``user`` role (exercises the 403 path); ``admin_client`` re-overrides
@@ -19,7 +19,7 @@ from httpx import ASGITransport, AsyncClient
 
 from .conftest import TEST_USER_EMAIL, TEST_USER_ID
 
-# Second user — seeded so user_id filtering has something to discriminate on.
+# Second user - seeded so user_id filtering has something to discriminate on.
 OTHER_USER_ID = "00000000-0000-7000-8000-0000000000a2"
 OTHER_USER_EMAIL = "other@mate.local"
 
@@ -90,7 +90,7 @@ async def seeded_events() -> AsyncIterator[str]:
                     last_seen_at=datetime.now(UTC).replace(tzinfo=None),
                 )
             )
-            # Flush the user before the events — there's no ORM relationship
+            # Flush the user before the events - there's no ORM relationship
             # between them, so the unit of work can't infer the FK insert order.
             await session.flush()
         session.add_all(
@@ -138,7 +138,7 @@ async def seeded_events() -> AsyncIterator[str]:
 
 
 # --------------------------------------------------------------------------
-# Access control — every new route is admin-gated
+# Access control - every new route is admin-gated
 # --------------------------------------------------------------------------
 
 
@@ -190,7 +190,7 @@ async def test_ndjson_filter_by_event_type(admin_client: AsyncClient, seeded_eve
 @pytest.mark.asyncio
 async def test_ndjson_filter_by_date_range(admin_client: AsyncClient, seeded_events: str) -> None:
     marker = seeded_events
-    # Half-open [2026-01-11, 2026-01-13) — only the day-2 /models page event.
+    # Half-open [2026-01-11, 2026-01-13) - only the day-2 /models page event.
     resp = await admin_client.get(
         "/api/v1/admin/export/events.ndjson?start=2026-01-11T00:00:00&end=2026-01-13T00:00:00"
     )

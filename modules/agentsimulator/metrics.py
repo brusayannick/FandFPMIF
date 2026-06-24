@@ -2,14 +2,14 @@
 
 Originally these came from the AgentSimulator paper's ``log_distance_measures``
 package. That package hard-pins ``jellyfish==0.11.2``, which has no cp312 wheel
-and won't build on the worker — and the platform SDK requires Python >=3.12, so
+and won't build on the worker - and the platform SDK requires Python >=3.12, so
 an older interpreter (where a jellyfish wheel exists) isn't an option. We
 therefore compute equivalent distances directly with numpy + scipy:
 
-* **AEDD / CEDD / REDD / CTDD** — the Earth-Mover (Wasserstein) distance between
+* **AEDD / CEDD / REDD / CTDD** - the Earth-Mover (Wasserstein) distance between
   the relevant timestamp distributions, which is exactly how the paper defines
   them. Units are hours.
-* **NGD** — the total-variation distance between the logs' activity n-gram
+* **NGD** - the total-variation distance between the logs' activity n-gram
   (n=3) distributions, in [0, 1].
 
 Values are faithful in spirit to the reference but not guaranteed identical to
@@ -42,7 +42,7 @@ def align_for_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """Rename log columns to a common convention
     (``case_id`` / ``activity`` / ``start_time`` / ``end_time`` / ``resource``)
     and coerce timestamps to UTC. Mirrors the upstream notebook's
-    ``align_column_names`` — notably it prefers the simulated log's ``agent``
+    ``align_column_names`` - notably it prefers the simulated log's ``agent``
     column as the resource.
     """
     df = df.copy()

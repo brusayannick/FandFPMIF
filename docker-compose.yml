@@ -63,12 +63,12 @@ services:
     volumes:
       # Persistent state. Back up by copying ./data.
       - ./data:/app/data
-      # Module folder is the platform's extension point — exposed read/write so
+      # Module folder is the platform's extension point – exposed read/write so
       # the install flow can write modules/<id>/ into the host filesystem.
       - ./modules:/app/modules
       # The CV4CDD model (Temporal Dynamics module) is uploaded at runtime into
       # modules/cv4cdd/model/, which the ./modules mount above already exposes at
-      # /app/modules/cv4cdd/model — no separate, host-specific mount needed. Set
+      # /app/modules/cv4cdd/model – no separate, host-specific mount needed. Set
       # the module's model_path to /app/modules/cv4cdd/model/<model-dir>.
     environment:
       DATA_DIR: /app/data
@@ -100,7 +100,7 @@ services:
       timeout: 3s
       retries: 5
       # First boot installs every module's Python deps before the HTTP server
-      # comes up — cv4cdd alone pulls TensorFlow (~500 MB). Subsequent boots
+      # comes up – cv4cdd alone pulls TensorFlow (~500 MB). Subsequent boots
       # reuse the wheels in /app/data/uv-python and start in seconds, but the
       # initial grace period needs to cover the worst case.
       start_period: 600s
@@ -113,18 +113,18 @@ services:
       args:
         # NEXT_PUBLIC_* envs are inlined at build time (the rationale lives in
         # apps/web/lib/api.ts). Set this to the URL the *browser* will use to
-        # reach the api — for local docker-compose that's the host's port 8000.
+        # reach the api – for local docker-compose that's the host's port 8000.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     container_name: mate-web
     volumes:
       # Same modules/ bind-mount as the api container so the entrypoint can
       # esbuild each module's panel into modules/<id>/.dist/ at container
-      # start — the API serves those bundles at /api/v1/modules/{id}/assets/.
+      # start – the API serves those bundles at /api/v1/modules/{id}/assets/.
       - ./modules:/app/modules
     environment:
       INTERNAL_API_URL: http://api:8000
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      # Auth.js v5 — encrypts the session cookie. Rotate per environment.
+      # Auth.js v5 – encrypts the session cookie. Rotate per environment.
       AUTH_SECRET: ${AUTH_SECRET:-dev-only-change-me-with-openssl-rand-base64-32}
       AUTH_URL: ${AUTH_URL:-http://localhost:3000}
       AUTH_TRUST_HOST: "true"

@@ -1,7 +1,7 @@
 """Shared GraphState for the CDE pipeline.
 
 Mirrors the original repo's `backend/state/schema.py` minus the drift-linker
-fields and UI-only feedback dict — those are out of scope for the first port.
+fields and UI-only feedback dict - those are out of scope for the first port.
 Every agent reads/writes a subset of these keys.
 """
 
@@ -20,7 +20,7 @@ class DriftInfo(TypedDict, total=False):
     # ISO-8601 strings, tz-naive UTC (the platform's ingest normalises to this).
     start_timestamp: str
     end_timestamp: str
-    # Optional — only populated during evaluation against a labelled corpus.
+    # Optional - only populated during evaluation against a labelled corpus.
     gold_doc: str
 
 
@@ -87,7 +87,7 @@ class GraphState(TypedDict, total=False):
     user_question: Optional[str]
     chat_history: List[Tuple[str, str]]
 
-    # Cross-drift context for the chatbot — list of past completed states.
+    # Cross-drift context for the chatbot - list of past completed states.
     full_state_log: List[Dict]
 
     # Surface error messages cleanly in the UI.

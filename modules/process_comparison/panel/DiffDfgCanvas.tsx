@@ -12,8 +12,8 @@ import type { DfgDiffData, DiffStatus } from "./types";
 // the single source of truth for the canvas + the legend in index.tsx.
 export const STATUS_COLOR: Record<DiffStatus, string> = {
   shared: "var(--muted-foreground)",
-  only_a: "rgb(37, 99, 235)", // blue-600 — baseline
-  only_b: "rgb(217, 119, 6)", // amber-600 — comparison
+  only_a: "rgb(37, 99, 235)", // blue-600 – baseline
+  only_b: "rgb(217, 119, 6)", // amber-600 – comparison
 };
 
 const NODE_W = 200;
@@ -22,7 +22,7 @@ const X_GAP = 90;
 const Y_GAP = 80;
 
 /** Longest-path layering, top-to-bottom. Cycles are tolerated: rank relaxation
- *  is capped at |nodes| passes so a loop can't spin forever — it just settles
+ *  is capped at |nodes| passes so a loop can't spin forever – it just settles
  *  at a stable layering. */
 function layeredPositions(
   nodeIds: string[],

@@ -210,7 +210,7 @@ async def export_dashboard(
 ) -> DashboardExport:
     """Portable, id-free snapshot for download. Re-importable via POST /import.
 
-    Intentionally drops the bound `event_log_id` — logs are per-user and the
+    Intentionally drops the bound `event_log_id` - logs are per-user and the
     importer rebinds on the target machine.
     """
     row = await _get_owned(session, dashboard_id, user.id)

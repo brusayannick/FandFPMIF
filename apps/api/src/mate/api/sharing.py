@@ -1,16 +1,16 @@
-"""Dashboard sharing — the one sanctioned cross-account access path.
+"""Dashboard sharing - the one sanctioned cross-account access path.
 
 The platform is otherwise strictly per-user: every row keys on ``user_id`` and a
 log's Parquet lives under ``data/users/{owner_id}/``. A ``DashboardShare`` is the
 *only* way a resource crosses an account boundary, and it grants **read** access
-only — recipients never mutate the dashboard or the underlying log.
+only - recipients never mutate the dashboard or the underlying log.
 
 Keeping every "may this user read X" predicate in this module means the
 isolation-widening surface is small and auditable. Two consumers:
 
   - route handlers, via :func:`get_accessible_dashboard` (owner-or-shared view);
   - the module context builder, via :func:`user_can_read_log` (so a shared
-    dashboard's cards can read the owner's log data — see ``loader._make_context``).
+    dashboard's cards can read the owner's log data - see ``loader._make_context``).
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ async def dashboard_shared_with(
 async def get_accessible_dashboard(
     session: AsyncSession, dashboard_id: str, user_id: str
 ) -> Dashboard:
-    """Return a dashboard the user may *view* — owner or share recipient.
+    """Return a dashboard the user may *view* - owner or share recipient.
 
     404 (not 403) on no-access, mirroring the per-user ownership helpers so a
     non-recipient can't distinguish "missing" from "exists but not shared".
@@ -79,13 +79,13 @@ async def get_accessible_dashboard(
 
 
 async def can_share_with_team(session: AsyncSession, team_id: str, user_id: str) -> bool:
-    """A user may share with a team only if they belong to it — so a board
+    """A user may share with a team only if they belong to it - so a board
     can't be pushed to a team the sharer isn't part of."""
     return await session.get(TeamMember, (team_id, user_id)) is not None
 
 
 async def can_share_with_user(session: AsyncSession, target_user_id: str, user_id: str) -> bool:
-    """A user may share directly only with someone they share a team with —
+    """A user may share directly only with someone they share a team with -
     the same scope the ``/sharing/targets`` picker offers."""
     my_teams = await user_team_ids(session, user_id)
     if not my_teams:
@@ -102,7 +102,7 @@ async def user_can_read_log(session: AsyncSession, log_id: str, user_id: str) ->
     """Does *user_id* have read access to *log_id*'s data via a shared dashboard?
 
     True iff some dashboard bound to this log is shared with the user (directly
-    or through a team). The owner case is handled by the caller — this answers
+    or through a team). The owner case is handled by the caller - this answers
     only the cross-account question. A dashboard delete cascades its shares, so
     revoking access is automatic.
     """

@@ -31,7 +31,7 @@ export function OnboardingOverlay() {
   const [step, setStep] = useState(0);
   const [uploadedLogId, setUploadedLogId] = useState<string | null>(null);
 
-  // Wait for the server's per-user answer before deciding — never flash the
+  // Wait for the server's per-user answer before deciding – never flash the
   // overlay for a user who already finished it.
   if (onboardingQuery.isLoading || !onboardingQuery.data) return null;
   if (onboardingQuery.data.completed) return null;
@@ -41,7 +41,7 @@ export function OnboardingOverlay() {
   if (cfgQuery.data === undefined && !cfgQuery.isError) return null;
 
   const mode = cfgQuery.data?.onboarding_mode ?? "on";
-  // `force` removes the privacy step entirely — tracking is mandated and the
+  // `force` removes the privacy step entirely – tracking is mandated and the
   // choice is never presented.
   const steps: StepKey[] =
     mode === "force"

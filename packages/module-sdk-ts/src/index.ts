@@ -9,7 +9,7 @@
  * across module boundaries.
  *
  * Authors should import from this package rather than reaching into the
- * host's `@/` aliases directly — the indirection lets the platform evolve
+ * host's `@/` aliases directly – the indirection lets the platform evolve
  * its internal layout without breaking installed modules.
  */
 

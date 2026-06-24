@@ -1,6 +1,6 @@
-"""/api/v1/admin — cross-user operations gated by the Keycloak ``admin`` role.
+"""/api/v1/admin - cross-user operations gated by the Keycloak ``admin`` role.
 
-Capabilities here are deliberately admin-only (they read every user's data —
+Capabilities here are deliberately admin-only (they read every user's data -
 emails, usernames, behaviour-tracking events, process metadata):
 
 * download a consistent snapshot of the whole metadata SQLite database;
@@ -178,7 +178,7 @@ def _unlink(path: Path) -> None:
 
 class ExportInfo(BaseModel):
     is_admin: bool
-    # Populated only for admins — a non-admin learns nothing about the data.
+    # Populated only for admins - a non-admin learns nothing about the data.
     user_count: int | None = None
     event_count: int | None = None
     db_size_bytes: int | None = None
@@ -269,7 +269,7 @@ def _xes_attr(key: str, value: Any) -> str:
 def _xes_date(key: str, dt: datetime | None) -> str:
     if dt is None:
         return ""
-    # Stored naive in UTC — stamp the zone so XES parsers read it correctly.
+    # Stored naive in UTC - stamp the zone so XES parsers read it correctly.
     return f"<date key={_xes_q(key)} value={_xes_q(dt.replace(tzinfo=UTC).isoformat())}/>"
 
 
@@ -613,7 +613,7 @@ async def export_preview(
 ) -> ExportPreview:
     """Counts + span for the current filter set, to preview an export.
 
-    Admin-only, deliberately cross-user. Pure aggregation — no rows leave the
+    Admin-only, deliberately cross-user. Pure aggregation - no rows leave the
     server. ``matched_sessions`` counts the distinct session ids in the matched
     events (so it tracks the filter, unlike the all-time sessions table).
     """

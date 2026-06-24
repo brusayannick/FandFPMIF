@@ -3,7 +3,7 @@
 /**
  * Tiny presentation kit shared by the performance module's dashboard cards.
  * Each card is bundled independently (`apps/web/scripts/bundle-modules.mjs`),
- * so this file is inlined into every widget bundle — keep it small and
+ * so this file is inlined into every widget bundle – keep it small and
  * dependency-light (only runtime externals: ui/skeleton + lib/format).
  */
 import type { ReactNode } from "react";

@@ -9,7 +9,7 @@
  * `ResponsiveContainer` always has a parent with a *definite* non-zero height.
  * Inside a dashboard card / RGL grid cell the flex chain can collapse to 0, and
  * a bare `flex-1` + `min-height` does NOT give the container a definite height
- * for `height: 100%` to resolve against — recharts then measures -1×-1 and
+ * for `height: 100%` to resolve against – recharts then measures -1×-1 and
  * renders nothing. We give the chart its own absolutely-positioned box
  * (`absolute inset-0`) inside a `relative` flex slot: inset-0 always sizes to
  * the slot's content box, so `height: 100%` resolves and recharts can measure.

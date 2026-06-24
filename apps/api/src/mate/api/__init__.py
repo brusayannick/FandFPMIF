@@ -1,4 +1,4 @@
-"""Mate — FastAPI backend.
+"""Mate - FastAPI backend.
 
 The platform package. Modules live outside this tree (in `modules/`); their
 SDK lives in `mate.sdk` (the sibling workspace member).

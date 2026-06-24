@@ -3,10 +3,10 @@ WWU_processcomplexity reference implementation).
 
 The module exposes two layers:
 
-* ``build_epa`` / entropy helpers — work on a state dict that mirrors the
+* ``build_epa`` / entropy helpers - work on a state dict that mirrors the
   original ``Graph`` / ``ActivityType`` shape so the c-index partition logic
   can be reproduced 1:1.
-* ``compute_basic_metrics`` — bundles every scalar metric the user asked for
+* ``compute_basic_metrics`` - bundles every scalar metric the user asked for
   for a *normal* (un-enriched) event log.
 
 The enriched-EPA variant lives in :mod:`enriched_core`.

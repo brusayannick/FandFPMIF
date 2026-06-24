@@ -28,7 +28,7 @@ export function mapEdgeRouting(r: EdgeRouting): NonNullable<LayeredOptions["edge
   }
 }
 
-/** xyflow edge "type" — visual curve style. */
+/** xyflow edge "type" – visual curve style. */
 export function mapEdgeType(r: EdgeRouting): "smoothstep" | "bezier" | "straight" | "step" {
   switch (r) {
     case "orthogonal":

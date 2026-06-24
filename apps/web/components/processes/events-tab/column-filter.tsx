@@ -49,7 +49,7 @@ export interface ColumnFilterProps {
   current: FilterEntry | null;
   onChange: (next: FilterEntry | null) => void;
   children: ReactNode;
-  /** Start with the editor popover open — used by the dashboard filter bar so
+  /** Start with the editor popover open – used by the dashboard filter bar so
    * a freshly-added column prompts for its value immediately. */
   defaultOpen?: boolean;
 }
@@ -156,7 +156,7 @@ export function ColumnFilter({
     }
     // Otherwise fall back to the value checklist.
     if (checked === null) {
-      // Never touched — no restriction.
+      // Never touched – no restriction.
       onChange(null);
     } else if (checked.size === 0) {
       onChange({ field: column.name, op: "in", value: [] });

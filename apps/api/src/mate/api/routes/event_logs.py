@@ -1,4 +1,4 @@
-"""POST/GET/DELETE /api/v1/event-logs — the import surface (§6, §13)."""
+"""POST/GET/DELETE /api/v1/event-logs - the import surface (§6, §13)."""
 
 from __future__ import annotations
 
@@ -318,7 +318,7 @@ async def probe_xml_upload(
         async with aiofiles.open(tmp_path, "wb") as out:
             while chunk := await file.read(1024 * 1024):
                 await out.write(chunk)
-        # Avoid the late import of xml_parser at module-load time — lxml's
+        # Avoid the late import of xml_parser at module-load time - lxml's
         # iterparse is sync and CPU-bound, so this runs in a thread.
         from mate.api.ingest.xml_parser import autodetect_mapping, probe_xml
 
@@ -326,7 +326,7 @@ async def probe_xml_upload(
             probe = await asyncio.to_thread(probe_xml, tmp_path)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Could not parse XML file: {exc}") from exc
-        # XES- and OCEL-shaped probes ship without fields — they're handled by
+        # XES- and OCEL-shaped probes ship without fields - they're handled by
         # the XES / OCEL parser at import time, so the frontend skips the wizard.
         hint = probe.get("format_hint") or "generic"
         mapping = (
@@ -459,7 +459,7 @@ async def update_event_log(
     if payload.column_overrides is not None:
         # Pydantic already enforces dict shape; the schema is open-ended (labels/order/hidden).
         row.column_overrides = payload.column_overrides
-    # `folder_id` is explicitly nullable — model_fields_set distinguishes
+    # `folder_id` is explicitly nullable - model_fields_set distinguishes
     # "key wasn't sent" from "explicitly set to null (move to root)".
     if "folder_id" in payload.model_fields_set:
         if payload.folder_id is not None:
@@ -496,11 +496,11 @@ async def reimport_event_log(
         )
 
     paths = log_paths(log_id, user.id)
-    # The retained upload may live only in the S3 bucket on a cold cache — pull
+    # The retained upload may live only in the S3 bucket on a cold cache - pull
     # the log dir back before locating it (no-op in local mode).
     await storage_sync.hydrate_log(user.id, log_id)
     # OCEL stores its upload under the real suffix (jsonocel/xmlocel/sqlite), not
-    # original.ocel — locate by glob so re-import works for every format.
+    # original.ocel - locate by glob so re-import works for every format.
     original_path = paths.original_for(row.source_format)
     if not original_path.exists():
         located = paths.find_original()
@@ -579,7 +579,7 @@ async def remap_event_log(
     user: CurrentUserDep,
 ) -> EventLogCreateResponse:
     """Re-import the log from its retained original with the user's chosen
-    column roles forced. Backs the settings "Column roles" picker — the user
+    column roles forced. Backs the settings "Column roles" picker - the user
     points case_id / activity / timestamp (+ optional roles) at the right source
     columns and the importer rebuilds everything from scratch.
     """
@@ -605,7 +605,7 @@ async def remap_event_log(
 
     roles = body.as_roles()
     # Validate the chosen source columns against what the importer last saw, when
-    # we have that on record — a stale/typo'd column name would otherwise just
+    # we have that on record - a stale/typo'd column name would otherwise just
     # silently fall through to autodetect.
     schema = row.detected_schema if isinstance(row.detected_schema, dict) else {}
     known = schema.get("source_columns") or schema.get("columns")
@@ -626,8 +626,8 @@ async def remap_event_log(
     row.date_max = None
     await session.commit()
 
-    # The explicit `column_roles` override is authoritative — applied centrally
-    # in dispatch over the freshly re-parsed columns — so we deliberately don't
+    # The explicit `column_roles` override is authoritative - applied centrally
+    # in dispatch over the freshly re-parsed columns - so we deliberately don't
     # pass the previous csv/xml mapping (which would re-trigger the parser's own
     # rename and fight the override).
     job_id = await runtime.submit(
@@ -670,7 +670,7 @@ async def duplicate_event_log(
         )
 
     src_paths = log_paths(log_id, user.id)
-    # On a cold S3 cache the bytes live only in the bucket — pull them first.
+    # On a cold S3 cache the bytes live only in the bucket - pull them first.
     await storage_sync.hydrate_log(user.id, log_id)
     if not src_paths.exists():
         raise HTTPException(

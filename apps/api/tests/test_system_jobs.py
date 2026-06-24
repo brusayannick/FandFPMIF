@@ -19,7 +19,7 @@ from .conftest import TEST_USER_EMAIL, TEST_USER_ID
 
 
 async def _settle(predicate, *, tries: int = 100, delay: float = 0.01) -> None:
-    """Yield the loop until ``predicate()`` holds — graceful scale-down retires
+    """Yield the loop until ``predicate()`` holds - graceful scale-down retires
     workers asynchronously (they consume a queue sentinel)."""
     for _ in range(tries):
         if predicate():
@@ -33,21 +33,21 @@ async def test_set_concurrency_scales_pool() -> None:
     from mate.api.config import Settings
     from mate.api.jobs.runtime import JobRuntime
 
-    # Own Settings instance — keeps the global get_settings() singleton (and any
+    # Own Settings instance - keeps the global get_settings() singleton (and any
     # other test) untouched by the live mutation set_concurrency performs.
     rt = JobRuntime(Settings())
     try:
         await rt.start()
         # The boot count comes from WORKER_CONCURRENCY (1 in the test env); don't
-        # hard-code it — assert the pool matches whatever the target is.
+        # hard-code it - assert the pool matches whatever the target is.
         assert rt._live_worker_count() == rt.concurrency()
 
-        # Scale up — workers spawn immediately.
+        # Scale up - workers spawn immediately.
         assert await rt.set_concurrency(5) == 5
         assert rt.concurrency() == 5
         assert rt._live_worker_count() == 5
 
-        # Scale down — idle workers retire via the sentinel without orphaning.
+        # Scale down - idle workers retire via the sentinel without orphaning.
         assert await rt.set_concurrency(2) == 2
         assert rt.concurrency() == 2
         await _settle(lambda: rt._live_worker_count() == 2)
@@ -139,7 +139,7 @@ async def test_admin_put_updates_runtime_and_persists(admin_client: AsyncClient)
 
 @pytest.mark.asyncio
 async def test_admin_put_out_of_range_422(admin_client: AsyncClient) -> None:
-    # Body validation (Field le=8) rejects before the handler runs — no resize,
+    # Body validation (Field le=8) rejects before the handler runs - no resize,
     # no persistence, so this stays hermetic.
     resp = await admin_client.put("/api/v1/system/jobs", json={"worker_concurrency": 99})
     assert resp.status_code == 422

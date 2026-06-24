@@ -1,4 +1,4 @@
-"""/api/v1/preferences/{key} — per-user client-state blobs.
+"""/api/v1/preferences/{key} - per-user client-state blobs.
 
 Backs the device-independent UI state that used to live in browser
 localStorage (the ``useUi`` and ``useVizSettings`` zustand stores). Keying by

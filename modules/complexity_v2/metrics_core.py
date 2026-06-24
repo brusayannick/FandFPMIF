@@ -1,25 +1,25 @@
-"""Complexity v2 — the full event-log complexity suite from Langer (2026),
+"""Complexity v2 - the full event-log complexity suite from Langer (2026),
 *Understanding Business Process Complexity* (WWU master thesis,
 ``MrWaitomo/WWU_processcomplexity``).
 
 This implements the metrics in scope of the thesis (Table 3.3), faithful to
 the definitions in §2.4 / §3.3, grouped by the paper's categories:
 
-* **Entropy** — variant / sequence entropy and their normalised forms,
+* **Entropy** - variant / sequence entropy and their normalised forms,
   computed over the Extended Prefix Automaton (EPA) of the log.
-* **Enriched Entropy** — the same four measures over an *Enriched* EPA whose
+* **Enriched Entropy** - the same four measures over an *Enriched* EPA whose
   edges also key on the IEEE-XES event/trace attributes, when present.
-* **Size** — number of events / event types / sequences, sequence-length
+* **Size** - number of events / event types / sequences, sequence-length
   statistics, and the average time difference between consecutive events.
-* **Variation** — number of acyclic paths and ties in the transition matrix,
+* **Variation** - number of acyclic paths and ties in the transition matrix,
   Lempel-Ziv complexity, (percentage of) unique sequences, average distinct
   events per sequence, order variation and activity variation.
-* **Distance** — average affinity, structure, deviation from random, average
+* **Distance** - average affinity, structure, deviation from random, average
   (pairwise Levenshtein) edit distance and structural process variety
   (Levenshtein distance matrix → agglomerative clustering → Σ merge heights).
 
 The ``prob-act-pairs`` metric (Grisold et al., 2022) is a transition
-*matrix*, not a scalar — :func:`transition_probability_matrix` returns it for
+*matrix*, not a scalar - :func:`transition_probability_matrix` returns it for
 the panel's heatmap, mirroring the thesis appendix D.
 
 Everything is pure-function and self-contained: the module never imports from
@@ -437,7 +437,7 @@ def _df_edges_and_vertices(df: pd.DataFrame, counts: dict[tuple[str, ...], int])
     return len(edges), v
 
 
-# ── Distance — affinity / structure / deviation from random ───────────────────
+# ── Distance - affinity / structure / deviation from random ───────────────────
 
 
 def affinity(counts: dict[tuple[str, ...], int]) -> float | None:
@@ -489,7 +489,7 @@ def deviation_from_random(df: pd.DataFrame) -> float | None:
     return 1.0 - dev
 
 
-# ── Variation — order / activity variation ────────────────────────────────────
+# ── Variation - order / activity variation ────────────────────────────────────
 
 
 def order_variation(df: pd.DataFrame) -> float | None:
@@ -522,7 +522,7 @@ def activity_variation(df: pd.DataFrame) -> float | None:
     return h
 
 
-# ── Size — sequence-length stats & avg time diff ──────────────────────────────
+# ── Size - sequence-length stats & avg time diff ──────────────────────────────
 
 
 def seq_len_stats(df: pd.DataFrame) -> dict[str, float]:
@@ -547,7 +547,7 @@ def avg_time_diff(df: pd.DataFrame) -> float | None:
     return float(mean(per_case_mean)) if per_case_mean else None
 
 
-# ── Distance — Levenshtein matrix → avg edit distance & structural variety ────
+# ── Distance - Levenshtein matrix → avg edit distance & structural variety ────
 
 
 def _levenshtein(a: tuple[str, ...], b: tuple[str, ...]) -> int:
@@ -626,7 +626,7 @@ def structural_variety_from_matrix(d: np.ndarray) -> float | None:
     return float(np.sum(z[:, 2]))
 
 
-# ── prob-act-pairs — transition probability matrix (Grisold et al., 2022) ─────
+# ── prob-act-pairs - transition probability matrix (Grisold et al., 2022) ─────
 
 
 def transition_probability_matrix(df: pd.DataFrame, top_k: int = 25) -> dict[str, Any]:
@@ -762,7 +762,7 @@ def _enriched_entropies(df: pd.DataFrame) -> dict[str, float]:
     }
 
 
-# ── Sanitiser — JSON has no inf / nan ─────────────────────────────────────────
+# ── Sanitiser - JSON has no inf / nan ─────────────────────────────────────────
 
 
 def _finite(value: Any) -> Any:
@@ -815,7 +815,7 @@ def compute_all(
     # Size.
     lens = seq_len_stats(df)
 
-    # Variation — number of acyclic paths (guard the exponential overflow the
+    # Variation - number of acyclic paths (guard the exponential overflow the
     # thesis itself notes for large logs; keep the log10 for display).
     exp10 = 0.08 * (1 + e_edges - v_vertices)
     try:
@@ -825,7 +825,7 @@ def compute_all(
     except OverflowError:
         n_acyclic = None
 
-    # Distance — one Levenshtein matrix feeds both avg-edit-distance and
+    # Distance - one Levenshtein matrix feeds both avg-edit-distance and
     # structural-var.
     variants, weights, downsampled = _select_variants(counts, max_variants)
     d_matrix = _levenshtein_matrix(variants)

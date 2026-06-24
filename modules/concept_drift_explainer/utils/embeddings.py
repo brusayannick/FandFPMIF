@@ -2,7 +2,7 @@
 
 Wraps any LangChain ``Embeddings`` instance with a per-invocation memo table
 so the same drift phrase isn't re-embedded within a single pipeline run.
-The concrete OpenAI model is chosen upstream from the module's own config —
+The concrete OpenAI model is chosen upstream from the module's own config -
 see [llm.py](./llm.py).
 """
 

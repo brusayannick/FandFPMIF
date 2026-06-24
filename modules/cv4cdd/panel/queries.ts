@@ -49,7 +49,7 @@ export function useRunCv4cdd(logId: string) {
     mutationFn: () =>
       api<{ job_id: string }>(url("/detect", logId), { method: "POST" }),
     onSuccess: () => {
-      // No-op here — completion polling lives in the panel so the user
+      // No-op here – completion polling lives in the panel so the user
       // sees the running state and the toast lands at the same moment.
       void qc.invalidateQueries({ queryKey: KEYS.results(logId) });
     },

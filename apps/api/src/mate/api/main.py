@@ -44,8 +44,9 @@ from mate.api.routes import v1
 from mate.api.routes.analytics import prune_expired, record_server_event
 from mate.api.schemas.common import HealthResponse
 from mate.api.storage import get_storage_settings
+from mate.api.system.metrics import ResourceSampler, set_resource_sampler
 
-# Daily — re-evaluated every loop iteration against the current
+# Daily - re-evaluated every loop iteration against the current
 # `analytics.config.retention_days` setting.
 _RETENTION_INTERVAL_SECONDS = 24 * 60 * 60
 
@@ -121,7 +122,7 @@ async def _module_processing_loop(bus: EventBus, coordinator: ModuleProcessingCo
 
     Subscribes to the terminal ``job.*`` topics and, for each finished job that
     is a child of an ``event_log.import`` job, re-checks whether the bound log's
-    expected modules have all reached a terminal state — flipping it to ``ready``
+    expected modules have all reached a terminal state - flipping it to ``ready``
     when they have. Failures are swallowed so the bus keeps draining (a missed
     tick is recovered by the boot reconcile on the next restart).
     """
@@ -151,7 +152,7 @@ def _watch_due(watch: WatchedFolder, now: datetime) -> bool:
         interval = watch.interval_seconds or 0
         if interval <= 0:
             return False
-    else:  # manual — never auto-scanned
+    else:  # manual - never auto-scanned
         return False
     return watch.last_scanned_at + timedelta(seconds=interval) <= now
 
@@ -272,7 +273,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         # A batch-aborting failure (e.g. a bad manifest or a duplicate module
         # id surfacing during discovery/topo-sort) must not stop the platform
-        # from booting — but it must be loud. Swallowing it silently once left
+        # from booting - but it must be loud. Swallowing it silently once left
         # the whole module system dark with no modules and no log line. Per-
         # module install/import errors are already logged + skipped inside the
         # loader; this catches the ones that abort the entire load.
@@ -314,6 +315,12 @@ async def lifespan(app: FastAPI):
     watch_poll_task = asyncio.create_task(_watched_folder_poll_loop(runtime))
     processing_task = asyncio.create_task(_module_processing_loop(bus, coordinator))
 
+    # Live CPU/RAM sampler for Admin → System. Built after the loader so its first
+    # breakdown can already see subprocess workers; manages its own asyncio task.
+    sampler = ResourceSampler(settings, loader=loader, runtime=runtime)
+    set_resource_sampler(sampler)
+    await sampler.start()
+
     try:
         yield
     finally:
@@ -325,6 +332,8 @@ async def lifespan(app: FastAPI):
                 pass
         if hot_reload is not None:
             hot_reload.stop()
+        await sampler.stop()
+        set_resource_sampler(None)
         set_coordinator(None)
         await loader.unload_all()
         set_module_loader(None)

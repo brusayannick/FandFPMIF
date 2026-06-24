@@ -15,7 +15,7 @@ export default async function LoginPage({
   const callbackUrl = params.callbackUrl || "/processes";
 
   // A refresh-failed session still exists (valid cookie, flagged error) but has
-  // no usable token — treat it as logged-out so we don't bounce the user back
+  // no usable token – treat it as logged-out so we don't bounce the user back
   // into the app they can't actually call.
   if (session && session.error !== "RefreshAccessTokenError") {
     redirect(callbackUrl);
@@ -28,7 +28,7 @@ export default async function LoginPage({
         <h1 className="text-2xl font-semibold">Mate</h1>
         <p className="text-sm text-muted-foreground">
           {DEMO_MODE
-            ? "Demo mode — signing you in…"
+            ? "Demo mode – signing you in…"
             : "Sign in with your workspace account to continue."}
         </p>
       </div>

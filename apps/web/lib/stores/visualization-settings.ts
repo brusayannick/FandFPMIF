@@ -29,7 +29,7 @@ export interface DfgRenderSettings {
   connectionsShown: number;
   hideSelfLoops: boolean;
   /** Keep only the top N% of visible edges by count (100 = show all). Unlike
-   *  the connections slider this does NOT affect node visibility — nodes stay
+   *  the connections slider this does NOT affect node visibility – nodes stay
    *  shown even if all their edges are removed. */
   edgeTopPercent: 100 | 95 | 90 | 85 | 80 | 70;
   edgeLabel: "count" | "duration" | "off";
@@ -115,7 +115,7 @@ interface VizSettingsState {
 // --------------------------------------------------------------------------
 
 export const DEFAULT_GENERAL: GeneralSettings = {
-  // Top-to-bottom by default — matches Celonis's DFG and is what most process
+  // Top-to-bottom by default – matches Celonis's DFG and is what most process
   // mining tooling defaults to. Users can switch to LR via Settings → General.
   layoutDirection: "TB",
   edgeRouting: "orthogonal",
@@ -161,7 +161,7 @@ export const DEFAULT_HEURISTICS: HeuristicsRenderSettings = {
 };
 
 // --------------------------------------------------------------------------
-// Helpers — set into nested per-(log, module) record without losing siblings.
+// Helpers – set into nested per-(log, module) record without losing siblings.
 // --------------------------------------------------------------------------
 
 function patchPerViz<K extends keyof PerVizSettings>(

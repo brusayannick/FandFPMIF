@@ -196,7 +196,7 @@ export function VariantsTab({ logId, log }: { logId: string; log: EventLogDetail
 
       <div className="flex items-center justify-between text-sm text-muted-foreground">
         <span className="tabular-nums">
-          {data ? `${formatNumber(data.total)} variants` : "—"}
+          {data ? `${formatNumber(data.total)} variants` : "–"}
         </span>
         <div className="flex items-center gap-2">
           <span className="tabular-nums">

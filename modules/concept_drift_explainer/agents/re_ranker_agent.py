@@ -1,4 +1,4 @@
-"""Re-ranker agent — blended-score pre-sort + LLM curator.
+"""Re-ranker agent - blended-score pre-sort + LLM curator.
 
 Adapted from the original `backend/agents/re_ranker_agent.py`. Identical
 algorithm; only the credential/embedder plumbing changes.

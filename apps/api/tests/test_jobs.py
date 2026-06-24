@@ -28,18 +28,18 @@ async def test_bus_schema_enforcement() -> None:
     bus = EventBus()
     bus.register_schema("kpi.computed", KpiPayload)
 
-    # Valid — passes through and gets re-normalised by Pydantic.
+    # Valid - passes through and gets re-normalised by Pydantic.
     await bus.publish("kpi.computed", {"log_id": "abc", "rate": 1.5})
 
-    # Missing required field — clear error at the publish site.
+    # Missing required field - clear error at the publish site.
     with pytest.raises(EventSchemaError):
         await bus.publish("kpi.computed", {"log_id": "abc"})
 
-    # Wrong type — same outcome.
+    # Wrong type - same outcome.
     with pytest.raises(EventSchemaError):
         await bus.publish("kpi.computed", {"log_id": "abc", "rate": "fast"})
 
-    # Untyped topic — bus stays out of the way.
+    # Untyped topic - bus stays out of the way.
     await bus.publish("anything.goes", {"whatever": 1})
 
     # Re-registering with a different model is a hard error.
@@ -54,7 +54,7 @@ async def test_bus_schema_enforcement() -> None:
 async def test_runtime_run_in_process_uses_worker_pid() -> None:
     """`JobRuntime.run_in_process` must execute the callable in a different
     process so GIL-bound work parallelises (§8.3). We compare PIDs as the
-    direct evidence — `os.getpid` is picklable and returns the worker's PID
+    direct evidence - `os.getpid` is picklable and returns the worker's PID
     when run inside the executor.
     """
     from mate.api.jobs.runtime import JobRuntime
@@ -64,7 +64,7 @@ async def test_runtime_run_in_process_uses_worker_pid() -> None:
         worker_pid = await rt.run_in_process(os.getpid)
         assert worker_pid != os.getpid()
         # Second call should reuse the same warm worker (or another from the
-        # pool — both fine; we only assert it's not the main process).
+        # pool - both fine; we only assert it's not the main process).
         again = await rt.run_in_process(os.getpid)
         assert again != os.getpid()
         # kwargs path: max(a, b, key=...) is awkward to pickle; use a simple
@@ -86,7 +86,7 @@ async def _wait(
         if last["status"] == target:
             return last
         await asyncio.sleep(0.05)
-    raise AssertionError(f"Did not reach {target!r} in {timeout}s — last: {last}")
+    raise AssertionError(f"Did not reach {target!r} in {timeout}s - last: {last}")
 
 
 @pytest.mark.asyncio
@@ -129,7 +129,7 @@ async def test_retry_only_failed(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_cancel_unknown_job_404(client: AsyncClient) -> None:
     # Cancel enforces ownership first (get_owned_job), so an unknown/not-yours
-    # job id is 404 — like get/retry. 409 is reserved for "exists but finished".
+    # job id is 404 - like get/retry. 409 is reserved for "exists but finished".
     resp = await client.post("/api/v1/jobs/00000000-0000-0000-0000-000000000000/cancel")
     assert resp.status_code == 404
 
@@ -180,7 +180,7 @@ async def test_sse_events_receives_job_lifecycle(client: AsyncClient) -> None:
                     return
 
     async def _kick() -> None:
-        # Let the bus subscription register before publishing — no replay.
+        # Let the bus subscription register before publishing - no replay.
         await asyncio.sleep(0.3)
         with (FIXTURES / "sample.xes").open("rb") as f:
             await client.post(

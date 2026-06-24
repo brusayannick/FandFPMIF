@@ -1,4 +1,4 @@
-"""CLI entry point — `mate-api` script (declared in pyproject.toml).
+"""CLI entry point - `mate-api` script (declared in pyproject.toml).
 
 Currently a thin wrapper around uvicorn so the API can be launched without
 remembering the full module path. Heavier subcommands (db migrate, module

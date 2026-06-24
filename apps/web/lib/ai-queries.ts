@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
+import type { AiConfigOut } from "@/lib/api-types";
 
 export type AiProvider = "anthropic" | "openai" | "unigpt" | "custom";
 
@@ -11,6 +12,10 @@ export interface ProviderConfig {
   base_url: string | null;
 }
 
+/** The editable draft / PUT payload – carries the api_key per provider. The GET
+ *  response is the masked {@link AiConfigOut} (no keys); {@link maskedToDraft}
+ *  adapts it. A blank api_key on save means "keep the stored one" (server
+ *  merges), so the masked round-trip never wipes keys. */
 export interface AiConfig {
   system_prompt: string;
   anthropic: ProviderConfig;
@@ -27,13 +32,36 @@ export interface AiConfig {
   allow_process_data: boolean;
 }
 
+export type { AiConfigOut } from "@/lib/api-types";
+
+/** True when the masked GET reports a stored key for `provider`. */
+export function providerKeySet(masked: AiConfigOut, provider: AiProvider): boolean {
+  return masked[`${provider}_key_set`];
+}
+
+/** Adapt the masked GET response into an editable draft: keys start blank (the
+ *  server keeps the stored ones on save), base URLs + selection are carried. */
+export function maskedToDraft(masked: AiConfigOut): AiConfig {
+  return {
+    system_prompt: masked.system_prompt,
+    anthropic: { api_key: null, base_url: masked.anthropic_base_url },
+    openai: { api_key: null, base_url: masked.openai_base_url },
+    unigpt: { api_key: null, base_url: masked.unigpt_base_url },
+    custom: { api_key: null, base_url: masked.custom_base_url },
+    selected_provider: masked.selected_provider,
+    selected_model: masked.selected_model,
+    classifier_model: masked.classifier_model,
+    allow_process_data: masked.allow_process_data,
+  };
+}
+
 export interface ModelInfo {
   id: string;
   display_name: string | null;
   created: number | null;
 }
 
-interface FetchModelsResponse {
+export interface FetchModelsResponse {
   models: ModelInfo[];
 }
 
@@ -68,9 +96,9 @@ const KEYS = {
 };
 
 export function useAiConfig() {
-  return useQuery<AiConfig>({
+  return useQuery<AiConfigOut>({
     queryKey: KEYS.config,
-    queryFn: () => api<AiConfig>("/api/v1/ai/config"),
+    queryFn: () => api<AiConfigOut>("/api/v1/ai/config"),
     staleTime: 60_000,
   });
 }
@@ -78,8 +106,10 @@ export function useAiConfig() {
 export function useUpdateAiConfig() {
   const qc = useQueryClient();
   return useMutation({
+    // PUT sends the full config (with keys); the GET response is masked. 403 is
+    // raised by the API when AI settings are admin-controlled.
     mutationFn: (payload: AiConfig) =>
-      api<AiConfig>("/api/v1/ai/config", { method: "PUT", json: payload }),
+      api<AiConfigOut>("/api/v1/ai/config", { method: "PUT", json: payload }),
     onSuccess: (data) => {
       qc.setQueryData(KEYS.config, data);
     },
@@ -105,6 +135,41 @@ export function useProviderModels(provider: AiProvider | null, enabled: boolean)
     enabled: enabled && provider !== null,
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
+  });
+}
+
+// ── Admin shared AI config (Admin → Controls) ──────────────────────────────
+// Same masked shape + model-fetch flow as the per-user hooks, but operate on
+// the ai.config ControlPolicy admin value via /admin/controls/ai/*. Saving the
+// shared value implies admin control (the server locks ai.config), so a save
+// also refreshes the controls catalog (secret_set / lock state changed).
+
+const ADMIN_AI_CONFIG_KEY = ["admin", "ai", "config"] as const;
+
+export function useAdminAiConfig() {
+  return useQuery<AiConfigOut>({
+    queryKey: ADMIN_AI_CONFIG_KEY,
+    queryFn: () => api<AiConfigOut>("/api/v1/admin/controls/ai/config"),
+    staleTime: 60_000,
+  });
+}
+
+export function useUpdateAdminAiConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: AiConfig) =>
+      api<AiConfigOut>("/api/v1/admin/controls/ai/config", { method: "PUT", json: payload }),
+    onSuccess: (data) => {
+      qc.setQueryData(ADMIN_AI_CONFIG_KEY, data);
+      qc.invalidateQueries({ queryKey: ["admin", "controls", "setting"] });
+    },
+  });
+}
+
+export function useFetchAdminProviderModels() {
+  return useMutation({
+    mutationFn: (provider: AiProvider) =>
+      api<FetchModelsResponse>(`/api/v1/admin/controls/ai/models/${provider}`, { method: "POST" }),
   });
 }
 
@@ -223,7 +288,7 @@ export function cleanDisplayName(modelId: string): string {
   const segments = modelId.split(/[-_]/).filter((p) => {
     // Parameter-count segments: "70B", "8B", "8x7B", "8x22B".
     if (/^\d+(?:[x×]\d+(?:\.\d+)?)?[bB]$/.test(p)) return false;
-    // Trailing date-ish segments — 4 to 8 digits ("2509", "20250101").
+    // Trailing date-ish segments – 4 to 8 digits ("2509", "20250101").
     if (/^\d{4,8}$/.test(p)) return false;
     return true;
   });

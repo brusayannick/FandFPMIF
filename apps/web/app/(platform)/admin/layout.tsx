@@ -11,7 +11,7 @@ export default function AdminLayout({
       <header className="space-y-2 pb-6">
         <PageTitle>Admin</PageTitle>
         <PageDescription>
-          Platform-wide administration across every user — activity, event logs,
+          Platform-wide administration across every user – activity, event logs,
           storage, and exports.
         </PageDescription>
       </header>

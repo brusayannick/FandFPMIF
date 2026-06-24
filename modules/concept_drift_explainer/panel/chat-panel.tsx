@@ -32,7 +32,7 @@ export function ChatPanel({
   if (!driftKey) {
     return (
       <p className="rounded border border-dashed py-6 text-center text-xs text-muted-foreground">
-        Run an analysis first — the chatbot answers questions about the active
+        Run an analysis first – the chatbot answers questions about the active
         drift&apos;s evidence.
       </p>
     );
@@ -46,7 +46,7 @@ export function ChatPanel({
       >
         {history.length === 0 ? (
           <p className="py-4 text-center text-xs text-muted-foreground">
-            Ask a follow-up about the explanation — e.g. <em>Which policy
+            Ask a follow-up about the explanation – e.g. <em>Which policy
             change explains the new pre-approval step?</em>
           </p>
         ) : (

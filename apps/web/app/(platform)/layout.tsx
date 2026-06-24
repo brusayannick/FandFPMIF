@@ -17,7 +17,12 @@ export default async function PlatformLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
-  if (!session) {
+  // A refresh-failed session is still non-null (valid cookie, flagged error) but
+  // has no usable token – treat it as logged-out and redirect server-side, before
+  // any dashboard HTML renders. Otherwise the shell paints, then the client api
+  // wrapper (lib/api.ts) catches the same error and signs out → a dashboard flash.
+  // Mirrors lib/api-server.ts and (auth)/login/page.tsx.
+  if (!session || session.error === "RefreshAccessTokenError") {
     redirect("/login");
   }
   return (

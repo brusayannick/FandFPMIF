@@ -9,7 +9,7 @@ then the platform's stdlib + inherits + SDK (which are already on
 
 Identification of the calling module relies on walking the calling frame
 chain looking for a ``__name__`` starting with ``mate_mod_``. This is
-not bulletproof — frames can be detached or stripped — but it covers the
+not bulletproof - frames can be detached or stripped - but it covers the
 common case and the alternative (full `importlib` finder per module loaded
 under its own meta-path) is heavier than v1 needs.
 """
@@ -90,7 +90,7 @@ class ModuleVenvFinder(MetaPathFinder):
             return None
         # For submodule imports, Python passes the parent package's
         # __path__ via the `path` argument. Honour it so PathFinder
-        # searches inside the package directory — falling back to `site`
+        # searches inside the package directory - falling back to `site`
         # would let `PathFinder.find_spec("gast.gast", [site])` resolve
         # to `site/gast/__init__.py` (the package, not `gast/gast.py`),
         # making `from .gast import *` recurse into the same file.

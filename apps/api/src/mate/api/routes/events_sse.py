@@ -1,19 +1,19 @@
-"""`GET /api/v1/events` — topic-filtered platform-wide stream (§7.9.5).
+"""`GET /api/v1/events` - topic-filtered platform-wide stream (§7.9.5).
 
 Server-Sent Events, **not** WebSocket. The production proxy chain (uni edge
 proxy → Caddy → api) carries HTTP streaming transparently but drops WebSocket
 upgrades: a WS handshake reaches the API as a plain `GET` with the upgrade
 headers stripped, so the WS-only route 404s and the live feed silently dies.
-SSE rides the exact same path Mate AI streaming already uses successfully — see
+SSE rides the exact same path Mate AI streaming already uses successfully - see
 ``infra/caddy/Caddyfile`` and ``apps/api/src/mate/api/routes/ai.py``.
 
 Query params:
 
-  - `topic` (repeatable) — bus pattern(s) to subscribe to. Defaults to `*`.
+  - `topic` (repeatable) - bus pattern(s) to subscribe to. Defaults to `*`.
     Examples: `?topic=job.*`, `?topic=job.completed&topic=job.failed`.
 
 Auth is the standard ``Authorization: Bearer`` header (the browser client uses
-``fetch`` streaming, which — unlike ``EventSource``/``WebSocket`` — can set
+``fetch`` streaming, which - unlike ``EventSource``/``WebSocket`` - can set
 headers), so the token no longer rides in the URL where it would leak into the
 access logs.
 
@@ -21,7 +21,7 @@ The frontend opens one of these per session for toasts + drawer updates; the
 high-frequency per-job feed is the separate ``GET /jobs/{id}/stream`` next door.
 
 Envelopes whose payload carries a ``user_id`` distinct from the connected
-user's are filtered out — that's how per-user isolation is enforced.
+user's are filtered out - that's how per-user isolation is enforced.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ async def stream_events(
                 except StopAsyncIteration:
                     return
                 # Filter cross-user events. System-emitted envelopes (no
-                # `user_id` in payload) are always forwarded — they're
+                # `user_id` in payload) are always forwarded - they're
                 # operator-level, never user data.
                 env_user = env.payload.get("user_id")
                 if env_user is not None and env_user != user.id:

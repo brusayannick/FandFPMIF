@@ -1,13 +1,13 @@
-"""/api/v1/ai/guidance — AI-assisted interpretation for module + process data.
+"""/api/v1/ai/guidance - AI-assisted interpretation for module + process data.
 
 The four surfaces:
 
-* ``POST /module/{module_id}`` — interprets a single module's cached output.
-* ``POST /module/{module_id}/stream`` — same, but SSE-streams the long-form
+* ``POST /module/{module_id}`` - interprets a single module's cached output.
+* ``POST /module/{module_id}/stream`` - same, but SSE-streams the long-form
   ``interpretation`` text while the structured tail arrives in a final event.
-* ``POST /process/{log_id}`` — synthesises across all enabled modules.
-* ``POST /import/column-mapping`` — pre-import CSV column-mapping suggestions.
-* ``POST /import/quality/{log_id}`` — post-import data-quality summary.
+* ``POST /process/{log_id}`` - synthesises across all enabled modules.
+* ``POST /import/column-mapping`` - pre-import CSV column-mapping suggestions.
+* ``POST /import/quality/{log_id}`` - post-import data-quality summary.
 
 Caching mirrors the per-module ``ResultCache`` pattern: every entry stores
 its source ``output_hash``, and we only return the cached entry when that
@@ -322,7 +322,7 @@ async def process_guidance(
             payload, _sys, _prefix = await _build_payload(mid, log_id, user.id)
             composite[mid] = payload
         except HTTPException:
-            # Skip modules without data yet — overview still works on the rest.
+            # Skip modules without data yet - overview still works on the rest.
             continue
 
     if not composite:

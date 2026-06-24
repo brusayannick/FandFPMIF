@@ -2,7 +2,7 @@
 
 How the web app stays visually consistent: one set of page primitives, one
 typography scale, one spacing convention. Read this before adding a page or a
-new top-level view — the goal is that every screen has identical gutters,
+new top-level view – the goal is that every screen has identical gutters,
 heading sizes and rhythm, so nothing looks "slightly off" from page to page.
 
 Stack: Next.js App Router + Tailwind v4 (tokens in [`app/globals.css`](app/globals.css))
@@ -13,28 +13,28 @@ merge helper is [`@/lib/cn`](lib/cn.ts). shadcn config: [`components.json`](comp
 
 Every page under `app/(platform)/` renders its content inside **`PageContainer`**
 ([`components/page.tsx`](components/page.tsx)). Never hand-roll an outer
-`mx-auto max-w-… px-… py-…` wrapper — use the primitive so width and padding are
+`mx-auto max-w-… px-… py-…` wrapper – use the primitive so width and padding are
 identical everywhere.
 
 `PageContainer` is fluid full-width with low, responsive margins, capped only so
-text/tables don't stretch on ultra-wide monitors. **One width everywhere** — data
+text/tables don't stretch on ultra-wide monitors. **One width everywhere** – data
 pages, lists, grids, settings, profile and import wizards all share it, so no
 screen looks narrower than another:
 
 | Width            | Applies to                                                  |
 | ---------------- | ----------------------------------------------------------- |
-| `max-w-[1760px]` | every page — data, lists, grids, dashboards, settings, forms |
+| `max-w-[1760px]` | every page – data, lists, grids, dashboards, settings, forms |
 
 Padding is `px-4 sm:px-6 lg:px-8` + `py-6` (16px on mobile → 24px tablet → 32px
 desktop; 24px top/bottom). The topbar uses the same horizontal gutter so the
 breadcrumb lines up with the page heading. There is intentionally **no width
-variant** — every page gets the same width and margin.
+variant** – every page gets the same width and margin.
 
 ### Nested layouts
 
 When a section has shared chrome that wraps several pages (a sub-tab nav), put a
 single `PageContainer` in the section's `layout.tsx` and let the child pages
-render **plain content** — do not nest a second `PageContainer` (double padding).
+render **plain content** – do not nest a second `PageContainer` (double padding).
 Examples: [`settings/layout.tsx`](app/(platform)/settings/layout.tsx) owns the
 container for all `settings/*` pages. Conversely, `modules/layout.tsx` is a
 pass-through because its children render their own container with distinct
@@ -81,14 +81,14 @@ export default function Example() {
 }
 ```
 
-- `PageHeader` is `flex flex-wrap items-start justify-between gap-4 pb-6` — actions
+- `PageHeader` is `flex flex-wrap items-start justify-between gap-4 pb-6` – actions
   sit on the right and wrap below the title on narrow screens.
 - Omit `PageActions` if there are no actions.
-- `PageTitle` renders an `<h1>` — exactly one per page.
+- `PageTitle` renders an `<h1>` – exactly one per page.
 
 ## Typography scale
 
-Canonical sizes — don't invent new heading sizes inline. (`PageTitle` /
+Canonical sizes – don't invent new heading sizes inline. (`PageTitle` /
 `PageDescription` already encode the first two.)
 
 | Role               | Classes                                       |
@@ -105,12 +105,12 @@ Canonical sizes — don't invent new heading sizes inline. (`PageTitle` /
 - Header bottom gap: `pb-6` (built into `PageHeader`).
 - Vertical rhythm between sections: `space-y-4` (dense) or `space-y-6` (looser).
 - Inline gaps: `gap-2` (buttons/badges) or `gap-3` (looser clusters).
-- Cards space their sections via the card's own `gap`/`px-6` — don't add extra
+- Cards space their sections via the card's own `gap`/`px-6` – don't add extra
   padding inside `CardContent` (see the note at the top of `card.tsx`).
 
 ## Color & radius tokens
 
-Use the semantic tokens defined in [`app/globals.css`](app/globals.css) — never
+Use the semantic tokens defined in [`app/globals.css`](app/globals.css) – never
 raw hex/Tailwind palette colors. Common ones: `bg-background`, `text-foreground`,
 `text-muted-foreground`, `bg-card`, `border-border`, `bg-primary` /
 `text-primary-foreground`, `bg-destructive`. Dark mode is automatic via the
@@ -121,7 +121,7 @@ raw hex/Tailwind palette colors. Common ones: `bg-background`, `text-foreground`
 ## Responsiveness
 
 - Mobile-first: base classes target small screens, add `sm:` / `lg:` upward.
-- Horizontal scaling is the container's job — pages rarely need their own
+- Horizontal scaling is the container's job – pages rarely need their own
   breakpoint padding.
 - Headers use `flex-wrap` so action buttons wrap instead of clipping.
 - Grids: start at one column and step up, e.g. `grid gap-4 sm:grid-cols-2 lg:grid-cols-3`.

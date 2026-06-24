@@ -44,7 +44,7 @@ export default function PrivacySettingsPage() {
 
   const cfg = cfgQuery.data;
 
-  // `force` mandates tracking — the tab is hidden, so a direct URL hit lands
+  // `force` mandates tracking – the tab is hidden, so a direct URL hit lands
   // here; bounce to General rather than show controls that can't be changed.
   const forced = cfg?.onboarding_mode === "force";
   useEffect(() => {
@@ -167,7 +167,7 @@ export default function PrivacySettingsPage() {
                 value={
                   summaryQuery.data.oldest_event
                     ? new Date(summaryQuery.data.oldest_event).toLocaleDateString()
-                    : "—"
+                    : "–"
                 }
               />
             </div>

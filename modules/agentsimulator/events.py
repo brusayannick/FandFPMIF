@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class SimulationCompleted(BaseModel):
-    """`agentsimulator.simulation.completed` — a simulation run finished."""
+    """`agentsimulator.simulation.completed` - a simulation run finished."""
 
     model_config = ConfigDict(extra="allow")
 

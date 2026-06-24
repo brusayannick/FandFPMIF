@@ -1,4 +1,4 @@
-"""Drift agent — first node of the pipeline.
+"""Drift agent - first node of the pipeline.
 
 Rewritten for the platform port. The original reads CV4CDD-4D outputs from
 disk (`prediction_results.csv` + `window_info.json` + `<LogName>.xes`); here
@@ -6,10 +6,10 @@ we consume the cv4cdd module's `detections` cache and the platform's
 normalised event log instead.
 
 Outputs the same three keys as the original:
-  * `drift_info` (DriftInfo) — process_name, changepoints, drift_type,
+  * `drift_info` (DriftInfo) - process_name, changepoints, drift_type,
     confidence, start/end timestamps (ISO-8601, tz-naive UTC).
-  * `drift_keywords` — Porter-stemmed activity-label keywords for retrieval.
-  * `drift_phrase` — LLM-synthesised one-sentence summary of the change.
+  * `drift_keywords` - Porter-stemmed activity-label keywords for retrieval.
+  * `drift_phrase` - LLM-synthesised one-sentence summary of the change.
 """
 
 from __future__ import annotations

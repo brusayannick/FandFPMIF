@@ -1,4 +1,4 @@
-"""ModuleContext — the typed shape every entry point receives (§5.5).
+"""ModuleContext - the typed shape every entry point receives (§5.5).
 
 The SDK only declares the *shape*. Concrete implementations live in
 `mate.api.modules.*` and are injected by the loader. Module code
@@ -8,7 +8,7 @@ should depend on these Protocols, not the implementations.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -46,6 +46,42 @@ class ProgressReporterProtocol(Protocol):
         total: float | None = None,
         stage: str | None = None,
     ) -> None: ...
+
+
+@runtime_checkable
+class CancellationProtocol(Protocol):
+    """Cooperative-cancel surface for a running handler (§7.9).
+
+    A job is *soft-killed*: the platform flags it and the handler is expected to
+    notice at its next poll point and wind down cleanly. Any handler that reports
+    progress already polls for free (the progress reporter checks this internally),
+    but long stretches without a progress tick should call ``check_cancelled()``::
+
+        async with ctx.event_log as log:
+            for chunk in chunks:
+                await ctx.check_cancelled()   # raises Cancelled if asked to stop
+                ...
+
+    Both methods are cheap and side-effect-free when the job is not cancelled.
+    """
+
+    def is_cancelled(self) -> bool: ...
+    async def check_cancelled(self) -> None: ...
+
+
+class _NoopCancellation:
+    """Default cancellation surface: never cancelled.
+
+    Used when a context is built outside a cancellable job (e.g. a plain route
+    handler) or by an older platform that doesn't wire one in - so module code
+    can always call ``ctx.is_cancelled()`` / ``ctx.check_cancelled()`` safely.
+    """
+
+    def is_cancelled(self) -> bool:
+        return False
+
+    async def check_cancelled(self) -> None:
+        return None
 
 
 @runtime_checkable
@@ -93,7 +129,7 @@ class OpenEventLogProtocol(Protocol):
     """Open a *second* case-centric log owned by the same user (§5.5).
 
     `ctx.event_log` is bound to the one log the invocation is scoped to. A few
-    modules — log comparison, benchmarking — need to read another log too. This
+    modules - log comparison, benchmarking - need to read another log too. This
     factory returns an `EventLogAccessProtocol` for any other case-centric log
     **owned by `ctx.user_id`**, applying that log's committed Events-tab filter
     just like the primary view. It is the only sanctioned cross-log accessor:
@@ -110,7 +146,7 @@ class OpenEventLogProtocol(Protocol):
 @runtime_checkable
 class ObjectCentricLogAccessProtocol(Protocol):
     """Lazy view of an object-centric (OCEL) log. The object-centric
-    counterpart to `EventLogAccessProtocol` — bound on `ctx.object_log` only for
+    counterpart to `EventLogAccessProtocol` - bound on `ctx.object_log` only for
     logs whose `log_model` is ``object_centric``. Exposes the four OCEL tables
     plus a reconstructed pm4py OCEL object::
 
@@ -136,7 +172,7 @@ class ModuleContext:
 
     Built by the loader per (log_id, module_id, invocation). For event
     handlers and route handlers without `log_id` (e.g. global routes), the
-    `log_id` may be empty — module authors should treat it as optional.
+    `log_id` may be empty - module authors should treat it as optional.
     """
 
     log_id: str
@@ -154,9 +190,26 @@ class ModuleContext:
     workdir: Path
     run_in_process: RunInProcessProtocol
     # Open another case-centric log owned by the same user (ownership-checked).
-    # The sanctioned way for a module to read a *second* log — e.g. comparison.
+    # The sanctioned way for a module to read a *second* log - e.g. comparison.
     open_event_log: OpenEventLogProtocol
     # Bound only for object-centric (OCEL) logs; None for case-centric logs.
     # A module only ever runs against the model it declares (availability
     # gating), so it reads exactly one of `event_log` / `object_log`.
     object_log: ObjectCentricLogAccessProtocol | None = None
+    # Cooperative-cancel surface for the running job (§7.9). Defaulted to a
+    # never-cancelled no-op so contexts built outside a cancellable job - or by
+    # an older platform that doesn't wire one in - keep working unchanged.
+    cancellation: CancellationProtocol = field(default_factory=_NoopCancellation)
+
+    def is_cancelled(self) -> bool:
+        """Whether the running job has been asked to stop (non-blocking)."""
+        return self.cancellation.is_cancelled()
+
+    async def check_cancelled(self) -> None:
+        """Raise :class:`Cancelled` if the running job has been asked to stop.
+
+        Call this at poll points in long-running work that doesn't report
+        progress; the platform turns the raised ``Cancelled`` into a clean
+        ``job.cancelled`` outcome.
+        """
+        await self.cancellation.check_cancelled()

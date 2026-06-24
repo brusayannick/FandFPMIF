@@ -33,7 +33,7 @@ export interface DashboardItem {
 }
 
 /** How finely cards snap and how much air sits between them. No level
- * auto-compacts — cards always stay exactly where you place them; granularity
+ * auto-compacts – cards always stay exactly where you place them; granularity
  * only changes the snap resolution. */
 export type Granularity = "free" | "fine" | "medium" | "low";
 
@@ -42,7 +42,7 @@ export interface CardChrome {
   border: boolean;
 }
 
-/** A named, saved set of global column filters — a reusable "saved filter". One
+/** A named, saved set of global column filters – a reusable "saved filter". One
  * can be marked active so it applies on load in view mode. */
 export interface FilterPreset {
   id: string;
@@ -87,7 +87,7 @@ export const GRANULARITY: Record<Granularity, GranularitySpec> = {
     // essentially freely. (react-grid-layout is always column-based, so this is
     // the closest practical thing to "no snap".)
     label: "Free",
-    description: "No snap — place freely",
+    description: "No snap – place freely",
     cols: 60,
     rowHeight: 8,
     margin: [2, 2],
@@ -122,7 +122,7 @@ export const GRANULARITY: Record<Granularity, GranularitySpec> = {
 /** When the column count changes (the user picks a different granularity),
  * rescale each card's `x`/`w` so it keeps the same relative position and width
  * instead of jumping. `h`/`y` are row-based and unbounded, so they're left as-is
- * — only the on-screen row height changes. */
+ * – only the on-screen row height changes. */
 export function rescaleColumns(
   items: DashboardItem[],
   fromCols: number,
@@ -137,7 +137,7 @@ export function rescaleColumns(
   });
 }
 
-/** Coerce an arbitrary stored value into valid canvas settings — older boards
+/** Coerce an arbitrary stored value into valid canvas settings – older boards
  * predate the chrome/preset fields, so each is defaulted independently. */
 export function canvasSettings(raw: Partial<CanvasSettings> | null | undefined): CanvasSettings {
   const g = raw?.granularity;
@@ -158,7 +158,7 @@ export function canvasSettings(raw: Partial<CanvasSettings> | null | undefined):
   };
 }
 
-/** The column filters the board should load with — its active preset, if any. */
+/** The column filters the board should load with – its active preset, if any. */
 export function activePresetFilters(settings: CanvasSettings): FilterEntry[] {
   const active = settings.presets.find((p) => p.id === settings.active_preset_id);
   return active ? active.filters : [];
@@ -184,7 +184,7 @@ export interface DashboardDetail {
   settings: CanvasSettings;
   created_at: string;
   updated_at: string;
-  /** False when the board was opened via a share — render it read-only. */
+  /** False when the board was opened via a share – render it read-only. */
   is_owner: boolean;
 }
 
@@ -216,6 +216,10 @@ export interface DashboardCard {
   icon: string | null;
   default_w: number;
   default_h: number;
+  /** Smallest size the card may be resized to (RGL cells); the canvas applies
+   * these as the grid item's `minW`/`minH`. */
+  min_w: number;
+  min_h: number;
   config_schema: WidgetConfigSchema | null;
   /** Log data model(s) this card applies to. The palette only shows a card
    * whose models include the board's model. */
@@ -262,7 +266,7 @@ export function useDashboard(id: string | null) {
   });
 }
 
-/** Every card exposed by the modules the user owns — powers the palette. */
+/** Every card exposed by the modules the user owns – powers the palette. */
 export function useCardCatalog() {
   return useQuery({
     queryKey: dashboardKeys.cards(),
@@ -313,7 +317,7 @@ export function useDeleteDashboard() {
   });
 }
 
-/** Earliest/latest timestamp in a log — seeds the time-range slider. */
+/** Earliest/latest timestamp in a log – seeds the time-range slider. */
 export interface TimeBounds {
   field: string | null;
   min_ts: string | null;
@@ -329,7 +333,7 @@ export function useTimeBounds(logId: string | null) {
   });
 }
 
-/** Column specs for a log — backs the dashboard's global filter bar. Reuses
+/** Column specs for a log – backs the dashboard's global filter bar. Reuses
  * the events endpoint (one row) since it returns the inferred `columns`. */
 export function useEventColumns(logId: string | null) {
   return useQuery({

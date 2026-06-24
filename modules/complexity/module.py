@@ -1,4 +1,4 @@
-"""Complexity — basic and enriched EPA-based complexity measures.
+"""Complexity - basic and enriched EPA-based complexity measures.
 
 Implements Rüschel & Langer's reference ``Complexity.py`` /
 ``EnrichedComplexity.py`` (see ``ComplexityOriginalRepo/``) against the
@@ -6,8 +6,8 @@ platform's normalised event table.
 
 Routes
 ------
-GET ``/metrics``         — basic + enriched bundle (cached).
-GET ``/enriched-available`` — quick yes/no for the enriched view.
+GET ``/metrics``         - basic + enriched bundle (cached).
+GET ``/enriched-available`` - quick yes/no for the enriched view.
 
 Precompute
 ----------
@@ -109,7 +109,7 @@ class ComplexityModule(Module):
         return {"available": bool(is_enriched_supported(schema))}
 
     @on_event("log.imported")
-    @job(progress=True, title="Complexity — precompute")
+    @job(progress=True, title="Complexity - precompute")
     async def precompute(self, ctx: ModuleContext, payload: dict[str, Any]) -> None:
         await ctx.progress.update(0.0, "Loading log")
         result = await self._compute(ctx)

@@ -1,7 +1,7 @@
 """Serialise comparison results to plain JSON for the panel.
 
 The DFG-diff payload mirrors the *shape* of the discovery module's
-``serialize_dfg`` (activities + edges, no coordinates — the canvas lays out
+``serialize_dfg`` (activities + edges, no coordinates - the canvas lays out
 client-side) but tags every node and edge with a diff ``status`` plus both
 logs' frequencies. Kept self-contained: modules can't import each other.
 """

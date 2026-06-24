@@ -4,7 +4,7 @@
 # Tab indentation is required for Make recipes.
 
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*##"; printf "\nMate — common tasks\n\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nMate – common tasks\n\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 install: ## Resolve all deps (uv + pnpm)
 	uv sync --extra dev
@@ -52,7 +52,7 @@ codegen: ## Regenerate TS types from the running API's /openapi.json
 deploy: ## Push + redeploy to the uni VM (run on the FB4-DEV-VPN)
 	./scripts/deploy.sh
 
-clean: ## Wipe local data + Keycloak Postgres volume — irrevocable
+clean: ## Wipe local data + Keycloak Postgres volume – irrevocable
 	rm -rf data/event_logs/* data/module_results/* data/users data/metadata.db data/metadata.db-wal data/metadata.db-shm data/.multi_user_migrated
 	-docker volume rm flows-and-funds_kc-data 2>/dev/null || true
 	@echo "data/ wiped and Keycloak volume removed. Module folders under modules/ are kept."

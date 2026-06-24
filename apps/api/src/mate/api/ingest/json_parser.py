@@ -209,7 +209,7 @@ def parse_json(
         probe = probe_json(path)
         effective = autodetect_mapping(probe)
         if effective is None:
-            # Leave the role columns raw — empty role names never match a real
+            # Leave the role columns raw - empty role names never match a real
             # field, so nothing is renamed and the resolver maps them centrally.
             effective = JsonColumnMapping(
                 event_path=resolved, case_id="", activity="", timestamp=""

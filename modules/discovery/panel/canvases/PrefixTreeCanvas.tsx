@@ -25,7 +25,7 @@ import {
 } from "../discovery-settings-context";
 
 // ---------------------------------------------------------------------------
-// Recursive node type (internal — rebuilt from the flat wire format)
+// Recursive node type (internal – rebuilt from the flat wire format)
 // ---------------------------------------------------------------------------
 
 interface PrefixTreeNode {

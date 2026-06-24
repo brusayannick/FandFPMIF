@@ -1,4 +1,4 @@
-"""CV4CDD — Computer-vision based concept-drift detection.
+"""CV4CDD - Computer-vision based concept-drift detection.
 
 Wraps the WINSIM pipeline from Kraus & van der Aa (BPM'24) so the platform
 can run it against any imported event log. The heavy work (similarity
@@ -9,10 +9,10 @@ The same job also auto-fires on ``log.imported`` so a freshly-imported
 log is analysed without any extra click.
 
 Routes:
-  POST /detect        — kick off the detection (returns ``{"job_id": "..."}``)
-  GET  /results       — fetch the cached detections JSON
-  GET  /image         — fetch the overlay PNG (used by the panel <img>)
-  GET  /similarity    — fetch the raw similarity-matrix PNG (no overlay)
+  POST /detect        - kick off the detection (returns ``{"job_id": "..."}``)
+  GET  /results       - fetch the cached detections JSON
+  GET  /image         - fetch the overlay PNG (used by the panel <img>)
+  GET  /similarity    - fetch the raw similarity-matrix PNG (no overlay)
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ from typing import Any
 # import-lock deadlock detector ("deadlock detected by _ModuleLock('pm4py.algo
 # .filtering')") and fails the job.
 #
-# Importing the exact submodules here — sequentially, on the loader's main thread
-# at module-load time — guarantees they are already in sys.modules before any
+# Importing the exact submodules here - sequentially, on the loader's main thread
+# at module-load time - guarantees they are already in sys.modules before any
 # worker thread touches them, so the in-thread imports below are just cache hits
 # and cv4cdd can never be a party to the race. TensorFlow is deliberately left
 # lazy (it's ~0.5 GB and only needed on an actual run); its import is serialised
@@ -64,7 +64,7 @@ from . import cv4cdd_core as _warm_cv4cdd_core  # noqa: F401
 # Pretrained CV4CDD models are large (~0.5 GB) and are NOT committed to git.
 # They're uploaded at runtime (POST /models) and extracted here. Because module
 # code runs once per process shared across every user, anything that lands on
-# this directory is automatically available platform-wide — user A uploads a
+# this directory is automatically available platform-wide - user A uploads a
 # model and user B can select it. Each account records *which* model it uses in
 # its own module config (config_json["model"]); the files are shared.
 MODEL_ROOT = Path(__file__).parent / "model"
@@ -140,7 +140,7 @@ def _extract_tar_zst(archive: Path, dest: Path) -> None:
     import zstandard
 
     dctx = zstandard.ZstdDecompressor()
-    # mode="r|" is a non-seekable streaming reader — matches the zstd stream.
+    # mode="r|" is a non-seekable streaming reader - matches the zstd stream.
     # filter="data" (Python 3.12) blocks absolute paths and `..` traversal.
     with (
         archive.open("rb") as fh,
@@ -185,7 +185,7 @@ class Cv4cddModule(Module):
     # ── Triggers ──────────────────────────────────────────────────────────────
 
     @on_event("log.imported")
-    @job(progress=True, title="CV4CDD — auto-detecting drifts")
+    @job(progress=True, title="CV4CDD - auto-detecting drifts")
     async def on_log_imported(
         self, ctx: ModuleContext, payload: dict[str, Any]
     ) -> dict[str, Any]:
@@ -195,7 +195,7 @@ class Cv4cddModule(Module):
         and can cancel it from the dock if it's not wanted.
         """
         # No model uploaded yet? Skip quietly rather than failing the job for
-        # every import — the user installs a model on the settings page first.
+        # every import - the user installs a model on the settings page first.
         if _resolve_model_dir(ctx.config.value or {}) is None:
             ctx.logger.info("cv4cdd.autodetect_skipped_no_model")
             return {
@@ -207,7 +207,7 @@ class Cv4cddModule(Module):
         return await self._do_detect(ctx)
 
     @route.post("/detect")
-    @job(progress=True, title="CV4CDD — concept-drift detection")
+    @job(progress=True, title="CV4CDD - concept-drift detection")
     async def detect(self, ctx: ModuleContext) -> dict[str, Any]:
         return await self._do_detect(ctx)
 
@@ -232,7 +232,7 @@ class Cv4cddModule(Module):
         df = await self._load_sorted_df(ctx)
 
         # Capture the running loop here on the main thread so the worker
-        # thread can marshal progress callbacks back through it — calling
+        # thread can marshal progress callbacks back through it - calling
         # `asyncio.get_event_loop()` from inside `to_thread` raises since
         # the thread-pool thread doesn't own a loop.
         loop = asyncio.get_running_loop()
@@ -263,7 +263,7 @@ class Cv4cddModule(Module):
 
     async def _load_sorted_df(self, ctx: ModuleContext) -> Any:
         """Return a DataFrame sorted so that traces appear in pm4py TIMESTAMP_SORT
-        order — exactly matching the reference pipeline.
+        order - exactly matching the reference pipeline.
 
         The platform stores events.parquet sorted by (case_id, timestamp), which
         gives alphabetical trace ordering for same-timestamp ties.  The reference
@@ -274,7 +274,7 @@ class Cv4cddModule(Module):
 
         When the original XES file is still on disk we re-import it via pm4py to
         recover the exact ordering.  For CSV logs (no XES file) we fall back to
-        the Parquet and sort by (start_timestamp, case_id) — consistent and
+        the Parquet and sort by (start_timestamp, case_id) - consistent and
         reproducible, though it may differ from the reference for tied timestamps.
         """
         async with ctx.event_log as log:
@@ -301,7 +301,7 @@ class Cv4cddModule(Module):
             df = await log.pandas()
 
         # Sort events by timestamp (mergesort keeps Parquet row order for ties,
-        # which is alphabetical case_id — reproducible even if not identical to
+        # which is alphabetical case_id - reproducible even if not identical to
         # the reference's XES file order).
         return df.sort_values("timestamp", kind="mergesort").reset_index(drop=True)
 
@@ -371,7 +371,7 @@ class Cv4cddModule(Module):
                     ctx.progress.update(fraction, message), loop
                 )
             except RuntimeError:
-                # Loop is closed (shutdown in progress) — drop the update.
+                # Loop is closed (shutdown in progress) - drop the update.
                 pass
 
         return cv4cdd_core.run_detection(
@@ -419,8 +419,8 @@ class Cv4cddModule(Module):
     # ── Model store (platform-wide) ──────────────────────────────────────────
     #
     # Models live on shared on-disk storage (MODEL_ROOT), so list/upload/delete
-    # operate platform-wide. Only the *selection* — which model this account
-    # uses — is per-user, stored in module config under "model" and saved via
+    # operate platform-wide. Only the *selection* - which model this account
+    # uses - is per-user, stored in module config under "model" and saved via
     # the platform's standard PUT /modules/{id}/config from the settings page.
 
     @route.get("/models")
@@ -463,7 +463,7 @@ class Cv4cddModule(Module):
         archive: Path | None = None
         staging: Path | None = None
         try:
-            # Stream the upload to a temp file — never hold ~0.5 GB in memory.
+            # Stream the upload to a temp file - never hold ~0.5 GB in memory.
             fd, archive_path = tempfile.mkstemp(suffix=".tar.zst", dir=MODEL_ROOT)
             archive = Path(archive_path)
             with os.fdopen(fd, "wb") as out:

@@ -136,7 +136,7 @@ function KpiCard({
           <Icon className="h-3.5 w-3.5" />
         </div>
         <div className="mt-1.5 text-2xl font-semibold tabular-nums">
-          {loading ? <Skeleton className="h-7 w-24" /> : (value ?? "—")}
+          {loading ? <Skeleton className="h-7 w-24" /> : (value ?? "–")}
         </div>
         {subline && <div className="mt-1 text-[11px] text-muted-foreground">{subline}</div>}
       </CardContent>

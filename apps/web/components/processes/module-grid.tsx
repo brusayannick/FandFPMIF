@@ -17,6 +17,7 @@ const CATEGORIES: { id: string; label: string }[] = [
   { id: "attribute", label: "Attribute" },
   { id: "external_input", label: "External input" },
   { id: "advanced", label: "Advanced process analytics" },
+  { id: "comparison", label: "Comparison" },
   { id: "other", label: "Other" },
 ];
 
@@ -29,7 +30,7 @@ export function ModuleGrid({ logId }: { logId: string }) {
     for (const c of CATEGORIES) out.set(c.id, []);
     for (const m of modules ?? []) {
       if (confidentialOnly && !m.is_confidential_safe) continue;
-      // Only surface modules that can actually be opened for this log — hide
+      // Only surface modules that can actually be opened for this log – hide
       // disabled ones and those the log is incompatible with (unavailable).
       if (m.enabled === false) continue;
       if ((m.availability?.status ?? "available") === "unavailable") continue;

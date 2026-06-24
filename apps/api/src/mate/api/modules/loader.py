@@ -1,9 +1,9 @@
-"""Module loader — discovery → install → import → mount (§5.3).
+"""Module loader - discovery → install → import → mount (§5.3).
 
 Mounts each loaded module's:
 
   - ``@route.*`` handlers under ``/api/v1/modules/{id}/...`` (FastAPI handles
-    sync→threadpool — §5.5).
+    sync→threadpool - §5.5).
   - ``@on_event`` handlers as bus subscribers (with SDK auto-wrap).
   - ``@job`` handlers on the platform `JobRuntime` and, when stacked under a
     route, replaces the route body with an enqueue-and-return-job-id stub.
@@ -72,7 +72,7 @@ def _topic_matches(pattern: str, topic: str) -> bool:
 
     Mirrors the bus fan-out logic (`events.bus._topic_matches`, kept private
     there) so a module that subscribes via a wildcard (`log.*`) is still counted
-    as a subscriber of `log.imported`. Kept in sync deliberately — both decide
+    as a subscriber of `log.imported`. Kept in sync deliberately - both decide
     the same thing for the same patterns.
     """
     if pattern in ("*", "**"):
@@ -120,7 +120,7 @@ class _SdkBusAdapter:
     log id) so the event stays inside that user's tenant: the `/events` SSE
     fan-out filters by `user_id`, and the loader's `@on_event` dispatch only
     delivers to handlers whose owning user matches. Without this stamp a module
-    that emits an event would broadcast it to *every* connected user — a
+    that emits an event would broadcast it to *every* connected user - a
     cross-tenant leak of whatever the payload carries.
     """
 
@@ -136,7 +136,7 @@ class _SdkBusAdapter:
             payload = {"value": payload}
         else:
             payload = dict(payload)
-        # `user_id` is a reserved routing key — force it to the emitting user so
+        # `user_id` is a reserved routing key - force it to the emitting user so
         # a module can't (by bug or by design) address another tenant. `log_id`
         # is a hint, so only fill it when the module didn't set one itself.
         payload["user_id"] = self._user_id
@@ -146,7 +146,7 @@ class _SdkBusAdapter:
 
     async def subscribe(self, *patterns: str):
         # Module-author-facing subscribe is a syntactic helper around our
-        # context-managed bus — return an async iterator. The lifetime of the
+        # context-managed bus - return an async iterator. The lifetime of the
         # subscription matches the iterator's lifetime.
         async def _iter():
             async with self._bus.subscribe(patterns or ("*",)) as stream:
@@ -168,6 +168,43 @@ class _NoopProgress:
         return None
 
 
+class _NoopCancellation:
+    """Default `CancellationProtocol`: never cancelled.
+
+    Reused for contexts built outside a cancellable job (plain routes, event
+    handlers without a job) so module code can always call ctx.is_cancelled() /
+    ctx.check_cancelled() safely.
+    """
+
+    def is_cancelled(self) -> bool:
+        return False
+
+    async def check_cancelled(self) -> None:
+        return None
+
+
+_NOOP_CANCELLATION = _NoopCancellation()
+
+
+class _JobCancellation:
+    """Bridges the SDK `CancellationProtocol` onto a running job's `JobHandle`.
+
+    `is_cancelled()` reads the cooperative token; `check_cancelled()` raises
+    `JobCancelled` (a BaseException) via the handle, which the runtime turns into
+    a clean `job.cancelled`. Given to in-process module job handlers so author
+    code can poll cancel directly between progress ticks.
+    """
+
+    def __init__(self, handle: JobHandle) -> None:
+        self._handle = handle
+
+    def is_cancelled(self) -> bool:
+        return self._handle.cancelled
+
+    async def check_cancelled(self) -> None:
+        self._handle.raise_if_cancelled()
+
+
 class _JobProgressAdapter:
     """Wraps the platform `JobHandle.progress()` for module authors."""
 
@@ -182,12 +219,16 @@ class _JobProgressAdapter:
         total: float | None = None,
         stage: str | None = None,
     ) -> None:
+        # Belt-and-suspenders: raise on a pending cancel before the fraction math
+        # or the underlying progress publish (which also polls). Lets a module
+        # soft-cancel at its next progress tick even via this adapter.
+        self._handle.raise_if_cancelled()
         # Two reporting styles are supported. With an explicit `total`, `current`
         # is an absolute count (`4200 / 10000`). Without a `total`, a *float*
         # `current` in [0, 1] is read as a fraction and mapped onto 0-100 so the
         # bar is determinate (and gets a real ETA, since the rate/eta math keys
         # off `total`). An int `current` with no total stays a running counter
-        # ("{n} processed") — so `update(current=1)` is "1 processed", not "100%".
+        # ("{n} processed") - so `update(current=1)` is "1 processed", not "100%".
         if total is None and isinstance(current, float) and 0.0 <= current <= 1.0:
             await self._handle.progress(round(current * 100), 100, stage=stage, message=message)
             return
@@ -210,7 +251,7 @@ class _ModuleConfigAdapter:
 
 class _BusForwardingLogger:
     """Wraps a structlog `BoundLogger` so every log call also fans out to the
-    event bus as `module.log.<level>` — the per-module logs tail in Settings
+    event bus as `module.log.<level>` - the per-module logs tail in Settings
     (§7.6.2) subscribes to that topic and filters by payload.module_id.
 
     We keep the structlog output too so server-side log aggregators stay
@@ -231,7 +272,7 @@ class _BusForwardingLogger:
     def _emit(self, level: str, event: str, **kwargs: Any) -> None:
         getattr(self._base, level)(event, **kwargs)
         # Best-effort: never let a logging side-effect break the handler.
-        # `user_id` scopes the line to the owning tenant — the Settings logs
+        # `user_id` scopes the line to the owning tenant - the Settings logs
         # tail subscribes to `module.log.*` over the per-user WS, so without it
         # one user would see another's log fields (which can embed their data).
         try:
@@ -268,7 +309,7 @@ class _BusForwardingLogger:
 class _UserScopedRegistry:
     """Per-invocation view of the process-global `CapabilityRegistry`.
 
-    The underlying registry holds every module loaded into the process —
+    The underlying registry holds every module loaded into the process -
     shared across all tenants. This view filters it down to the modules the
     *owning user* has installed, so cross-module RPC (`ctx.registry.call`),
     capability probing (`has`) and listing (`installed_modules`) can never
@@ -300,7 +341,7 @@ class _UserScopedRegistry:
         owner = self._registry.owner_of(capability)
         if owner is None or owner not in self._allowed:
             # Same message whether the capability is unknown or just not the
-            # caller's — avoids leaking which modules other tenants installed.
+            # caller's - avoids leaking which modules other tenants installed.
             raise LookupError(
                 f"Capability {capability!r} is not provided by any module you have installed."
             )
@@ -311,9 +352,9 @@ def _resolve_dynamic(value: Any, log_id: str, module_id: str, fallback: str) -> 
     """Resolve a `@job(title=...)` value that may be a callable.
 
     Authors can pass either a plain string or `(ctx_stub, payload) -> str`
-    for runtime-formatted titles like *"Discovery — model.bpmn vs Order-to-
+    for runtime-formatted titles like *"Discovery - model.bpmn vs Order-to-
     Cash 2024"*. We feed the callable a minimal stub instead of the real
-    ModuleContext (which doesn't exist yet at submission time — the job
+    ModuleContext (which doesn't exist yet at submission time - the job
     hasn't run) and the in-flight payload.
     """
     if value is None or isinstance(value, str):
@@ -331,7 +372,7 @@ def _resolve_dynamic(value: Any, log_id: str, module_id: str, fallback: str) -> 
 
 
 # Header carrying a dashboard's ephemeral event filter. It's a base64-encoded
-# JSON object `{"filter": [{field, op, value?}, ...]}` — base64 so the filter
+# JSON object `{"filter": [{field, op, value?}, ...]}` - base64 so the filter
 # values survive an HTTP header without escaping headaches. When present it
 # *replaces* the log's persistent committed Events-tab filter for this one
 # request (dashboards scope their own dataset; see the dashboards plan).
@@ -379,7 +420,7 @@ def _extra_handler_params(bound_method: Callable[..., Any]) -> list[inspect.Para
     Modules typically use `from __future__ import annotations`, which turns
     every annotation into a string. We resolve them via `get_type_hints` so
     FastAPI sees real classes (notably `UploadFile`, which it auto-detects as
-    a form/file param only when it's a real type — a string `'UploadFile'`
+    a form/file param only when it's a real type - a string `'UploadFile'`
     annotation silently degrades to a query param and the file arrives None.
     """
     try:
@@ -397,7 +438,7 @@ def _extra_handler_params(bound_method: Callable[..., Any]) -> list[inspect.Para
     except Exception:
         hints = {}
     # `bound_method` is a bound instance method, so `self` is already removed.
-    # Skip the first param (`ctx`) — what remains are the user kwargs.
+    # Skip the first param (`ctx`) - what remains are the user kwargs.
     resolved: list[inspect.Parameter] = []
     for p in params[1:]:
         if p.name in hints:
@@ -479,21 +520,30 @@ class ModuleLoader:
         self.registry = registry
         self.api_app = api_app
         self.loaded: dict[str, LoadedModule] = {}
-        # Ids discovered under ``modules_dir`` at boot — the shared "default"
+        # Ids discovered under ``modules_dir`` at boot - the shared "default"
         # set every user is seeded with. Uploads added later via ``load_one``
         # must never land here, so it is only ever populated in ``load_all``.
         self.default_module_ids: set[str] = set()
         self._mount_router: APIRouter | None = None
         self._sub_event_tasks: list[asyncio.Task] = []
         self._bridges: dict[str, SubprocessBridge] = {}
-        # Let the job runtime reach a subprocess module's worker on cancel:
-        # the cooperative token can't stop an un-interruptible worker handler,
-        # so cancelling a running subprocess job kills+respawns its worker.
-        self.runtime.set_subprocess_canceller(self._cancel_subprocess_job)
+        # Let the job runtime reach a subprocess module's worker on cancel. Two
+        # phases: soft (flag the worker so its next ctx RPC raises → cooperative
+        # wind-down), then hard (kill+respawn) only after a grace window for a
+        # worker that ignored the soft signal (e.g. a native job with no poll
+        # point). The cooperative token alone can't reach the worker process.
+        self.runtime.set_subprocess_soft_canceller(self._soft_cancel_subprocess_job)
+        self.runtime.set_subprocess_hard_canceller(self._hard_cancel_subprocess_job)
         # topic (as declared in `@on_event`) → module_ids subscribing to it.
         # Populated by `_bind_event`; consumed by `event_subscriber_module_ids`
         # so the import handler can freeze the set of modules a log must wait on.
         self._event_subscribers: dict[str, set[str]] = {}
+        # Subset of the above limited to *job-backed* subscriptions (`@on_event`
+        # stacked with `@job`). Only these create a `Job` row when the topic
+        # fires, so only these may enter the precompute closure / readiness gate -
+        # a fire-and-forget `@on_event` with no `@job` would otherwise strand a
+        # log in `processing` forever (no job ever reaches a terminal status).
+        self._precompute_subscribers: dict[str, set[str]] = {}
 
     async def load_all(self) -> list[LoadedModule]:
         discovered = discover(self.modules_dir, self.uploaded_modules_dir)
@@ -540,6 +590,8 @@ class ModuleLoader:
             self.registry.add_module(d.id)
             await self._seed_module_config(d.manifest)
 
+        self._warn_unprovided_precompute_subscriptions()
+
         if self.api_app is not None:
             self._mount_router = APIRouter(prefix="/api/v1")
             for loaded in self.loaded.values():
@@ -568,6 +620,7 @@ class ModuleLoader:
             self.registry.remove_module(loaded.id)
         self.loaded.clear()
         self._event_subscribers.clear()
+        self._precompute_subscribers.clear()
         reset_finder()
 
     async def load_one(
@@ -614,7 +667,7 @@ class ModuleLoader:
     async def unload_one(self, module_id: str) -> bool:
         """Unmount a module's routes / event subscribers / capabilities. The
         FastAPI router can't actually be unbound at runtime, so the in-memory
-        routes survive until the next process restart — but the handlers are
+        routes survive until the next process restart - but the handlers are
         gated on `self.loaded`, so calls return 404 cleanly.
         """
         loaded = self.loaded.pop(module_id, None)
@@ -636,18 +689,36 @@ class ModuleLoader:
         # first so the unloaded module's topics don't linger (it's rebuilt by
         # `_bind_event` for each remaining module below).
         self._event_subscribers.clear()
+        self._precompute_subscribers.clear()
         for remaining in self.loaded.values():
             self._rebind_events(remaining)
         self.registry.remove_module(module_id)
         return True
 
-    async def _cancel_subprocess_job(self, job_id: str, module_id: str) -> None:
-        """Runtime hook: hard-stop a running subprocess-module job by killing
-        and respawning the module's worker. No-op for in-process modules (no
-        bridge) — their jobs cancel cooperatively via the token."""
+    async def _soft_cancel_subprocess_job(self, job_id: str, module_id: str) -> None:
+        """Runtime hook (phase 1): ask the module's worker to wind down.
+
+        Flags the in-flight call so the worker's next ctx RPC fails with a cancel
+        sentinel (which the worker reconstructs as `Cancelled`) - a cooperative
+        stop, no kill. Returns immediately. No-op for in-process modules (no
+        bridge): those cancel on the cooperative token alone.
+        """
         bridge = self._bridges.get(module_id)
         if bridge is not None:
-            await bridge.cancel_active()
+            await bridge.soft_cancel(job_id)
+
+    async def _hard_cancel_subprocess_job(self, job_id: str, module_id: str) -> None:
+        """Runtime hook (phase 2): hard-stop the worker by killing+respawning it.
+
+        The escalation when the soft signal didn't land in the grace window
+        (a native handler with no poll point). Clears the bridge's cancel flags
+        afterwards so a reused worker isn't left poisoned."""
+        bridge = self._bridges.get(module_id)
+        if bridge is not None:
+            try:
+                await bridge.cancel_active()
+            finally:
+                bridge.clear_cancel(job_id)
 
     def _rebind_events(self, loaded: LoadedModule) -> None:
         for attr_name in dir(loaded.instance):
@@ -660,7 +731,7 @@ class ModuleLoader:
     async def _seed_module_config(self, manifest: Manifest) -> None:
         """No-op since the multi-user migration.
 
-        ``module_configs`` is now keyed by ``(user_id, module_id)`` — seeding
+        ``module_configs`` is now keyed by ``(user_id, module_id)`` - seeding
         without a user_id would either leave the row orphaned or require
         materialising defaults for every existing user. Instead, routes
         treat "no row" as ``enabled = manifest.default_enabled`` (see
@@ -671,6 +742,14 @@ class ModuleLoader:
 
     def manifests(self) -> list[Manifest]:
         return [m.manifest for m in self.loaded.values()]
+
+    def subprocess_bridges(self) -> dict[str, SubprocessBridge]:
+        """`{module_id: bridge}` for subprocess-isolated modules (read-only copy).
+
+        Used by the admin resource sampler to read each worker's live PID and
+        attribute measured CPU/RAM to it.
+        """
+        return dict(self._bridges)
 
     def event_subscriber_module_ids(self, topic: str) -> set[str]:
         """Module-ids whose `@on_event` handlers fire for `topic`.
@@ -686,6 +765,98 @@ class ModuleLoader:
             if _topic_matches(pattern, topic):
                 out |= module_ids
         return out
+
+    def precompute_subscriber_module_ids(self, topic: str) -> set[str]:
+        """Like `event_subscriber_module_ids`, but only *job-backed* subscribers.
+
+        These are the `@on_event` handlers stacked with `@job` that actually
+        create a `Job` row when `topic` fires - the only ones the readiness gate
+        may wait on (see `_precompute_subscribers`).
+        """
+        out: set[str] = set()
+        for pattern, module_ids in self._precompute_subscribers.items():
+            if _topic_matches(pattern, topic):
+                out |= module_ids
+        return out
+
+    def _precompute_consumers(self, producer_id: str, candidates: set[str]) -> set[str]:
+        """Modules in `candidates` whose job-backed `@on_event` fires for a topic
+        `producer_id` emits.
+
+        A producer emits its manifest `provides` topics plus the reserved
+        `<id>.completed` event the platform auto-publishes when its precompute job
+        succeeds (`modules.processing`). Capability names in `provides` that
+        nobody `@on_event`-subscribes to simply yield no consumers.
+        """
+        loaded = self.loaded.get(producer_id)
+        if loaded is None:
+            return set()
+        emitted = set(loaded.manifest.provides) | {f"{producer_id}.completed"}
+        out: set[str] = set()
+        for topic in emitted:
+            out |= self.precompute_subscriber_module_ids(topic) & candidates
+        out.discard(producer_id)
+        return out
+
+    def precompute_closure(
+        self, import_topic: str, owned_ids: set[str]
+    ) -> tuple[set[str], dict[str, set[str]]]:
+        """The transitive set of precompute modules a log imported on `import_topic`
+        will run, plus the consumer→producer dependency edges between them.
+
+        Starts from the job-backed subscribers to `import_topic` (∩ the user's
+        `owned_ids`) and walks the `provides`/`consumes` event graph: a module
+        that emits `<x>.completed` (or any declared `provides` topic) pulls in the
+        modules subscribed to it. Built from the *actual* subscription graph, so a
+        phantom `consumes` (a topic no loaded module emits) is simply never
+        reached. Frozen at import time so the gate stays deterministic.
+        """
+        roots = self.precompute_subscriber_module_ids(import_topic) & owned_ids
+        nodes: set[str] = set(roots)
+        edges: dict[str, set[str]] = {}
+        frontier: list[str] = list(roots)
+        while frontier:
+            producer = frontier.pop()
+            for consumer in self._precompute_consumers(producer, owned_ids):
+                edges.setdefault(consumer, set()).add(producer)
+                if consumer not in nodes:
+                    nodes.add(consumer)
+                    frontier.append(consumer)
+        return nodes, edges
+
+    def precompute_edges(self, nodes: set[str]) -> dict[str, set[str]]:
+        """Consumer→producer dependency edges *among* a fixed `nodes` set.
+
+        Lets the processing coordinator reason about cascade-skips over the
+        frozen expected-module set without recomputing the whole closure.
+        """
+        edges: dict[str, set[str]] = {}
+        for producer in nodes:
+            for consumer in self._precompute_consumers(producer, nodes):
+                edges.setdefault(consumer, set()).add(producer)
+        return edges
+
+    def _warn_unprovided_precompute_subscriptions(self) -> None:
+        """Warn for any job-backed `@on_event` whose topic no loaded module emits -
+        a precompute job that can never be triggered (a phantom `consumes`).
+
+        The reserved `<id>.completed` of every loaded module counts as provided
+        (auto-emitted on success); import topics and wildcards are skipped.
+        """
+        import_topics = {"log.imported", "ocel.imported"}
+        provided: set[str] = set()
+        for loaded in self.loaded.values():
+            provided |= set(loaded.manifest.provides)
+            provided.add(f"{loaded.id}.completed")
+        for topic, module_ids in self._precompute_subscribers.items():
+            if topic in import_topics or "*" in topic:
+                continue
+            if topic not in provided:
+                log.warning(
+                    "modules.precompute_subscription_unprovided",
+                    topic=topic,
+                    subscribers=sorted(module_ids),
+                )
 
     def availability_for(
         self,
@@ -721,7 +892,7 @@ class ModuleLoader:
     # -- internal -----------------------------------------------------------
 
     async def _instantiate(self, d: DiscoveredModule) -> Module:
-        """Build a `Module` instance — either in-process or via a subprocess
+        """Build a `Module` instance - either in-process or via a subprocess
         bridge depending on the manifest's `isolation` setting (§5.4)."""
         if d.manifest.dependencies.python.isolation == "subprocess":
             bridge = SubprocessBridge(d.manifest, d.folder)
@@ -738,7 +909,7 @@ class ModuleLoader:
         """Optionally import `<folder>/events.py` and register its
         `EVENT_SCHEMAS: dict[str, type[BaseModel]]` mapping on the bus.
 
-        Modules without an `events.py` are silently skipped — schema
+        Modules without an `events.py` are silently skipped - schema
         enforcement is opt-in. A malformed `EVENT_SCHEMAS` value logs a
         warning but does not abort the module load.
         """
@@ -809,7 +980,7 @@ class ModuleLoader:
 
     def _bind(self, loaded: LoadedModule) -> None:
         for cap in loaded.manifest.provides:
-            # Capabilities are bound lazily — module authors surface them via
+            # Capabilities are bound lazily - module authors surface them via
             # @route handlers; mapping a capability name to a specific handler
             # is left as a phase 5.1 enhancement (no v1 module needs cross-
             # module RPC). For now we record them as "advertised by this module".
@@ -889,8 +1060,12 @@ class ModuleLoader:
                         handle.payload.get("log_id", ""),
                         handle.user_id,
                         progress=_JobProgressAdapter(handle),
+                        cancellation=_JobCancellation(handle),
                         filter_override=handle.payload.get("_filter_override"),
                     )
+                    # Tag the ctx with its job id so a subprocess bridge can map
+                    # the per-call RPC token → job id and target the soft cancel.
+                    ctx._ff_job_id = handle.id  # type: ignore[attr-defined]
                     raw = handle.payload.get("_extras") or {}
                     rebuilt: dict[str, Any] = {}
                     for name, value in raw.items():
@@ -961,8 +1136,12 @@ class ModuleLoader:
         module_id = loaded.id
         # Record the subscription so `event_subscriber_module_ids` can answer
         # "which modules wait on `log.imported`?" at import time. A module may
-        # subscribe via a wildcard (`log.*`) — kept verbatim and matched later.
+        # subscribe via a wildcard (`log.*`) - kept verbatim and matched later.
         self._event_subscribers.setdefault(topic, set()).add(module_id)
+        # Job-backed subscriptions are the only ones that produce a `Job` row, so
+        # only they may gate a log's `processing → ready` transition.
+        if job_spec is not None:
+            self._precompute_subscribers.setdefault(topic, set()).add(module_id)
 
         if job_spec is None:
 
@@ -979,7 +1158,7 @@ class ModuleLoader:
                                     continue
                                 # The bus is process-global, but a module must
                                 # only react to events from users who installed
-                                # it — otherwise user B's import would run user
+                                # it - otherwise user B's import would run user
                                 # A's module against B's data.
                                 if not await self._user_owns(event_user_id, module_id):
                                     continue
@@ -1001,7 +1180,7 @@ class ModuleLoader:
             self._sub_event_tasks.append(asyncio.create_task(_runner()))
             return
 
-        # Stacked @on_event + @job — run handler through the JobRuntime so it
+        # Stacked @on_event + @job - run handler through the JobRuntime so it
         # appears in the dock with progress, cancellation, etc.
         job_type = f"module.{module_id}.event.{topic.replace('.', '_')}"
 
@@ -1012,7 +1191,9 @@ class ModuleLoader:
                 handle.payload.get("log_id", ""),
                 handle.user_id,
                 progress=_JobProgressAdapter(handle),
+                cancellation=_JobCancellation(handle),
             )
+            ctx._ff_job_id = handle.id  # type: ignore[attr-defined]
             await self._invoke_handler(bound_method, ctx, event_payload)
 
         if job_type not in self.runtime._handlers:  # type: ignore[attr-defined]
@@ -1031,7 +1212,7 @@ class ModuleLoader:
                             if not event_user_id:
                                 continue
                             # Only enqueue work for users who installed this
-                            # module — see the no-job runner above.
+                            # module - see the no-job runner above.
                             if not await self._user_owns(event_user_id, module_id):
                                 continue
                             resolved_title = _resolve_dynamic(
@@ -1107,6 +1288,7 @@ class ModuleLoader:
         user_id: str,
         *,
         progress: Any | None = None,
+        cancellation: Any | None = None,
         filter_override: list[dict[str, Any]] | None = None,
     ) -> ModuleContext:
         # workdir is per-invocation; for v1 we use a temp dir scoped to the
@@ -1121,17 +1303,26 @@ class ModuleLoader:
         # Whose data dir the bound log's Parquet is read from. Equals user_id for
         # an owned log; for a log reached through a shared dashboard it becomes
         # the owner's id so path resolution points at the owner's data. This is
-        # the single sanctioned cross-account read widening — every other facet
+        # the single sanctioned cross-account read widening - every other facet
         # of the context (config, owned modules, cache, bus) stays scoped to the
         # requesting user. See mate.api.sharing.user_can_read_log.
         storage_user_id = user_id
         try:
             sm = get_sessionmaker()
             async with sm() as session:
-                row = await session.get(ModuleConfig, (user_id, module_id))
-                if row is not None and row.config_json:
-                    cfg_json = dict(row.config_json)
-                # Modules this user has installed — scopes ctx.registry so
+                # Admin-controlled module config (mate.api.policy) overrides the
+                # per-user ModuleConfig with one shared value for every user.
+                from mate.api.policy import SCOPE_MODULE, resolve
+
+                admin_cfg, controlled = await resolve(session, SCOPE_MODULE, module_id, user_id)
+                if controlled:
+                    if isinstance(admin_cfg, dict):
+                        cfg_json = dict(admin_cfg)
+                else:
+                    row = await session.get(ModuleConfig, (user_id, module_id))
+                    if row is not None and row.config_json:
+                        cfg_json = dict(row.config_json)
+                # Modules this user has installed - scopes ctx.registry so
                 # cross-module RPC can only reach the user's own modules.
                 owned_ids = await user_module_ids(session, user_id)
                 # The applied Events-tab filter, so a module's view of the log
@@ -1152,13 +1343,13 @@ class ModuleLoader:
             cfg_json = {}
 
         # A dashboard's ephemeral filter *replaces* the committed Events-tab
-        # filter for this one request — the dashboard scopes its own dataset
+        # filter for this one request - the dashboard scopes its own dataset
         # from the raw log without mutating EventLog.active_filter.
         #
         # That also means it must NOT share the module's result cache: a cached
         # endpoint (e.g. performance's `kpis`) keys only on (log_id, module_id)
         # and judges freshness by the parquet mtime, which an ephemeral filter
-        # never changes — so without a per-filter cache namespace it would serve
+        # never changes - so without a per-filter cache namespace it would serve
         # the *unfiltered* result and the dashboard filter would appear to do
         # nothing. Give each distinct ephemeral filter its own cache variant.
         cache_variant: str | None = None
@@ -1171,7 +1362,7 @@ class ModuleLoader:
 
         # The sanctioned cross-log accessor (ctx.open_event_log). Modules that
         # compare logs need a *second* EventLogAccess; minting it here keeps the
-        # tenant-isolation invariant in one place — we refuse any log the caller
+        # tenant-isolation invariant in one place - we refuse any log the caller
         # doesn't own. The returned view mirrors the primary one: same user, the
         # target log's own committed Events-tab filter.
         async def _open_event_log(other_log_id: str) -> EventLogAccess:
@@ -1179,7 +1370,7 @@ class ModuleLoader:
             async with sm_() as session:
                 other = await session.get(EventLog, other_log_id)
             if other is None or other.user_id != user_id:
-                # Same response whether missing or another tenant's — never
+                # Same response whether missing or another tenant's - never
                 # confirm the existence of a log the caller doesn't own.
                 raise PermissionError(f"Event log {other_log_id} not found.")
             if other.log_model == "object_centric":
@@ -1215,6 +1406,7 @@ class ModuleLoader:
             ),
             config=_ModuleConfigAdapter(cfg_json),
             progress=progress or _NoopProgress(),
+            cancellation=cancellation or _NOOP_CANCELLATION,  # type: ignore[arg-type]
             logger=_BusForwardingLogger(  # type: ignore[arg-type]
                 log.bind(module_id=module_id, log_id=log_id, user_id=user_id),
                 self.bus,

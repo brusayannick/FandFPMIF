@@ -1,7 +1,7 @@
 """OCEL data routes + cross-model 409 rejection.
 
 Verifies the /ocel/* endpoints serve object-centric logs and that the two
-models reject each other's endpoints — no endpoint ever serves both.
+models reject each other's endpoints - no endpoint ever serves both.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ async def _wait_until_ready(client: AsyncClient, log_id: str, timeout: float = 1
         if last["status"] == "failed":
             raise AssertionError(f"Import failed: {last.get('error')}")
         await asyncio.sleep(0.05)
-    raise AssertionError(f"Import did not finish in {timeout}s — last state: {last}")
+    raise AssertionError(f"Import did not finish in {timeout}s - last state: {last}")
 
 
 async def _upload(client: AsyncClient, filename: str, mime: str) -> str:

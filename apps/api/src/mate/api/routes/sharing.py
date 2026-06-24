@@ -1,4 +1,4 @@
-"""User-facing sharing collection routes — `/api/v1/sharing/*`.
+"""User-facing sharing collection routes - `/api/v1/sharing/*`.
 
 Per-dashboard share management (add/remove/list) lives on the dashboards router
 (`/dashboards/{id}/shares`); this module holds the cross-dashboard views:
@@ -6,7 +6,7 @@ Per-dashboard share management (add/remove/list) lives on the dashboards router
   - what's been shared *with me* (the recipient's inbox), and
   - who I *can* share with (my teams + co-members), to populate the share picker.
 
-Sharing targets are deliberately scoped to people you share a team with — you
+Sharing targets are deliberately scoped to people you share a team with - you
 can't share with arbitrary strangers, only members of your own teams.
 """
 

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
-// A thin top progress bar that gives instant feedback on *every* navigation —
+// A thin top progress bar that gives instant feedback on *every* navigation –
 // the App Router otherwise stalls on the current screen until the next route's
 // payload resolves, with no visible signal that the click registered.
 //
@@ -17,7 +17,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 
 const startListeners = new Set<() => void>();
 
-/** Imperatively begin the bar — for programmatic `router.push` navigations. */
+/** Imperatively begin the bar – for programmatic `router.push` navigations. */
 export const routeProgress = {
   start() {
     startListeners.forEach((l) => l());
@@ -62,7 +62,7 @@ export function RouteProgress() {
     }
     setVisible(true);
     setProgress(8);
-    // Ease toward 90% — never reach 100 until the route actually resolves.
+    // Ease toward 90% – never reach 100 until the route actually resolves.
     trickle.current = setInterval(() => {
       setProgress((p) => (p >= 90 ? 90 : p + (90 - p) * 0.12));
     }, 200);
@@ -107,7 +107,7 @@ export function RouteProgress() {
     };
   }, [start]);
 
-  // The route resolved — complete the bar. Skips the initial mount via activeRef.
+  // The route resolved – complete the bar. Skips the initial mount via activeRef.
   useEffect(() => {
     finish();
     // eslint-disable-next-line react-hooks/exhaustive-deps

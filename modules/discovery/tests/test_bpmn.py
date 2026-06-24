@@ -5,13 +5,13 @@ stand up minimal fakes for the *only* Protocol surface the BPMN route touches
 (``ctx.event_log`` as an async context manager exposing ``.pandas()`` and
 ``ctx.cache`` with ``get``/``set``/``exists``/``delete``). The fakes mirror the
 contracts in ``mate.sdk.context`` (``EventLogAccessProtocol`` /
-``ResultCacheProtocol``) — nothing reaches past them.
+``ResultCacheProtocol``) - nothing reaches past them.
 
 Covered:
 - ``GET /bpmn`` returns a payload carrying non-empty BPMN XML.
 - A second ``GET /bpmn`` is served from cache without recomputing.
 - The former editing routes (upload / save / reset) no longer exist on the
-  module class — the view is read-only.
+  module class - the view is read-only.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from modules.discovery.module import DiscoveryModule
 
 
 class _FakeEventLog:
-    """Stands in for ``EventLogAccessProtocol`` — async-CM yielding a DataFrame."""
+    """Stands in for ``EventLogAccessProtocol`` - async-CM yielding a DataFrame."""
 
     def __init__(self, df: pd.DataFrame) -> None:
         self._df = df

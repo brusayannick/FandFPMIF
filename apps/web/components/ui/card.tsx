@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn"
 // Card sections are spaced by the outer Card's `gap-5` and the outer
 // `py-6` / horizontal `px-6` on each section. This means no section needs
 // its own vertical padding, so consumers should NOT add `pb-3`, `p-6`,
-// etc. — those layered on top of the defaults and produced the uneven
+// etc. – those layered on top of the defaults and produced the uneven
 // padding callers had to patch around. If you want a compact card,
 // override the outer Card with `className="py-0 gap-0"` and put your own
 // padding on the inner section (see components/processes/module-card.tsx).

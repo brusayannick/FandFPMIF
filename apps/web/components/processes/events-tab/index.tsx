@@ -247,7 +247,7 @@ export function EventsTab({ logId, log }: { logId: string; log: EventLogDetail }
               {formatNumber(start)}–{formatNumber(end)} of {formatNumber(data.total)}
             </span>
           ) : (
-            <span>—</span>
+            <span>–</span>
           )}
         </div>
         <div className="flex items-center gap-2">

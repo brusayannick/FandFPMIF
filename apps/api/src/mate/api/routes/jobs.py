@@ -1,13 +1,13 @@
-"""/api/v1/jobs/* — full surface (§7.9.5).
+"""/api/v1/jobs/* - full surface (§7.9.5).
 
-GET  /jobs                       — paginated/filtered list (drives the drawer)
-GET  /jobs/{id}                  — detail / poll
-POST /jobs/{id}/cancel           — cooperative cancel
-POST /jobs/{id}/retry            — re-enqueue a failed job; returns new id
-POST /jobs/queue/pause           — stop pulling new jobs
-POST /jobs/queue/resume          — resume
-GET  /events                     — topic-filtered SSE stream (`?topic=job.*`)
-GET  /jobs/{id}/stream           — high-frequency SSE progress for a single job
+GET  /jobs                       - paginated/filtered list (drives the drawer)
+GET  /jobs/{id}                  - detail / poll
+POST /jobs/{id}/cancel           - cooperative cancel
+POST /jobs/{id}/retry            - re-enqueue a failed job; returns new id
+POST /jobs/queue/pause           - stop pulling new jobs
+POST /jobs/queue/resume          - resume
+GET  /events                     - topic-filtered SSE stream (`?topic=job.*`)
+GET  /jobs/{id}/stream           - high-frequency SSE progress for a single job
 """
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ async def retry_job(job_id: str, session: SessionDep, user: CurrentUserDep) -> d
 
 @router.post("/queue/pause", status_code=status.HTTP_204_NO_CONTENT)
 async def pause_queue(user: CurrentUserDep) -> None:
-    """Pause only the caller's jobs — other users' queues keep flowing."""
+    """Pause only the caller's jobs - other users' queues keep flowing."""
     await get_job_runtime().pause_queue(user.id)
 
 
@@ -124,7 +124,7 @@ async def resume_queue(user: CurrentUserDep) -> None:
 
 # -- Streaming (SSE) ---------------------------------------------------------
 #
-# Server-Sent Events, not WebSocket — see ``events_sse.py`` for why the prod
+# Server-Sent Events, not WebSocket - see ``events_sse.py`` for why the prod
 # proxy chain forces this. Auth is the standard ``Authorization: Bearer``
 # header via ``CurrentUserDep``.
 
@@ -180,7 +180,7 @@ async def stream_job(job_id: str, session: SessionDep, user: CurrentUserDep) -> 
                     continue
                 yield _sse(env.to_json())
                 if env.topic in {"job.completed", "job.failed", "job.cancelled"}:
-                    # Terminal event — end the stream cleanly.
+                    # Terminal event - end the stream cleanly.
                     return
 
     return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)

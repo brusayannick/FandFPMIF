@@ -76,7 +76,7 @@ const DEFAULT_STARTERS: Starter[] = [
   },
 ];
 
-// Process-level starters — shown on /processes/{logId} when no module is active.
+// Process-level starters – shown on /processes/{logId} when no module is active.
 // These replace the inline "Generate AI overview" and "Check data quality" cards.
 const PROCESS_STARTERS: Starter[] = [
   {
@@ -96,7 +96,7 @@ const PROCESS_STARTERS: Starter[] = [
   },
 ];
 
-// Per-module starters — these replace each module's inline "Get AI insights" card.
+// Per-module starters – these replace each module's inline "Get AI insights" card.
 const MODULE_STARTERS: Record<string, Starter[]> = {
   complexity: [
     {
@@ -294,7 +294,7 @@ function deriveChatContext(pathname: string | null):
   if (m) {
     const log_id = decodeURIComponent(m[1]!);
     // Reserved sub-routes like /processes/import or /processes/new aren't real
-    // log ids — skip them so the chat doesn't try to load nonexistent state.
+    // log ids – skip them so the chat doesn't try to load nonexistent state.
     if (log_id !== "import" && log_id !== "new") {
       ctx.log_id = log_id;
       const module_id = m[2] ? decodeURIComponent(m[2]) : null;
@@ -307,8 +307,8 @@ function deriveChatContext(pathname: string | null):
 // Short, client-side line shown above a chip when we skip the chat LLM (no
 // tokens). References the real destination/action so it reads naturally.
 function confirmationText(targets: NavTarget[], actions: ActionTarget[]): string {
-  if (targets.length) return `Here you go — use the shortcut below to open ${targets[0]!.label}.`;
-  if (actions.length) return `Sure — use the button below to ${actions[0]!.label.toLowerCase()}.`;
+  if (targets.length) return `Here you go – use the shortcut below to open ${targets[0]!.label}.`;
+  if (actions.length) return `Sure – use the button below to ${actions[0]!.label.toLowerCase()}.`;
   return "Done.";
 }
 
@@ -352,7 +352,7 @@ export function MateAiSidebar() {
   const onNavigate = (target: NavTarget) => {
     track(EV.AI_NAV_CLICKED, { target_id: target.id, kind: target.kind });
     // Keep the sidebar open across navigation (the platform layout persists, so
-    // the conversation stays put) — the user can keep chatting after the jump.
+    // the conversation stays put) – the user can keep chatting after the jump.
     router.push(target.href);
   };
 
@@ -389,7 +389,7 @@ export function MateAiSidebar() {
       setTheme(String(action.value));
     } else if (action.target === "onboarding") {
       if (action.setting === "experience_level" && onboarding) {
-        // Preserve the completed flag — only re-tune the proficiency level.
+        // Preserve the completed flag – only re-tune the proficiency level.
         updateOnboarding.mutate({
           completed: onboarding.completed,
           experience_level: action.value as "beginner" | "intermediate" | "expert",
@@ -466,7 +466,7 @@ export function MateAiSidebar() {
 
     // 2) Command-style turns skip the chat LLM entirely and show a templated line
     //    + chip(s): an available navigation target, or ANY settings action (a
-    //    setting chip never needs an LLM answer — just like a nav chip).
+    //    setting chip never needs an LLM answer – just like a nav chip).
     const navChip = targets[0];
     const pureNavigate = route?.intent === "navigate" && navChip?.available === true;
     if (pureNavigate || actions.length > 0) {

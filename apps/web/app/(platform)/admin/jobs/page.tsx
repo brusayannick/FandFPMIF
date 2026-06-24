@@ -398,7 +398,7 @@ export default function AdminJobsPage() {
 
           {data && data.total > data.items.length ? (
             <p className="text-xs text-muted-foreground">
-              Showing {formatNumber(data.items.length)} of {formatNumber(data.total)} — narrow the
+              Showing {formatNumber(data.items.length)} of {formatNumber(data.total)} – narrow the
               filters to see the rest.
             </p>
           ) : null}
@@ -538,7 +538,7 @@ function JobsTable({
                 ) : null}
                 {!hideLog ? (
                   <td className="max-w-48 truncate px-3 py-2 text-muted-foreground" title={r.log_name ?? ""}>
-                    {r.log_name ?? "—"}
+                    {r.log_name ?? "–"}
                   </td>
                 ) : null}
                 <td className="px-3 py-2">

@@ -24,7 +24,7 @@ ColumnRole = Literal[
 
 
 class ColumnSpec(BaseModel):
-    """One column in the events table — describes how to render and edit it."""
+    """One column in the events table - describes how to render and edit it."""
 
     name: str
     label: str
@@ -36,7 +36,7 @@ class ColumnSpec(BaseModel):
 
 
 class EventsHeader(BaseModel):
-    """The few aggregate counters shown above the events table — refreshed
+    """The few aggregate counters shown above the events table - refreshed
     on every PATCH so the page header stays in sync with edits.
     """
 
@@ -59,14 +59,14 @@ class EventsPage(BaseModel):
 
 
 class CellPatch(BaseModel):
-    """Body for `PATCH /events/{row_index}` — one cell change."""
+    """Body for `PATCH /events/{row_index}` - one cell change."""
 
     field: str
     value: Any | None = None
 
 
 class CellPatchResult(BaseModel):
-    """Response for a successful PATCH — the new row, its (potentially
+    """Response for a successful PATCH - the new row, its (potentially
     re-sorted) row_index, and refreshed header counts.
     """
 
@@ -84,7 +84,7 @@ class ColumnValueEntry(BaseModel):
 
 
 class ColumnValuesPage(BaseModel):
-    """Distinct values for a column — backs the Events-tab filter checklist."""
+    """Distinct values for a column - backs the Events-tab filter checklist."""
 
     field: str
     values: list[ColumnValueEntry]
@@ -103,7 +103,7 @@ class FilterEntryModel(BaseModel):
 
 
 class ActiveFilterUpdate(BaseModel):
-    """Body for `PUT /active-filter` — the filter to commit. An empty list
+    """Body for `PUT /active-filter` - the filter to commit. An empty list
     clears the filter (full dataset)."""
 
     filter: list[FilterEntryModel] = Field(default_factory=list)
@@ -117,7 +117,7 @@ class ActiveFilterResult(BaseModel):
 
 
 class TimeBounds(BaseModel):
-    """Earliest/latest timestamp in a log — seeds the dashboard time-range
+    """Earliest/latest timestamp in a log - seeds the dashboard time-range
     slider. ``null`` bounds mean the log has no usable timestamp column or no
     rows. Timestamps are ISO-8601 strings (the raw column's value)."""
 
@@ -170,7 +170,7 @@ class AttributeBreakdown(BaseModel):
 
 
 class VariantDetail(BaseModel):
-    """Response for `GET /variants/{variant_id}` — drives the variant detail page."""
+    """Response for `GET /variants/{variant_id}` - drives the variant detail page."""
 
     rank: int
     variant_id: str

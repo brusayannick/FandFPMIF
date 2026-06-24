@@ -1,7 +1,7 @@
 """Canonical column-role resolution for event-log ingest.
 
 The platform contract is that every imported log exposes the three mandatory
-roles — ``case_id`` / ``activity`` / ``timestamp`` — plus optional
+roles - ``case_id`` / ``activity`` / ``timestamp`` - plus optional
 ``end_timestamp`` / ``resource`` / ``cost`` / ``role`` / ``lifecycle``. Source
 files name those columns however they like, so at import we map source columns
 onto the canonical roles.
@@ -17,7 +17,7 @@ in order:
    a high-repetition column for ``case_id``, a moderate-cardinality string for
    ``activity``).
 
-Anything resolved by (3) or (4) — or a required role that stays unresolved —
+Anything resolved by (3) or (4) - or a required role that stays unresolved -
 marks the result ``needs_review`` so the UI can prompt the user to confirm the
 mapping. This is the source of truth shared by every parser and the re-map flow.
 """
@@ -235,8 +235,8 @@ def dedupe_case_insensitive_columns(columns: list[str]) -> dict[str, str]:
     The events dataset is always queried through DuckDB, whose column
     identifiers are case-insensitive: a frame carrying two columns that differ
     only in case (e.g. a domain ``Activity`` attribute alongside the canonical
-    ``activity`` role) collapses on read — DuckDB silently renames the second to
-    ``activity_1`` — so modules reading ``activity`` get the wrong column or
+    ``activity`` role) collapses on read - DuckDB silently renames the second to
+    ``activity_1`` - so modules reading ``activity`` get the wrong column or
     none at all. We therefore guarantee at write time that no two stored columns
     collide.
 

@@ -9,7 +9,7 @@ import { PageContainer } from "@/components/page";
 // pulsing preview of where the data will land instead of a blank screen.
 // Used by route-level loading.tsx files and in-page <Suspense>/isLoading paths.
 
-/** A bordered card-table shell — mirrors the rounded-xl tables across the app. */
+/** A bordered card-table shell – mirrors the rounded-xl tables across the app. */
 export function TableSkeleton({
   rows = 6,
   className,
@@ -46,7 +46,7 @@ export function TableSkeleton({
   );
 }
 
-/** A responsive grid of card placeholders — modules, dashboards, etc. */
+/** A responsive grid of card placeholders – modules, dashboards, etc. */
 export function CardGridSkeleton({
   count = 6,
   className,

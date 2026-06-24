@@ -15,7 +15,7 @@ import { OcelDataTable } from "./ocel-data-table";
 const LIMIT = 100;
 const ALL = "__all__";
 
-/** The flattened event↔object relations table — which objects each event
+/** The flattened event↔object relations table – which objects each event
  * touched, with the (optional) qualifier. */
 export function OcelRelationshipsTab({ logId }: { logId: string }) {
   const [offset, setOffset] = useState(0);

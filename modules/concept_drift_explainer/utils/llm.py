@@ -1,4 +1,4 @@
-"""Module-AI helper — fully isolated from the platform's global AI config.
+"""Module-AI helper - fully isolated from the platform's global AI config.
 
 Unlike most modules, the Concept Drift Explainer does **not** read the
 platform's Settings → AI keys. It owns its own OpenAI credentials, persisted
@@ -11,12 +11,12 @@ under ``cfg["ai"]``::
         "embedding_dimensions": 1536,   # optional; null ⇒ model native
     }
 
-Only OpenAI is supported — the settings card offers a key + model picker with a
+Only OpenAI is supported - the settings card offers a key + model picker with a
 "Check" button (see ``module.py::ai_check``). The clients are built directly
 here with no platform-database dependency.
 
 Falls back to ``OPENAI_API_KEY`` / ``OPENAI_BASE_URL`` env vars when the module
-config has no ``ai.api_key`` — covers the pytest suite, which doesn't mount the
+config has no ``ai.api_key`` - covers the pytest suite, which doesn't mount the
 full platform.
 """
 

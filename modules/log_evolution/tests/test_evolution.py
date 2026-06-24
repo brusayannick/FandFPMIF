@@ -1,7 +1,7 @@
 """Unit tests for the log-evolution aggregations.
 
 Exercises the pure functions in :mod:`modules.log_evolution.evolution` against
-a synthetic log spanning several months — no ``ModuleContext`` needed.
+a synthetic log spanning several months - no ``ModuleContext`` needed.
 """
 
 from __future__ import annotations

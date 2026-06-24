@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from mate.api.routes.admin import router as admin_router
 from mate.api.routes.admin_insights import router as admin_insights_router
 from mate.api.routes.admin_jobs import router as admin_jobs_router
+from mate.api.routes.admin_policies import router as admin_policies_router
 from mate.api.routes.admin_storage import router as admin_storage_router
 from mate.api.routes.admin_teams import router as admin_teams_router
 from mate.api.routes.ai import router as ai_router
@@ -26,6 +27,7 @@ v1 = APIRouter(prefix="/api/v1")
 v1.include_router(admin_router)
 v1.include_router(admin_insights_router)
 v1.include_router(admin_jobs_router)
+v1.include_router(admin_policies_router)
 v1.include_router(admin_storage_router)
 v1.include_router(admin_teams_router)
 v1.include_router(event_logs_router)

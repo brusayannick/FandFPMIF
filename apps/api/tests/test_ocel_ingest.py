@@ -31,7 +31,7 @@ async def _wait_until_ready(client: AsyncClient, log_id: str, timeout: float = 1
         if last["status"] == "failed":
             raise AssertionError(f"Import failed: {last.get('error')}")
         await asyncio.sleep(0.05)
-    raise AssertionError(f"Import did not finish in {timeout}s — last state: {last}")
+    raise AssertionError(f"Import did not finish in {timeout}s - last state: {last}")
 
 
 @pytest.mark.asyncio
@@ -53,7 +53,7 @@ async def test_ocel_round_trip_and_isolation(client: AsyncClient) -> None:
     assert detail["objects_count"] == 3
     assert detail["object_types_count"] == 3
     assert detail["relations_count"] == 5
-    # Case-centric counts stay NULL — the case-centric path never ran.
+    # Case-centric counts stay NULL - the case-centric path never ran.
     assert detail["cases_count"] is None
     assert detail["variants_count"] is None
 
@@ -100,7 +100,7 @@ async def test_case_centric_stays_case_centric(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_ocel_json_plain_extension_autoroutes(client: AsyncClient) -> None:
     """An OCEL 2.0 log named plain `.json` is content-detected and routed to the
-    object-centric path — no `.jsonocel` extension required."""
+    object-centric path - no `.jsonocel` extension required."""
     fixture = FIXTURES / "sample_ocel.json"
     with fixture.open("rb") as f:
         resp = await client.post(

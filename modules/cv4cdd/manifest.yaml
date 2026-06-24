@@ -2,12 +2,15 @@ id: cv4cdd
 name: CV4CDD - Concept Drift Detection
 version: 1.0.0
 category: advanced
-description: Computer-vision approach for concept drift detection. Identifies sudden, gradual, incremental, and recurring drifts via a fine-tuned object-detection model on a similarity-matrix encoding of the event log.
+description: >-
+  Detects when and how your process changed. It encodes the log as a similarity
+  image and uses a trained object-detection model to find sudden, gradual,
+  incremental, and recurring drifts.
 keywords: ["concept drift", "drift detection", "drift", "sudden drift", "gradual drift", "recurring drift", "change point"]
 author: A. Kraus and H. van der Aa
 license: CC-BY-4.0
 default_enabled: true
-# Runs entirely locally — safe to use against confidential event logs.
+# Runs entirely locally – safe to use against confidential event logs.
 isConfidentialSafe: true
 
 requirements:
@@ -32,13 +35,13 @@ dependencies:
   python:
     # tensorflow ships no cp313 wheels, so this module genuinely cannot run on
     # Python >= 3.13. The platform now pins in_process venvs to its own
-    # interpreter, so this is no longer needed to stop uv drift — it's a real
+    # interpreter, so this is no longer needed to stop uv drift – it's a real
     # constraint the loader validates: on a platform Python outside this range
     # the module fails fast with a clear message (relax or go subprocess)
     # instead of a cryptic tensorflow wheel-build error.
     requires-python: ">=3.12,<3.13"
     packages:
-      # Keep this list minimal — every extra package risks dragging a numpy
+      # Keep this list minimal – every extra package risks dragging a numpy
       # build that doesn't match the platform's. scipy + matplotlib were
       # replaced by a small bit of inline numpy code + a hardcoded viridis
       # LUT in cv4cdd_core.py so they don't need to be installed.
@@ -63,6 +66,8 @@ frontend:
       icon: AlertTriangle
       default_w: 5
       default_h: 8
+      min_w: 4
+      min_h: 5
       config_schema:
         properties:
           min_confidence:
@@ -89,7 +94,7 @@ model_store:
   title: Detection model
   description: >-
     Upload a pretrained CV4CDD model as a .tar.zst archive. Models are shared
-    across the whole platform — once anyone uploads one, every account can
+    across the whole platform – once anyone uploads one, every account can
     select it here. Choose which model this account uses for detection.
   accept: .tar.zst
   config_key: model

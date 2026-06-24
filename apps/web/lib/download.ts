@@ -19,7 +19,7 @@ export async function downloadBlob(path: string, filename: string): Promise<void
       const body = (await res.json()) as { detail?: string };
       if (body?.detail) detail = body.detail;
     } catch {
-      // Non-JSON error body — keep the generic message.
+      // Non-JSON error body – keep the generic message.
     }
     toast.error(detail);
     return;

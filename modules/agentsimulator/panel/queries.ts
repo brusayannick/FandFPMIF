@@ -59,7 +59,7 @@ export const METRIC_ORDER: MetricKey[] = ["NGD", "AEDD", "CEDD", "REDD", "CTDD"]
 // splits the entire log and can only be started (unfiltered) from the panel. On
 // a filtered dashboard, `api()` would otherwise attach the board's ambient
 // `X-FF-Event-Filter`, routing reads into a per-filter cache *variant* the run
-// never wrote to — so the cards render empty. Pin every agentsimulator call to
+// never wrote to – so the cards render empty. Pin every agentsimulator call to
 // the canonical (no-filter) namespace by sending a no-op filter header: `api()`
 // leaves a caller-set header untouched (so this overrides the ambient one), and
 // the backend decodes an empty filter list to "no override". Keep run + reads on

@@ -12,7 +12,7 @@ export interface OcelOverviewPanelProps {
 }
 
 /** Native object-centric summary shown above the module grid on the Overview
- * tab for OCEL logs — object types & per-type counts, plus activities. */
+ * tab for OCEL logs – object types & per-type counts, plus activities. */
 export function OcelOverviewPanel({ logId }: OcelOverviewPanelProps) {
   const { data, isLoading, isError } = useOcelOverview(logId);
 

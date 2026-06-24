@@ -82,7 +82,7 @@ async def test_module_route_applies_event_filter_header(
     assert filtered.status_code == 200, filtered.text
     assert filtered.json() == {"events": 2}
 
-    # The override is ephemeral — a subsequent unheadered call sees the full log.
+    # The override is ephemeral - a subsequent unheadered call sees the full log.
     again = await client_with_sample_mod.get(f"/api/v1/modules/sample_mod/count?log_id={log_id}")
     assert again.json() == {"events": 9}
 
@@ -147,7 +147,7 @@ async def test_event_filter_header_bypasses_stale_result_cache(
     """A cached endpoint must not serve the unfiltered cache to a filtered
     request. The ephemeral filter gets its own cache namespace, so the filtered
     call recomputes (2 'ship' events) even though the full result (9) was cached
-    first — and the unfiltered cache is still returned afterwards."""
+    first - and the unfiltered cache is still returned afterwards."""
     log_id = await _seed_sample_log(client_with_sample_mod)
 
     # Warm the cache with the full log.
@@ -199,15 +199,15 @@ async def test_module_manifest_endpoint(client_with_sample_mod: AsyncClient) -> 
 async def test_module_config_get_put(client_with_sample_mod: AsyncClient) -> None:
     initial = await client_with_sample_mod.get("/api/v1/modules/sample_mod/config")
     assert initial.status_code == 200
-    assert initial.json() == {"config": {}, "enabled": True}
+    assert initial.json() == {"config": {}, "enabled": True, "controlled_by_admin": False}
 
     payload = {"config": {"threshold": 0.5}, "enabled": True}
     put = await client_with_sample_mod.put("/api/v1/modules/sample_mod/config", json=payload)
     assert put.status_code == 200
-    assert put.json() == payload
+    assert put.json() == {**payload, "controlled_by_admin": False}
 
     again = await client_with_sample_mod.get("/api/v1/modules/sample_mod/config")
-    assert again.json() == payload
+    assert again.json() == {**payload, "controlled_by_admin": False}
 
 
 @pytest.mark.asyncio
@@ -236,7 +236,7 @@ async def test_module_assets_served_and_traversal_rejected(
     missing = await client_with_sample_mod.get("/api/v1/modules/sample_mod/assets/nope.js")
     assert missing.status_code == 404
 
-    # Traversal — try to escape .dist/ via ../. resolve() collapses it, then
+    # Traversal - try to escape .dist/ via ../. resolve() collapses it, then
     # the relative_to() check fails.
     escape = await client_with_sample_mod.get("/api/v1/modules/sample_mod/assets/..%2Fsecret.txt")
     assert escape.status_code in (400, 404)
@@ -308,7 +308,7 @@ async def test_module_install_upload_rejects_bad_suffix(
 async def test_module_install_registry_npm_rejected(
     client_with_sample_mod: AsyncClient,
 ) -> None:
-    """npm source has no Python entry point to bind to — the job must surface
+    """npm source has no Python entry point to bind to - the job must surface
     a clear error rather than silently no-op."""
     resp = await client_with_sample_mod.post(
         "/api/v1/modules/install/registry",
@@ -330,7 +330,7 @@ async def test_module_install_registry_npm_rejected(
 @pytest.mark.asyncio
 async def test_entry_point_discovery(client_with_sample_mod: AsyncClient) -> None:
     """Register an in-process entry point pointing at a fake package; verify
-    the discovery layer picks it up. We don't `pip install` anything here —
+    the discovery layer picks it up. We don't `pip install` anything here -
     we use `importlib.metadata`'s test hooks via a stub Distribution.
     """
     import importlib.metadata
@@ -445,7 +445,7 @@ async def test_subprocess_wire_protocol_bidirectional() -> None:
     result = await conn_a.send_request("add", {"x": 2, "y": 40})
     assert result == 42
 
-    # Worker → host (B calls A) — exercises the reverse direction so we know
+    # Worker → host (B calls A) - exercises the reverse direction so we know
     # the duplex framing doesn't deadlock.
     greeting = await conn_b.send_request("greet", {"name": "world"})
     assert greeting == "hello world"
@@ -510,7 +510,7 @@ async def test_availability_evaluated_against_log_schema(
 @pytest.mark.asyncio
 async def test_job_progress_adapter_fraction_vs_counter() -> None:
     """`_JobProgressAdapter` maps a 0-1 *float* fraction onto 0-100 (determinate
-    bar + ETA), but leaves explicit counts and integer running counters alone —
+    bar + ETA), but leaves explicit counts and integer running counters alone -
     so `update(current=1)` stays "1 processed", never "100%"."""
     from mate.api.modules.loader import _JobProgressAdapter
 
@@ -527,6 +527,11 @@ async def test_job_progress_adapter_fraction_vs_counter() -> None:
             force: bool = False,
         ) -> None:
             calls.append((current, total, stage, message))
+
+        def raise_if_cancelled(self) -> None:
+            # Mirror the real JobHandle surface - the adapter polls it for a
+            # cooperative cancel before reporting. Never cancelled in this test.
+            return None
 
     adapter = _JobProgressAdapter(_FakeHandle())  # type: ignore[arg-type]
 
@@ -553,7 +558,7 @@ def test_discover_skips_duplicate_id_across_roots(tmp_path: Path) -> None:
     """A leftover upload colliding with a bundled default must not abort the
     whole load. Regression: a stray ``uploaded_modules/discovery`` next to the
     default ``modules/discovery`` made ``discover()`` raise, which the boot path
-    swallowed — leaving the platform with zero modules and no log. discover()
+    swallowed - leaving the platform with zero modules and no log. discover()
     now keeps the first-seen (defaults) copy and skips the duplicate.
     """
     from mate.api.modules.discovery import discover
@@ -572,7 +577,7 @@ def test_discover_skips_duplicate_id_across_roots(tmp_path: Path) -> None:
     _write_module(uploads_root, "discovery")
 
     # Defaults root is scanned first, so its copy wins and the upload is skipped
-    # — without raising.
+    # - without raising.
     found = discover(defaults_root, uploads_root)
     discovery_mods = [d for d in found if d.id == "discovery"]
     assert len(discovery_mods) == 1

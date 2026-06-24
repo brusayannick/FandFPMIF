@@ -56,7 +56,7 @@ class PcompModule(Module):
         return df_baseline, df_other
 
     @route.post("/permutation-test")
-    @job(progress=True, title="Pcomp — Permutation Test")
+    @job(progress=True, title="Pcomp - Permutation Test")
     async def permutation_test(
         self, ctx: ModuleContext, body: PermutationTestRequest
     ) -> dict[str, Any]:
@@ -99,7 +99,7 @@ class PcompModule(Module):
         return result
 
     @route.post("/bootstrap-test")
-    @job(progress=True, title="Pcomp — Bootstrap Test")
+    @job(progress=True, title="Pcomp - Bootstrap Test")
     async def bootstrap_test(
         self, ctx: ModuleContext, body: BootstrapTestRequest
     ) -> dict[str, Any]:
@@ -152,6 +152,6 @@ class PcompModule(Module):
         cached = await ctx.cache.get(f"{prefix}__{other_log_id}")
         if cached is None:
             raise HTTPException(
-                status_code=404, detail="No result cached — run the test first."
+                status_code=404, detail="No result cached - run the test first."
             )
         return cached

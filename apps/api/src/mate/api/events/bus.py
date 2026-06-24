@@ -3,13 +3,13 @@
 Two consumers in the platform process:
 
   - The frontend, via `GET /api/v1/events` (SSE, topic-filtered) and per-job
-    `GET /api/v1/jobs/{id}/stream` — both implemented as bus subscribers.
-  - Modules, via `ctx.bus` (phase 5) — module authors publish/subscribe
+    `GET /api/v1/jobs/{id}/stream` - both implemented as bus subscribers.
+  - Modules, via `ctx.bus` (phase 5) - module authors publish/subscribe
     Pydantic-typed events (§5.7).
 
 Each subscriber is fed via its own bounded `asyncio.Queue` so a slow consumer
 can never block the publisher or other consumers. When the queue is full we
-drop the oldest event — better to lose a `job.progress` tick than stall the
+drop the oldest event - better to lose a `job.progress` tick than stall the
 whole pipeline. Cumulative drops are logged.
 """
 
@@ -69,7 +69,7 @@ class _Subscription:
 class EventSchemaError(ValueError):
     """Raised by `EventBus.publish` when a payload fails the registered
     Pydantic schema for its topic (§5.7a). Surfacing fast at the publish
-    site keeps producer bugs out of subscriber queues — subscribers only
+    site keeps producer bugs out of subscriber queues - subscribers only
     ever see validated payloads.
     """
 
@@ -85,7 +85,7 @@ class EventBus:
         self._schemas: dict[str, type[BaseModel]] = {}
 
     def register_schema(self, topic: str, model: type[BaseModel]) -> None:
-        """Register a Pydantic model for `topic`. Exact-match only — wildcard
+        """Register a Pydantic model for `topic`. Exact-match only - wildcard
         patterns are deliberately unsupported here (they'd make multi-match
         ambiguous). Re-registering the same topic with a different model
         raises.
@@ -99,7 +99,7 @@ class EventBus:
 
     # Platform routing keys that live alongside a module's domain payload.
     # They are preserved across schema validation so a module-authored schema
-    # that doesn't model them can't strip them — the WS fan-out and the
+    # that doesn't model them can't strip them - the WS fan-out and the
     # loader's @on_event dispatch both key on `user_id` for tenant isolation.
     _RESERVED_KEYS = ("user_id", "log_id")
 
@@ -169,7 +169,7 @@ _bus: EventBus | None = None
 
 def get_event_bus() -> EventBus:
     if _bus is None:
-        raise RuntimeError("Event bus is not initialised — startup did not run.")
+        raise RuntimeError("Event bus is not initialised - startup did not run.")
     return _bus
 
 

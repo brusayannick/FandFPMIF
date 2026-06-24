@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import RGL, { WidthProvider, type Layout } from "react-grid-layout";
 
 import { cn } from "@/lib/cn";
@@ -36,7 +37,7 @@ function firstCollision(list: DashboardItem[], it: DashboardItem): DashboardItem
  * (transitively) overlaps straight down, and leaves every other card exactly
  * where `snapshot` had it. It's recomputed from the drag-start snapshot on every
  * pointer move, so displaced cards spring back the instant the dragged card
- * leaves them — while intentional gaps survive (there's no vertical compaction,
+ * leaves them – while intentional gaps survive (there's no vertical compaction,
  * unlike react-grid-layout's built-in `compactType: "vertical"`).
  */
 function reflowFree(snapshot: DashboardItem[], id: string, x: number, y: number): DashboardItem[] {
@@ -76,31 +77,43 @@ type FreeDrag = {
   snapshot: DashboardItem[];
 };
 
+/** Synchronously begins a palette→canvas add at the pointer's position. The
+ * canvas hands one of these to the palette (via a ref) so the palette's
+ * `pointerdown` attaches the drag listeners in the same tick — identical to the
+ * canvas's own free-drag, not deferred through React state + an effect. */
+export type AddStarter = (card: CatalogCard, e: React.PointerEvent) => void;
+
+/** Layout/child id of the live placeholder shown while adding from the palette. */
+const ADD_GHOST_ID = "__add_ghost__";
+
 /**
- * The react-grid-layout canvas. In edit mode it accepts drops from the palette
- * (`pendingCard`), and drag/resize via the card header handle. Geometry changes
- * flow back through `onItemsChange`; the parent owns the canonical item list.
- * The `settings.granularity` chooses the snap resolution (cols), row height, and
- * gutter — never auto-compaction, so cards stay exactly where you place them.
+ * The react-grid-layout canvas. In edit mode it accepts adds from the palette
+ * (via `startAddRef`), and drag/resize via the card header handle. Geometry
+ * changes flow back through `onItemsChange`; the parent owns the item list. The
+ * `settings.granularity` chooses the snap resolution (cols), row height, and
+ * gutter – never auto-compaction, so cards stay exactly where you place them.
  *
  * Since no granularity compacts (`compactType: null`), drag is driven here
  * instead of by RGL: RGL won't let the layout prop move non-dragged cards
  * mid-drag, and its null-compaction never springs pushed cards back. So RGL's
  * own drag is disabled and a fully controlled layout is recomputed per pointer
- * move (see `reflowFree`); RGL still owns native resize and palette drops.
+ * move (see `reflowFree`). Palette adds are pointer-driven too (HTML5 drag-drop
+ * never reaches the canvas behind the prod proxy); RGL still owns native resize.
  */
 export function DashboardCanvas({
   items,
   logId,
   editing,
-  pendingCard,
+  startAddRef,
   settings,
   onItemsChange,
 }: {
   items: DashboardItem[];
   logId: string | null;
   editing: boolean;
-  pendingCard: CatalogCard | null;
+  /** The canvas publishes its add-drag starter here so the palette can call it
+   * synchronously from `pointerdown` (see `AddStarter`). */
+  startAddRef: { current: AddStarter | null };
   settings: CanvasSettings;
   onItemsChange: (items: DashboardItem[]) => void;
 }) {
@@ -132,27 +145,86 @@ export function DashboardCanvas({
     for (const c of catalog ?? []) map.set(`${c.module_id}:${c.widget_id}`, c.config_schema);
     return (moduleId: string, widgetId: string) => map.get(`${moduleId}:${widgetId}`);
   }, [catalog]);
+  // Each widget declares its own minimum size in its manifest; look it up by
+  // `(module_id, widget_id)` and feed it to RGL as the item's `minW`/`minH` so a
+  // card can't be resized below what it can render. RGL treats a missing minW/minH
+  // as `1` (GridItem default), so every field MUST resolve to a number — coerce
+  // per-field to the historical floor when the catalog hasn't loaded, predates the
+  // field, or no longer lists the card. (An undefined here = unbounded resize.)
+  const minSizeFor = useMemo(() => {
+    const FALLBACK = { minW: 2, minH: 3 };
+    const num = (v: unknown, fallback: number) =>
+      typeof v === "number" && Number.isFinite(v) && v > 0 ? v : fallback;
+    const map = new Map<string, { minW: number; minH: number }>();
+    for (const c of catalog ?? [])
+      map.set(`${c.module_id}:${c.widget_id}`, {
+        minW: num(c.min_w, FALLBACK.minW),
+        minH: num(c.min_h, FALLBACK.minH),
+      });
+    return (moduleId: string, widgetId: string) =>
+      map.get(`${moduleId}:${widgetId}`) ?? FALLBACK;
+  }, [catalog]);
 
   // Live free-mode drag state. `liveItems` overrides the rendered layout while a
   // drag is in flight; `draggingId` marks the card whose transition is killed so
   // it tracks the cursor instead of easing behind it.
   const [liveItems, setLiveItems] = useState<DashboardItem[] | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // Live palette→canvas add state. `addCard` is the card being added (drives the
+  // ghost + chip); `addPointer` positions the chip; `addCell` is the snapped grid
+  // cell under the cursor (null when off-grid).
+  const [addCard, setAddCard] = useState<CatalogCard | null>(null);
+  const [addPointer, setAddPointer] = useState<{ x: number; y: number } | null>(null);
+  const [addCell, setAddCell] = useState<{ x: number; y: number } | null>(null);
   const dragRef = useRef<FreeDrag | null>(null);
   const liveRef = useRef<DashboardItem[] | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  // Detach in-flight drag listeners if we unmount mid-drag.
+  // Detach in-flight drag/add listeners if we unmount mid-gesture.
   const teardownRef = useRef<() => void>(() => {});
-  useEffect(() => () => teardownRef.current(), []);
+  const addTeardownRef = useRef<() => void>(() => {});
+  useEffect(
+    () => () => {
+      teardownRef.current();
+      addTeardownRef.current();
+    },
+    [],
+  );
+
+  // The live placeholder while adding from the palette: a ghost item at the
+  // hovered cell that real cards reflow around (same machinery as a free drag),
+  // so the preview matches exactly what `commitAdd` will persist.
+  const ghostItem = useMemo<DashboardItem | null>(() => {
+    if (!addCard || !addCell) return null;
+    return {
+      i: ADD_GHOST_ID,
+      module_id: addCard.module_id,
+      widget_id: addCard.widget_id,
+      title: addCard.title,
+      x: addCell.x,
+      y: addCell.y,
+      w: addCard.default_w,
+      h: addCard.default_h,
+      config: {},
+    };
+  }, [addCard, addCell]);
 
   // Cards render from the committed `items` (stable content) and are positioned
-  // by the `layout` prop, which carries live positions during a free drag. That
-  // split keeps widget bodies from re-rendering on every pointer move.
-  const displayItems = liveItems ?? items;
+  // by the `layout` prop, which carries live positions during a free drag or a
+  // palette add. That split keeps widget bodies from re-rendering on every move.
+  const displayItems = useMemo<DashboardItem[]>(
+    () =>
+      ghostItem
+        ? reflowFree([...items, ghostItem], ADD_GHOST_ID, ghostItem.x, ghostItem.y)
+        : (liveItems ?? items),
+    [ghostItem, liveItems, items],
+  );
   const layout = useMemo<Layout[]>(
     () =>
-      displayItems.map((it) => ({ i: it.i, x: it.x, y: it.y, w: it.w, h: it.h, minW: 2, minH: 3 })),
-    [displayItems],
+      displayItems.map((it) => {
+        const { minW, minH } = minSizeFor(it.module_id, it.widget_id);
+        return { i: it.i, x: it.x, y: it.y, w: it.w, h: it.h, minW, minH };
+      }),
+    [displayItems, minSizeFor],
   );
 
   // Stable refs/handlers so memoized cards don't re-render while dragging.
@@ -183,8 +255,9 @@ export function DashboardCanvas({
 
   const handleLayoutChange = (next: Layout[]) => {
     // RGL fires this on mount, on resize, and on its own (non-free) drags. While
-    // a free drag is in flight the layout prop is ours, so ignore the echo.
-    if (!editing || dragRef.current) return;
+    // a free drag or palette add is in flight the layout prop is ours (it carries
+    // the ghost/reflow), so ignore the echo or we'd persist the preview.
+    if (!editing || dragRef.current || addCard) return;
     const byId = new Map(next.map((l) => [l.i, l]));
     const merged = items.map((it) => {
       const l = byId.get(it.i);
@@ -281,24 +354,105 @@ export function DashboardCanvas({
     window.addEventListener("pointercancel", cancel);
   };
 
-  const handleDrop = (_layout: Layout[], dropped: Layout) => {
-    if (!pendingCard) return;
+  // Append `card` and reflow existing cards around it (same as the live ghost
+  // preview), then hand the new list to the parent. Refs so it's stable for the
+  // gesture effect below.
+  const commitAdd = useCallback((card: CatalogCard, x: number, y: number) => {
     const newItem: DashboardItem = {
       i:
         typeof crypto !== "undefined" && crypto.randomUUID
           ? crypto.randomUUID()
           : `card-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      module_id: pendingCard.module_id,
-      widget_id: pendingCard.widget_id,
-      title: pendingCard.title,
-      x: dropped.x,
-      y: dropped.y,
-      w: pendingCard.default_w,
-      h: pendingCard.default_h,
-      config: configDefaults(pendingCard.config_schema),
+      module_id: card.module_id,
+      widget_id: card.widget_id,
+      title: card.title,
+      x,
+      y,
+      w: card.default_w,
+      h: card.default_h,
+      config: configDefaults(card.config_schema),
     };
-    onItemsChange([...items, newItem]);
-  };
+    onItemsChangeRef.current(reflowFree([...itemsRef.current, newItem], newItem.i, x, y));
+  }, []);
+
+  // Snap a viewport point to a grid cell, mirroring RGL's calcXY (the cursor is
+  // the new card's top-left). Returns null when the point is outside the grid,
+  // which the add-gesture treats as "not a drop target".
+  const cellWithinGrid = useCallback(
+    (clientX: number, clientY: number, w: number) => {
+      const gridEl = wrapRef.current?.querySelector(".react-grid-layout") as HTMLElement | null;
+      if (!gridEl) return null;
+      const rect = gridEl.getBoundingClientRect();
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom)
+        return null;
+      const width = gridEl.clientWidth || rect.width;
+      if (!width) return null;
+      const [mx, my] = grid.margin;
+      const colW = (width - mx * (cols - 1) - mx * 2) / cols;
+      const x = Math.max(0, Math.min(cols - w, Math.round((clientX - rect.left - mx) / (colW + mx))));
+      const y = Math.max(0, Math.round((clientY - rect.top - my) / (grid.rowHeight + my)));
+      return { x, y };
+    },
+    [grid, cols],
+  );
+
+  // Palette → canvas add. The palette calls `startAdd` synchronously from its
+  // `pointerdown` (via `startAddRef`), so the drag listeners attach in the same
+  // tick as the press — identical to the canvas's own free-drag (`onPointerDown`
+  // below), not deferred through React state + an effect. We track the cursor to
+  // preview a ghost, then on release drop at the hovered cell — or, if it was a
+  // click with no real movement, append at the bottom so a plain click still adds.
+  const startAdd = useCallback(
+    (card: CatalogCard, e: React.PointerEvent) => {
+      if (!editing) return;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      setAddCard(card);
+      setAddPointer({ x: startX, y: startY });
+      setAddCell(cellWithinGrid(startX, startY, card.default_w));
+      let moved = false;
+      const move = (ev: PointerEvent) => {
+        if (Math.abs(ev.clientX - startX) > 4 || Math.abs(ev.clientY - startY) > 4) moved = true;
+        setAddPointer({ x: ev.clientX, y: ev.clientY });
+        setAddCell(cellWithinGrid(ev.clientX, ev.clientY, card.default_w));
+      };
+      const finish = (ev: PointerEvent) => {
+        cleanup();
+        const cell = cellWithinGrid(ev.clientX, ev.clientY, card.default_w);
+        if (cell) commitAdd(card, cell.x, cell.y);
+        else if (!moved)
+          commitAdd(card, 0, itemsRef.current.reduce((m, it) => Math.max(m, it.y + it.h), 0));
+      };
+      const cancel = () => cleanup();
+      const cleanup = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", finish);
+        window.removeEventListener("pointercancel", cancel);
+        addTeardownRef.current = () => {};
+        setAddCard(null);
+        setAddPointer(null);
+        setAddCell(null);
+      };
+      addTeardownRef.current = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", finish);
+        window.removeEventListener("pointercancel", cancel);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", finish);
+      window.addEventListener("pointercancel", cancel);
+    },
+    [editing, cellWithinGrid, commitAdd],
+  );
+
+  // Publish the starter so the palette (a sibling) can begin the gesture from its
+  // own `pointerdown`, synchronously.
+  useEffect(() => {
+    startAddRef.current = startAdd;
+    return () => {
+      startAddRef.current = null;
+    };
+  }, [startAdd, startAddRef]);
 
   return (
     <div ref={wrapRef} className="min-h-full" onPointerDown={freeReflow ? onPointerDown : undefined}>
@@ -310,14 +464,7 @@ export function DashboardCanvas({
         margin={grid.margin}
         isDraggable={editing && grid.compactType !== null}
         isResizable={editing}
-        isDroppable={editing}
         draggableHandle=".dashboard-drag-handle"
-        droppingItem={{
-          i: "__dropping__",
-          w: pendingCard?.default_w ?? 6,
-          h: pendingCard?.default_h ?? 8,
-        }}
-        onDrop={handleDrop}
         onLayoutChange={handleLayoutChange}
         compactType={grid.compactType}
       >
@@ -341,7 +488,23 @@ export function DashboardCanvas({
             </div>
           );
         })}
+        {ghostItem && (
+          <div key={ADD_GHOST_ID} data-grid-id={ADD_GHOST_ID} className="pointer-events-none">
+            <div className="h-full w-full rounded-lg border-2 border-dashed border-primary/60 bg-primary/10" />
+          </div>
+        )}
       </GridLayout>
+      {addCard &&
+        addPointer &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-50 max-w-[16rem] truncate rounded-md border border-border bg-card px-2 py-1 text-xs font-medium shadow-lg"
+            style={{ left: addPointer.x + 12, top: addPointer.y + 12 }}
+          >
+            {addCard.title}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

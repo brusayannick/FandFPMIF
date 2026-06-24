@@ -4,7 +4,7 @@ Revision ID: 0002_system_settings
 Revises: 0001_initial
 Create Date: 2026-06-19
 
-Adds the ``system_settings`` table — the singleton, admin-controlled analogue of
+Adds the ``system_settings`` table - the singleton, admin-controlled analogue of
 ``user_settings``. First consumer is job-runtime worker concurrency (Settings →
 General → Jobs), persisted so a live change survives a restart. Guarded on the
 live schema in the same idempotent style as the squashed baseline.

@@ -40,7 +40,7 @@ interface Usage {
 const GIB = 1024 ** 3;
 
 function formatBytes(n: number | null): string {
-  if (n == null) return "—";
+  if (n == null) return "–";
   if (n < 1024) return `${n} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let v = n / 1024;
@@ -386,7 +386,7 @@ export default function AdminStoragePage() {
                   <>
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <Stat label="Used" value={formatBytes(usage?.used_bytes ?? null)} />
-                      <Stat label="Objects" value={usage?.object_count ?? "—"} />
+                      <Stat label="Objects" value={usage?.object_count ?? "–"} />
                     </div>
                     {usage && usage.quota_bytes != null && usage.quota_bytes > 0 && (
                       <div className="space-y-1">

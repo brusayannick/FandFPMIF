@@ -3,14 +3,15 @@ name: Concept Drift Explainer
 version: 0.1.0
 category: advanced
 description: >-
-  LLM-based explanations for concept drifts. Combines CV4CDD detections with
-  retrieval over user-uploaded enterprise documents to produce ranked,
-  citation-backed causes.
+  Explains why your process changed. It takes the drift points found by CV4CDD,
+  searches your uploaded company documents for context, and returns ranked,
+  citation-backed causes. Sends data to an external LLM, so it is not safe for
+  confidential logs.
 keywords: ["explain drift", "drift explanation", "why drift", "drift reason", "root cause drift", "drift cause"]
 author: J. Schaffner (ported by FF team)
 license: MIT
 default_enabled: true
-# Sends event-log excerpts and uploaded documents to an external LLM — not
+# Sends event-log excerpts and uploaded documents to an external LLM – not
 # safe for confidential data.
 isConfidentialSafe: false
 
@@ -28,8 +29,7 @@ provides:
   - concept_drift_explainer.explanations
 
 consumes:
-  - cv4cdd.detect
-  - log.imported
+  - cv4cdd.completed
 
 dependencies:
   python:
@@ -64,6 +64,8 @@ frontend:
       icon: Waves
       default_w: 5
       default_h: 8
+      min_w: 4
+      min_h: 5
       config_schema:
         properties:
           min_confidence:

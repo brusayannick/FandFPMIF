@@ -23,5 +23,5 @@ async def test_preferences_roundtrip_and_allowlist(client: AsyncClient) -> None:
     assert put.status_code == 200
     assert (await client.get("/api/v1/preferences/ui")).json() == body
 
-    # Keys are independent — saving ui doesn't touch viz.
+    # Keys are independent - saving ui doesn't touch viz.
     assert (await client.get("/api/v1/preferences/viz")).json() == {}

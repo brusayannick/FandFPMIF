@@ -11,7 +11,7 @@ shape (set by the route in `routes/event_logs.py`) is::
     }
 
 On success `events.parquet` / `cases.parquet` / `meta.json` are written and the
-row in `process_logs` is moved to status='ready' — or 'processing' when an
+row in `process_logs` is moved to status='ready' - or 'processing' when an
 installed module subscribes to the import topic, in which case
 `mate.api.modules.processing` un-gates the log to 'ready' once those modules
 finish precomputing. On failure the status is flipped to 'failed' with `error`
@@ -30,7 +30,7 @@ import structlog
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mate.api.db.models import EventLog
+from mate.api.db.models import EventLog, Job
 from mate.api.ingest.aggregation import compute_cases
 from mate.api.ingest.csv_parser import parse_csv
 from mate.api.ingest.json_parser import parse_json
@@ -84,7 +84,7 @@ async def _import_handler(handle: JobHandle) -> None:
     await handle.progress(0, total=None, stage="parsing", message="Reading source file", force=True)
 
     # Object-centric (OCEL) logs take a fully separate path: no case_id, no root
-    # events.parquet/cases.parquet, no variants — they persist under ocel/ only.
+    # events.parquet/cases.parquet, no variants - they persist under ocel/ only.
     if source_format == "ocel":
         await _import_ocel(handle, log_id, original_path, paths, flavor=ocel_flavor)
         return
@@ -115,6 +115,12 @@ async def _import_handler(handle: JobHandle) -> None:
     else:
         raise ValueError(f"Source format {source_format!r} is not supported in v1.")
 
+    # The parser ran inside a single uninterruptible `to_thread` - cancel can't
+    # land mid-parse, so an in-flight parse finishes first. Poll here, the first
+    # gap with no progress call, so a cancel issued during parsing is honoured
+    # before we spend more work normalising/writing.
+    handle.raise_if_cancelled()
+
     total_events = len(rows)
     await handle.progress(
         total_events,
@@ -135,7 +141,7 @@ async def _import_handler(handle: JobHandle) -> None:
     # user can correct the roles in settings (which re-imports). An explicit
     # `column_roles` override (from that re-map) wins outright.
     column_roles_override: dict[str, str] | None = payload.get("column_roles")
-    # Candidate columns the user can map from — captured *before* canonicalising
+    # Candidate columns the user can map from - captured *before* canonicalising
     # so they're stable across re-imports (the parser is deterministic) and the
     # settings "Column roles" picker offers exactly these names.
     source_columns = list(df.columns)
@@ -180,13 +186,17 @@ async def _import_handler(handle: JobHandle) -> None:
     )
 
     # Parquet-safe dtype coercion for messy object columns (see helper docs).
-    # case_id and activity are excluded — they're contractually strings (pm4py
+    # case_id and activity are excluded - they're contractually strings (pm4py
     # / Discovery treat case_id as the trace key) and an all-digit case_id
     # would otherwise get silently re-typed to int here.
     fixed_columns = coerce_object_columns(df, string_only={"case_id", "activity"})
 
+    # The "writing" progress tick above already auto-raised on a pending cancel
+    # (JobHandle.progress polls the token first); this guards the cases write,
+    # which has no progress call before it.
     df.to_parquet(paths.events, index=False, engine="pyarrow", compression="zstd")
 
+    handle.raise_if_cancelled()
     cases_df = compute_cases(df)
     cases_df.to_parquet(paths.cases, index=False, engine="pyarrow", compression="zstd")
 
@@ -219,7 +229,7 @@ async def _import_handler(handle: JobHandle) -> None:
     # subscribes to `log.imported`, else `processing` until those modules finish
     # precomputing (the coordinator un-gates the log off their terminal jobs).
     async with handle.sessionmaker() as session:
-        expected = await _expected_modules("log.imported", handle.user_id, session)
+        expected, plan = await _precompute_plan("log.imported", handle.user_id, session)
         await session.execute(
             update(EventLog)
             .where(EventLog.id == log_id)
@@ -244,6 +254,8 @@ async def _import_handler(handle: JobHandle) -> None:
                 error=None,
             )
         )
+        if expected:
+            await _stash_precompute_plan(session, handle.id, plan)
         await session.commit()
 
     # Persist the freshly-written log dir to the S3 primary store (no-op in
@@ -263,6 +275,15 @@ async def _import_handler(handle: JobHandle) -> None:
         events=meta["events_count"],
         cases=meta["cases_count"],
     )
+
+    # Hand the precompute DAG plan to the jobs UI before the children spawn, so a
+    # live import's group card can render waiting/skipped steps immediately (the
+    # frontend store otherwise only sees the plan on a full `GET /jobs` rehydrate).
+    if expected:
+        await handle.bus.publish(
+            "job.plan",
+            {"id": handle.id, "user_id": handle.user_id, "precompute_plan": plan},
+        )
 
     await handle.bus.publish(
         "log.imported",
@@ -293,13 +314,17 @@ async def _import_ocel(
     """Import an object-centric (OCEL) log.
 
     Parses with pm4py into the four canonical tables and persists them under
-    ``ocel/`` — deliberately NOT writing the case-centric root
+    ``ocel/`` - deliberately NOT writing the case-centric root
     events.parquet/cases.parquet (their absence is the isolation guard).
 
     ``flavor`` (``json`` / ``xml`` / ``sqlite``) selects the pm4py reader; it's
     content-detected at upload and recovered from meta.json on re-import.
     """
     result = await asyncio.to_thread(parse_ocel, original_path, flavor=flavor)
+
+    # First gap after the single uninterruptible parse `to_thread` - honour a
+    # cancel issued during parsing before normalising/writing the OCEL tables.
+    handle.raise_if_cancelled()
 
     await handle.progress(
         result.stats["events_count"],
@@ -345,6 +370,10 @@ async def _import_ocel(
     )
 
     paths.ensure()
+    # Last gap before the OCEL parquet writes - the "writing" progress tick above
+    # already polls the token, but guard explicitly so a cancel during the
+    # coerce/normalize step stops before any file lands.
+    handle.raise_if_cancelled()
     events.to_parquet(paths.ocel_events, index=False, engine="pyarrow", compression="zstd")
     objects.to_parquet(paths.ocel_objects, index=False, engine="pyarrow", compression="zstd")
     relations.to_parquet(paths.ocel_relations, index=False, engine="pyarrow", compression="zstd")
@@ -372,7 +401,7 @@ async def _import_ocel(
     paths.write_meta(meta)
 
     async with handle.sessionmaker() as session:
-        expected = await _expected_modules("ocel.imported", handle.user_id, session)
+        expected, plan = await _precompute_plan("ocel.imported", handle.user_id, session)
         await session.execute(
             update(EventLog)
             .where(EventLog.id == log_id)
@@ -396,6 +425,8 @@ async def _import_ocel(
                 error=None,
             )
         )
+        if expected:
+            await _stash_precompute_plan(session, handle.id, plan)
         await session.commit()
 
     # Persist the freshly-written OCEL log dir to the S3 primary store (no-op in
@@ -416,6 +447,12 @@ async def _import_ocel(
         objects=result.stats["objects_count"],
         log_model="object_centric",
     )
+
+    if expected:
+        await handle.bus.publish(
+            "job.plan",
+            {"id": handle.id, "user_id": handle.user_id, "precompute_plan": plan},
+        )
 
     # Distinct topic from `log.imported` so case-centric subscribers never wake
     # for an OCEL import.
@@ -448,20 +485,36 @@ def _to_iso(value: Any) -> str | None:
     return str(value)
 
 
-async def _expected_modules(topic: str, user_id: str, session: AsyncSession) -> set[str]:
-    """Modules the just-imported log must wait on before it can go ``ready``.
+async def _precompute_plan(
+    topic: str, user_id: str, session: AsyncSession
+) -> tuple[set[str], list[dict[str, Any]]]:
+    """Modules the just-imported log must wait on, plus the DAG plan for the UI.
 
     Delegates to the process-global :class:`ModuleProcessingCoordinator`. When it
     isn't wired (e.g. a bare-runtime test that never started the module loader)
-    we return an empty set so the import falls back to the legacy "ready
-    immediately" behaviour instead of failing.
+    we return ``(set(), [])`` so the import falls back to the legacy "ready
+    immediately" behaviour instead of failing. The returned set is the transitive
+    precompute closure (direct subscribers plus everything chained off their
+    ``<id>.completed`` events).
     """
     from mate.api.modules.processing import get_coordinator
 
     coordinator = get_coordinator()
     if coordinator is None:
-        return set()
-    return await coordinator.expected_modules(topic, user_id, session)
+        return set(), []
+    return await coordinator.precompute_plan(topic, user_id, session)
+
+
+async def _stash_precompute_plan(
+    session: AsyncSession, import_job_id: str, plan: list[dict[str, Any]]
+) -> None:
+    """Persist the precompute DAG plan onto the import job's payload so the jobs
+    UI can render waiting/skipped steps for not-yet-submitted chained modules."""
+    job_row = await session.get(Job, import_job_id)
+    if job_row is not None:
+        payload = dict(job_row.payload_json or {})
+        payload["precompute_plan"] = plan
+        job_row.payload_json = payload
 
 
 def register_import_handler(runtime: JobRuntime) -> None:

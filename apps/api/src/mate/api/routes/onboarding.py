@@ -1,9 +1,9 @@
-"""/api/v1/onboarding — per-user onboarding state.
+"""/api/v1/onboarding - per-user onboarding state.
 
 Completion lives in the per-user ``user_settings`` table (key ``onboarding``)
 rather than browser localStorage. That makes the welcome flow correct under
-multi-user: a brand-new Keycloak user always sees the overlay — even on a
-browser where another account already finished it — and a returning user never
+multi-user: a brand-new Keycloak user always sees the overlay - even on a
+browser where another account already finished it - and a returning user never
 re-sees it regardless of which browser they sign in from.
 """
 

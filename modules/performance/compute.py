@@ -1,4 +1,4 @@
-"""Performance computation helpers — DuckDB-first, pm4py for the rest."""
+"""Performance computation helpers - DuckDB-first, pm4py for the rest."""
 
 from __future__ import annotations
 

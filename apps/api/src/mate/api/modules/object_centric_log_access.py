@@ -1,4 +1,4 @@
-"""ObjectCentricLogAccess — lazy view of an imported OCEL log's parquet tables.
+"""ObjectCentricLogAccess - lazy view of an imported OCEL log's parquet tables.
 
 The object-centric counterpart to `EventLogAccess`. Reads the four tables the
 OCEL importer wrote under ``ocel/`` (events, objects, relations, o2o). Kept
@@ -47,7 +47,7 @@ class ObjectCentricLogAccess:
         await storage_sync.hydrate_log(self.user_id, self.log_id)
         if not self._paths.ocel_events.exists():
             raise FileNotFoundError(
-                f"OCEL log {self.log_id} has no ocel/events.parquet — import not finished?"
+                f"OCEL log {self.log_id} has no ocel/events.parquet - import not finished?"
             )
         return self
 
@@ -79,13 +79,13 @@ class ObjectCentricLogAccess:
         return await asyncio.to_thread(pd.read_parquet, path)
 
     async def ocel(self) -> Any:
-        """Reconstruct a pm4py OCEL object from the persisted parquet tables —
+        """Reconstruct a pm4py OCEL object from the persisted parquet tables -
         used by object-centric discovery (e.g. ``pm4py.discover_ocdfg``)."""
         try:
             import pm4py  # noqa: F401
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "pm4py is not available — declare it in your manifest's "
+                "pm4py is not available - declare it in your manifest's "
                 "dependencies.python.inherit or .packages."
             ) from exc
 

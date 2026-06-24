@@ -2,12 +2,14 @@ id: ocel_discovery
 name: Object-Centric Discovery
 version: 1.0.0
 category: foundation
-description: Object-centric process discovery - object types, activities, and the object-centric directly-follows graph (OC-DFG) for OCEL logs.
+description: >-
+  Discovers a process from object-centric (OCEL) logs, showing the object types,
+  the activities, and the object-centric directly-follows graph (OC-DFG).
 keywords: ["object-centric", "object centric", "ocel", "oc-dfg", "object types", "ocpm"]
 author: Mate
 license: MIT
 default_enabled: true
-# Runs entirely locally — safe to use against confidential event logs.
+# Runs entirely locally – safe to use against confidential event logs.
 isConfidentialSafe: true
 
 requirements:
@@ -49,6 +51,8 @@ frontend:
       icon: Layers
       default_w: 5
       default_h: 5
+      min_w: 4
+      min_h: 4
       log_models: [object_centric]
     - id: ocdfg
       entry: ./widgets/Ocdfg.tsx
@@ -57,6 +61,8 @@ frontend:
       icon: Network
       default_w: 6
       default_h: 10
+      min_w: 5
+      min_h: 8
       log_models: [object_centric]
     - id: activity-object-types
       entry: ./widgets/ActivityObjectTypes.tsx
@@ -65,6 +71,8 @@ frontend:
       icon: Table2
       default_w: 6
       default_h: 6
+      min_w: 5
+      min_h: 4
       log_models: [object_centric]
     - id: object-lifecycle
       entry: ./widgets/ObjectLifecycle.tsx
@@ -73,6 +81,8 @@ frontend:
       icon: Timer
       default_w: 5
       default_h: 6
+      min_w: 4
+      min_h: 4
       log_models: [object_centric]
 
 permissions:

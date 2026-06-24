@@ -36,7 +36,7 @@ export function ServerStateSync() {
     key: "viz",
     enabled,
     userKey,
-    // Viz settings churn fast (slider/node drags) — a longer debounce keeps
+    // Viz settings churn fast (slider/node drags) – a longer debounce keeps
     // the save rate sane; the tab-hide flush catches the final edit.
     debounceMs: 1000,
     read: () => pickData(useVizSettings.getState()),

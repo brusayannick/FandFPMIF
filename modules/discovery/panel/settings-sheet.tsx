@@ -292,7 +292,7 @@ function MergedSettingsForm({ onClose }: { onClose: () => void }) {
 }
 
 // --------------------------------------------------------------------------
-// Direction toggle — rotating arrow that cycles TB → LR → BT → RL.
+// Direction toggle – rotating arrow that cycles TB → LR → BT → RL.
 // Keeps a monotonically-increasing tick so each click rotates +90°
 // rather than snapping back at the wrap-around.
 // --------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Alembic environment — uses sync URL derived from the app's async URL.
+"""Alembic environment - uses sync URL derived from the app's async URL.
 
 Alembic itself runs synchronously; we strip the `+aiosqlite` driver token
 so the same `DATABASE_URL` env var works for both runtime and migrations.

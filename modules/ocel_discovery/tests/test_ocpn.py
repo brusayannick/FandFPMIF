@@ -1,4 +1,4 @@
-"""OC-PN serializer test — builds a small OCEL, discovers the object-centric
+"""OC-PN serializer test - builds a small OCEL, discovers the object-centric
 Petri net with pm4py, and asserts the flattened per-object-type shape the panel
 consumes."""
 

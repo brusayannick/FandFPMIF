@@ -1,4 +1,4 @@
-"""Context retrieval agent — broad hybrid search in Pinecone.
+"""Context retrieval agent - broad hybrid search in Pinecone.
 
 Adapted from the original `backend/agents/context_retrieval_agent.py`. The
 Pinecone index and OpenAI embedder are now passed in via the graph builder
@@ -56,7 +56,7 @@ def run_context_retrieval_agent(
     try:
         query_vector = embedder.embed_query(query_text)
     except Exception as e:
-        # Surface the full provider error (incl. response body) — without this
+        # Surface the full provider error (incl. response body) - without this
         # a 400 from the embeddings endpoint silently empties out the rest of
         # the pipeline and the UI shows nothing.
         body = getattr(getattr(e, "response", None), "text", None)

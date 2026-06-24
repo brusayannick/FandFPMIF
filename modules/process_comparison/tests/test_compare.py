@@ -1,7 +1,7 @@
 """Unit tests for the pure comparison primitives + serialisers.
 
 Builds small synthetic logs (identical, then one with an extra edge and a
-dropped variant) and asserts the diff classification, EMD, and variant diff —
+dropped variant) and asserts the diff classification, EMD, and variant diff -
 no ``ModuleContext`` needed.
 """
 

@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/empty-state";
 import { CardPalette } from "@/components/dashboards/card-palette";
-import { DashboardCanvas } from "@/components/dashboards/dashboard-canvas";
+import { DashboardCanvas, type AddStarter } from "@/components/dashboards/dashboard-canvas";
 import { ShareDialog } from "@/components/dashboards/share-dialog";
 import {
   DashboardFilterProvider,
@@ -50,7 +50,6 @@ import {
   useTimeBounds,
   useUpdateDashboard,
   type CanvasSettings,
-  type DashboardCard as CatalogCard,
   type DashboardItem,
 } from "@/lib/dashboard-queries";
 
@@ -66,9 +65,11 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const [items, setItems] = useState<DashboardItem[]>([]);
   const [logId, setLogId] = useState<string | null>(null);
   const [settings, setSettings] = useState<CanvasSettings>(DEFAULT_CANVAS_SETTINGS);
-  const [pendingCard, setPendingCard] = useState<CatalogCard | null>(null);
+  // The canvas publishes its add-drag starter here; the palette calls it
+  // synchronously from `pointerdown` so the gesture matches an in-canvas drag.
+  const startAddRef = useRef<AddStarter | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
-  // Shared boards open read-only for the recipient — no edit toolbar, no log
+  // Shared boards open read-only for the recipient – no edit toolbar, no log
   // picker. The backend also 404s owner-only mutations, so this is just UX.
   const isOwner = dashboard?.is_owner ?? true;
   // Snapshot of the last-saved state, to compute the dirty flag.
@@ -114,7 +115,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     setSettings(next);
   };
 
-  // Only logs of the board's own model are bindable — a case-centric board can
+  // Only logs of the board's own model are bindable – a case-centric board can
   // only render case-centric logs and vice-versa.
   const readyLogs = useMemo(
     () =>
@@ -300,7 +301,10 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           {logId && <DashboardFilterBarConnected logId={logId} />}
           <div className="flex min-h-0 flex-1">
             {editing && (
-              <CardPalette onDragCard={setPendingCard} logModel={dashboard.log_model} />
+              <CardPalette
+                onStartAdd={(card, e) => startAddRef.current?.(card, e)}
+                logModel={dashboard.log_model}
+              />
             )}
             <DashboardWidgetScope>
               <div className="dashboard-canvas-bg relative min-h-0 flex-1 overflow-auto p-3">
@@ -323,13 +327,13 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
                     }
                   />
                 ) : (
-                  // In edit mode the canvas is always mounted — even empty — so
+                  // In edit mode the canvas is always mounted – even empty – so
                   // it stays a react-grid-layout drop target for the palette.
                   <DashboardCanvas
                     items={items}
                     logId={logId}
                     editing={editing}
-                    pendingCard={pendingCard}
+                    startAddRef={startAddRef}
                     settings={settings}
                     onItemsChange={setItems}
                   />

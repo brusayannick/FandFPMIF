@@ -1,9 +1,9 @@
-"""Process Comparison — diff two or more event logs.
+"""Process Comparison - diff two or more event logs.
 
 Routes take the baseline ``log_id`` (the log the panel is opened on, injected by
 the loader) plus a comma-separated ``others`` list of comparison log ids. Each
-comparison log is opened through ``ctx.open_event_log`` — the sanctioned,
-ownership-checked cross-log accessor — so a user can only ever diff their own
+comparison log is opened through ``ctx.open_event_log`` - the sanctioned,
+ownership-checked cross-log accessor - so a user can only ever diff their own
 logs. Results are cached under a key that hashes the log set *and* each log's
 parquet mtime, so a re-import of any log invalidates the relevant entries.
 """
@@ -88,7 +88,7 @@ class ProcessComparisonModule(Module):
     ) -> dict[str, Any]:
         """Resolve [baseline, *others], cache on (ids + mtimes), and run ``run``.
 
-        ``run(ordered_ids, frames)`` is a pure, thread-offloaded function — all
+        ``run(ordered_ids, frames)`` is a pure, thread-offloaded function - all
         the per-route logic lives there; everything around it (ownership checks,
         caching, frame loading) is shared.
         """

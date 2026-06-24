@@ -2,18 +2,18 @@
 
 Modules that need a chat LLM or an embedding model call into here so the
 provider/model/key plumbing lives in one place. Keys are pulled from the
-global ``ai.config`` settings via [ai_config.py](ai_config.py) — modules only
+global ``ai.config`` settings via [ai_config.py](ai_config.py) - modules only
 persist the ``(provider, model)`` pair they want.
 
 Supported providers (matching the global picker in
 [apps/web/app/(platform)/settings/ai/page.tsx](../../../../apps/web/app/(platform)/settings/ai/page.tsx)):
 
-* ``anthropic`` — Claude via ``langchain-anthropic``. No embeddings endpoint.
-* ``openai``   — GPT/o-series via ``langchain-openai``.
-* ``unigpt``   — OpenAI-compatible endpoint (LibreChat / university deploys).
-* ``custom``   — Any other OpenAI-compatible endpoint at ``p.base_url``.
+* ``anthropic`` - Claude via ``langchain-anthropic``. No embeddings endpoint.
+* ``openai``   - GPT/o-series via ``langchain-openai``.
+* ``unigpt``   - OpenAI-compatible endpoint (LibreChat / university deploys).
+* ``custom``   - Any other OpenAI-compatible endpoint at ``p.base_url``.
 
-LangChain itself is *not* a platform dependency — each module ships its own
+LangChain itself is *not* a platform dependency - each module ships its own
 venv with the langchain packages it needs. To keep this module importable in
 the bare platform process, the langchain imports are deferred to call time.
 """
@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mate.api.ai_config import Provider, _provider_creds
 
-if TYPE_CHECKING:  # pragma: no cover — only for type checkers
+if TYPE_CHECKING:  # pragma: no cover - only for type checkers
     from langchain_core.embeddings import Embeddings
     from langchain_core.language_models import BaseChatModel
 
@@ -89,7 +89,7 @@ async def build_embeddings(
 ) -> Embeddings:
     """Return a LangChain embeddings client for ``(provider, model)``.
 
-    Anthropic has no native embeddings endpoint — picking it here is a config
+    Anthropic has no native embeddings endpoint - picking it here is a config
     mistake the user should fix in the module's AI-models picker.
 
     ``dimensions`` controls Matryoshka-style server-side truncation. Only

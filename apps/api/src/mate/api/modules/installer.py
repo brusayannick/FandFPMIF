@@ -3,7 +3,7 @@
 For each discovered module:
 
   - If the manifest's `dependencies.python.packages` is empty *and* the
-    module folder doesn't already contain a `pyproject.toml`, we skip — the
+    module folder doesn't already contain a `pyproject.toml`, we skip - the
     module imports nothing beyond stdlib + inherits + SDK.
   - Otherwise we synthesise a minimal `pyproject.toml` (when the author
     didn't supply one), create an isolated venv, and install deps into it.
@@ -17,7 +17,7 @@ write restrictions on the VirtioFS layer.
 When `manifest.dependencies.python.isolation == "subprocess"` the loader
 spawns a worker from the module's own venv via
 `mate.api.modules.subprocess_host.SubprocessBridge` (§5.4). The
-installer itself doesn't care about the mode — it just guarantees the
+installer itself doesn't care about the mode - it just guarantees the
 venv exists; choosing in-process vs. subprocess is the loader's call.
 """
 
@@ -40,7 +40,7 @@ log = structlog.get_logger(__name__)
 
 class ModuleInstallError(RuntimeError):
     """Raised when a module's venv cannot be materialised in a way that will
-    actually work — e.g. an in_process module whose ``requires-python``
+    actually work - e.g. an in_process module whose ``requires-python``
     excludes the platform interpreter. The loader catches this and skips the
     module so it never gets imported in-process (an ABI mismatch would crash
     the host)."""
@@ -94,7 +94,7 @@ def _host_satisfies(requires_python: str | None) -> tuple[bool, str]:
 
 
 def _sdk_project_root() -> Path:
-    """Directory of the `mate-sdk` package (the one with its `pyproject.toml`) —
+    """Directory of the `mate-sdk` package (the one with its `pyproject.toml`) -
     installed into subprocess venvs so the worker can import the SDK + its deps
     under its own interpreter."""
     import mate.sdk
@@ -156,14 +156,14 @@ async def install_module(folder: Path, manifest: Manifest, *, force: bool = Fals
     py = manifest.dependencies.python
     is_subprocess = py.isolation == "subprocess"
     # in_process with no private deps just uses the platform's packages via the
-    # import finder — no venv needed. A subprocess module ALWAYS needs a venv
+    # import finder - no venv needed. A subprocess module ALWAYS needs a venv
     # (at minimum the SDK, to run its worker in its own interpreter).
     if not is_subprocess and not py.packages and not (folder / "pyproject.toml").exists():
         return None
 
     # Resolve the interpreter + synthesized metadata per isolation mode.
     # in_process modules are imported into THIS interpreter, so their venv must
-    # be ABI-identical to it — pin to sys.executable and treat requires-python
+    # be ABI-identical to it - pin to sys.executable and treat requires-python
     # as a validation gate. subprocess modules run in their own process, so
     # requires-python selects their (possibly different) interpreter and the
     # `inherit` names must be installed into the venv (no shared interpreter to
@@ -228,7 +228,7 @@ async def install_module(folder: Path, manifest: Manifest, *, force: bool = Fals
 
     log.info("modules.installer.start", module_id=manifest.id, packages=synth_packages)
 
-    # Step 1 — create the venv. in_process pins to the host interpreter path;
+    # Step 1 - create the venv. in_process pins to the host interpreter path;
     # subprocess passes the requires-python spec so uv picks/auto-downloads it.
     # `--allow-existing` so a stray file lingering in the target (e.g. macOS
     # Finder/Spotlight re-creating `.DS_Store` inside a bind-mounted module
@@ -239,7 +239,7 @@ async def install_module(folder: Path, manifest: Manifest, *, force: bool = Fals
         log.error("modules.installer.venv_failed", module_id=manifest.id, output=out)
         return None
 
-    # Step 2 — install the project (and all its declared deps) into the venv.
+    # Step 2 - install the project (and all its declared deps) into the venv.
     # `uv pip install <dir>` reads pyproject.toml and installs dependencies
     # without creating or requiring a lock file.
     rc, out = await _run(["uv", "pip", "install", "--python", str(venv_dir), str(folder)])
@@ -250,7 +250,7 @@ async def install_module(folder: Path, manifest: Manifest, *, force: bool = Fals
     if is_subprocess:
         # The worker runs in its own interpreter and imports `mate.sdk` (+ its
         # deps pydantic/pyyaml/structlog), which it can't borrow from the
-        # platform across the process/ABI boundary — install them natively into
+        # platform across the process/ABI boundary - install them natively into
         # the worker venv (the SDK requires-python is >=3.12, so it installs on
         # any selected interpreter).
         rc, out = await _run(
@@ -275,7 +275,7 @@ async def install_module(folder: Path, manifest: Manifest, *, force: bool = Fals
 
 def remove_module_artifacts(folder: Path) -> None:
     """Wipe `.venv/`, `.dist/`, `.installed-hash`, `node_modules/`. The
-    manifest and `module.py` are kept — only build artefacts go.
+    manifest and `module.py` are kept - only build artefacts go.
     """
     for name in (".venv", ".dist", "node_modules", ".installed-hash"):
         target = folder / name

@@ -1,4 +1,4 @@
-"""Module availability gating by log model — the two models never cross."""
+"""Module availability gating by log model - the two models never cross."""
 
 from __future__ import annotations
 

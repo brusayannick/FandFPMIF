@@ -24,7 +24,7 @@ class SampleModule(Module):
 
     @route.get("/count")
     async def count(self, ctx: ModuleContext) -> dict[str, int]:
-        """Row count of the (filter-aware) events view — lets tests prove a
+        """Row count of the (filter-aware) events view - lets tests prove a
         per-request dashboard filter narrows what a module sees."""
         async with ctx.event_log as log:
             rows = await log.duckdb_fetch("SELECT COUNT(*) FROM events")
@@ -32,7 +32,7 @@ class SampleModule(Module):
 
     @route.get("/cached-count")
     async def cached_count(self, ctx: ModuleContext) -> dict[str, int]:
-        """Like /count but memoised in the result cache — proves an ephemeral
+        """Like /count but memoised in the result cache - proves an ephemeral
         dashboard filter gets its own cache namespace instead of being served
         the first (unfiltered) cached result."""
         cached = await ctx.cache.get("count")
@@ -48,7 +48,7 @@ class SampleModule(Module):
     async def open_other(self, ctx: ModuleContext, other_id: str) -> dict[str, object]:
         """Open a *second* log via the ownership-checked cross-log accessor and
         return its event count. Returns ``{"denied": True}`` when the accessor
-        refuses (missing log or another tenant's) — lets a test prove the
+        refuses (missing log or another tenant's) - lets a test prove the
         tenant-isolation invariant on ``ctx.open_event_log``."""
         try:
             other = await ctx.open_event_log(other_id)

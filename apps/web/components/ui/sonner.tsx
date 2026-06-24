@@ -14,7 +14,7 @@ import { useMounted } from "@/lib/use-mounted"
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme()
-  // Until mounted, the resolved theme is unknown on the server — render the
+  // Until mounted, the resolved theme is unknown on the server – render the
   // stable "system" default so SSR and the first client render match (#418).
   const mounted = useMounted()
 

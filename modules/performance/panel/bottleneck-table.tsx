@@ -18,7 +18,7 @@ export function BottleneckTable({ items, selectedActivity, onSelectActivity }: B
   if (!items.length) {
     return (
       <div className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground">
-        No bottlenecks detected — sojourn times are evenly distributed across activities.
+        No bottlenecks detected – sojourn times are evenly distributed across activities.
       </div>
     );
   }

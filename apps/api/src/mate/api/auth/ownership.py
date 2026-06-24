@@ -4,7 +4,7 @@ The pattern across every CRUD route is the same:
 
   - look up a row by id,
   - check it belongs to the current user,
-  - 404 on mismatch (not 403 — avoids id enumeration).
+  - 404 on mismatch (not 403 - avoids id enumeration).
 
 These helpers wrap that pattern so the route code stays readable.
 """

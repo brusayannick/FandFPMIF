@@ -83,7 +83,7 @@ let signingOut = false;
 async function logoutToLogin(): Promise<void> {
   if (typeof window === "undefined") return;
   if (signingOut) return;
-  // Already on the login surface — nothing to do (and avoids a redirect loop).
+  // Already on the login surface – nothing to do (and avoids a redirect loop).
   if (window.location.pathname.startsWith("/login")) return;
   signingOut = true;
   const callbackUrl = `${window.location.pathname}${window.location.search}`;
@@ -136,7 +136,7 @@ export async function api<T = unknown>(
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
-/** Raw fetch that returns the Response without JSON-parsing — use for SSE / streaming endpoints. */
+/** Raw fetch that returns the Response without JSON-parsing – use for SSE / streaming endpoints. */
 export async function rawFetch(
   path: string,
   init: RequestInit & { json?: unknown } = {},
@@ -154,7 +154,7 @@ export async function rawFetch(
 /** Build an absolute URL pointing at the backend. Use for `<img src>`, `<a href>`,
  * and any other browser-side reference that bypasses the `api()` helper.
  *
- * Static module assets are served from this URL — the API doesn't require a
+ * Static module assets are served from this URL – the API doesn't require a
  * token for `/api/v1/modules/{id}/assets/*` (they're public bundles).
  */
 export function apiUrl(path: string): string {

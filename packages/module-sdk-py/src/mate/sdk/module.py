@@ -1,4 +1,4 @@
-"""`Module` base class — the only thing a module's `module.py` must subclass."""
+"""`Module` base class - the only thing a module's `module.py` must subclass."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ class Module:
 
     A subclass must declare ``id`` matching the manifest ``id``. Methods
     decorated with `@route.*`, `@on_event`, or `@job` are bound by the
-    platform loader at startup — there is no manual registration.
+    platform loader at startup - there is no manual registration.
 
     Authors should not instantiate Module subclasses themselves; the loader
     does that exactly once per module.

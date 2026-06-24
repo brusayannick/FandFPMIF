@@ -1,14 +1,14 @@
-"""/api/v1/admin/insights — read-only cross-user dashboards for admins.
+"""/api/v1/admin/insights - read-only cross-user dashboards for admins.
 
 Two capabilities, both gated by the Keycloak ``admin`` role (they read every
-user's metadata — accounts, imported logs, job outcomes, usage analytics):
+user's metadata - accounts, imported logs, job outcomes, usage analytics):
 
-* ``GET /admin/insights/overview`` — KPIs + time series for an admin dashboard
+* ``GET /admin/insights/overview`` - KPIs + time series for an admin dashboard
   spanning platform data (users/logs), job-runtime health, and usage analytics.
-* ``GET /admin/insights/event-logs`` — a paginated, searchable listing of every
+* ``GET /admin/insights/event-logs`` - a paginated, searchable listing of every
   user's imported event logs joined to the owning user.
 
-Everything here is a pure read aggregation over existing tables — no schema and
+Everything here is a pure read aggregation over existing tables - no schema and
 no cross-user mutations. The event-bus ``user_id`` tenant-isolation invariant
 does not apply: these are deliberately cross-user, admin-gated REST reads.
 
@@ -17,22 +17,38 @@ See ``apps/web/app/(platform)/admin/overview`` and ``.../admin/logs`` for the UI
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Literal
 
 import structlog
 from fastapi import APIRouter, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.engine import Row
 
 from mate.api.auth import AdminUserDep
-from mate.api.db.models import AnalyticsEvent, AnalyticsSession, EventLog, Job, User
+from mate.api.config import get_settings
+from mate.api.db.models import (
+    AnalyticsEvent,
+    AnalyticsSession,
+    EventLog,
+    Job,
+    ModuleInstall,
+    StorageConfig,
+    User,
+    UserSetting,
+)
 from mate.api.db.session import SessionDep
 from mate.api.ingest.storage import log_paths
+from mate.api.jobs.runtime import get_job_runtime
+from mate.api.storage import s3 as storage_s3
 from mate.api.storage import sync as storage_sync
+from mate.api.storage.config import get_storage_settings
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/admin/insights", tags=["admin"])
@@ -92,7 +108,7 @@ class AdminOverview(BaseModel):
 
 
 def _naive_utc_now() -> datetime:
-    """Now as a naive UTC datetime — every timestamp column is stored this way."""
+    """Now as a naive UTC datetime - every timestamp column is stored this way."""
     return datetime.now(UTC).replace(tzinfo=None)
 
 
@@ -373,6 +389,533 @@ async def overview(user: AdminUserDep, session: SessionDep, days: int = 90) -> A
 
 
 # --------------------------------------------------------------------------
+# Metric group: user activity
+# --------------------------------------------------------------------------
+
+
+class LastSeenBucket(BaseModel):
+    bucket: str  # "today" | "7d" | "30d" | "older" | "never"
+    count: int
+
+
+class UsersInsights(BaseModel):
+    days: int
+    user_count: int
+    active_users_in_range: int
+    onboarding_completed: int
+    onboarding_completion_pct: int
+    active_users_by_day: list[DayCount]
+    sessions_by_day: list[DayCount]
+    last_seen_buckets: list[LastSeenBucket]
+    top_users_by_events: list[TopUser]
+
+
+@router.get("/users", response_model=UsersInsights)
+async def users_insights(user: AdminUserDep, session: SessionDep, days: int = 90) -> UsersInsights:
+    """User-activity metrics across all users (admin-only, read-only)."""
+    days = max(1, min(days, 365))
+    now = _naive_utc_now()
+    cutoff = now - timedelta(days=days)
+
+    user_count = int(await session.scalar(select(func.count()).select_from(User)) or 0)
+
+    active_users_in_range = int(
+        await session.scalar(
+            select(func.count(func.distinct(AnalyticsSession.user_id))).where(
+                AnalyticsSession.last_seen_at >= cutoff
+            )
+        )
+        or 0
+    )
+
+    # Onboarding completion ratio over the UserSetting key ``onboarding``
+    # ({completed: bool, ...}). json_extract is SQLite's native JSON path read.
+    onboarding_completed = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(UserSetting)
+            .where(
+                UserSetting.key == "onboarding",
+                func.json_extract(UserSetting.value_json, "$.completed") == 1,
+            )
+        )
+        or 0
+    )
+    onboarding_pct = round(100 * onboarding_completed / user_count) if user_count else 0
+
+    active_by_day = _day_series(
+        (
+            await session.execute(
+                select(
+                    func.date(AnalyticsSession.last_seen_at),
+                    func.count(func.distinct(AnalyticsSession.user_id)),
+                )
+                .where(AnalyticsSession.last_seen_at >= cutoff)
+                .group_by(func.date(AnalyticsSession.last_seen_at))
+                .order_by(func.date(AnalyticsSession.last_seen_at))
+            )
+        ).all()
+    )
+    sessions_by_day = _day_series(
+        (
+            await session.execute(
+                select(func.date(AnalyticsSession.started_at), func.count())
+                .where(AnalyticsSession.started_at >= cutoff)
+                .group_by(func.date(AnalyticsSession.started_at))
+                .order_by(func.date(AnalyticsSession.started_at))
+            )
+        ).all()
+    )
+
+    # Last-seen recency buckets over the users table.
+    d1, d7, d30 = now - timedelta(days=1), now - timedelta(days=7), now - timedelta(days=30)
+    last_seen_buckets = [
+        LastSeenBucket(
+            bucket="today",
+            count=int(
+                await session.scalar(
+                    select(func.count()).select_from(User).where(User.last_seen_at >= d1)
+                )
+                or 0
+            ),
+        ),
+        LastSeenBucket(
+            bucket="7d",
+            count=int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(User)
+                    .where(User.last_seen_at < d1, User.last_seen_at >= d7)
+                )
+                or 0
+            ),
+        ),
+        LastSeenBucket(
+            bucket="30d",
+            count=int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(User)
+                    .where(User.last_seen_at < d7, User.last_seen_at >= d30)
+                )
+                or 0
+            ),
+        ),
+        LastSeenBucket(
+            bucket="older",
+            count=int(
+                await session.scalar(
+                    select(func.count()).select_from(User).where(User.last_seen_at < d30)
+                )
+                or 0
+            ),
+        ),
+    ]
+
+    top_users_by_events = [
+        TopUser(user_id=str(uid), email=email, username=username, count=int(c))
+        for uid, email, username, c in (
+            await session.execute(
+                select(
+                    User.id,
+                    User.email,
+                    User.preferred_username,
+                    func.count(AnalyticsEvent.id),
+                )
+                .join(AnalyticsEvent, AnalyticsEvent.user_id == User.id)
+                .where(AnalyticsEvent.occurred_at >= cutoff)
+                .group_by(User.id, User.email, User.preferred_username)
+                .order_by(func.count(AnalyticsEvent.id).desc())
+                .limit(10)
+            )
+        ).all()
+    ]
+
+    return UsersInsights(
+        days=days,
+        user_count=user_count,
+        active_users_in_range=active_users_in_range,
+        onboarding_completed=onboarding_completed,
+        onboarding_completion_pct=onboarding_pct,
+        active_users_by_day=active_by_day,
+        sessions_by_day=sessions_by_day,
+        last_seen_buckets=last_seen_buckets,
+        top_users_by_events=top_users_by_events,
+    )
+
+
+# --------------------------------------------------------------------------
+# Metric group: storage & data
+# --------------------------------------------------------------------------
+
+
+class StorageUserRow(BaseModel):
+    user_id: str
+    email: str | None
+    username: str | None
+    log_count: int
+    events_total: int
+    disk_bytes: int | None = None
+
+
+class StorageLogRow(BaseModel):
+    id: str
+    name: str
+    owner_id: str
+    events_count: int | None
+    cases_count: int | None
+
+
+class StorageInsights(BaseModel):
+    backend_mode: str
+    s3_used_bytes: int | None = None
+    s3_object_count: int | None = None
+    s3_quota_bytes: int | None = None
+    s3_error: str | None = None
+    total_logs: int
+    total_events: int
+    per_user: list[StorageUserRow]
+    largest_logs: list[StorageLogRow]
+    disk_included: bool = False
+
+
+def _dir_size_bytes(path: Path, *, max_entries: int = 100_000) -> int:
+    """Bounded recursive byte total under ``path`` (mirrors routes/system.py)."""
+    total = 0
+    visited = 0
+    for entry in path.rglob("*"):
+        visited += 1
+        if visited > max_entries:
+            break
+        try:
+            if entry.is_file():
+                total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+@router.get("/storage", response_model=StorageInsights)
+async def storage_insights(
+    user: AdminUserDep, session: SessionDep, include_disk: int = 0
+) -> StorageInsights:
+    """Storage & data metrics across all users (admin-only, read-only).
+
+    ``include_disk=1`` adds a per-user on-disk byte walk (the one heavy query) -
+    off by default and bounded + off the event loop when on.
+    """
+    live = EventLog.deleted_at.is_(None)
+
+    total_logs = int(
+        await session.scalar(select(func.count()).select_from(EventLog).where(live)) or 0
+    )
+    total_events = int(
+        await session.scalar(select(func.coalesce(func.sum(EventLog.events_count), 0)).where(live))
+        or 0
+    )
+
+    per_user_rows = (
+        await session.execute(
+            select(
+                User.id,
+                User.email,
+                User.preferred_username,
+                func.count(EventLog.id),
+                func.coalesce(func.sum(EventLog.events_count), 0),
+            )
+            .join(EventLog, EventLog.user_id == User.id)
+            .where(live)
+            .group_by(User.id, User.email, User.preferred_username)
+            .order_by(func.coalesce(func.sum(EventLog.events_count), 0).desc())
+            .limit(20)
+        )
+    ).all()
+    per_user = [
+        StorageUserRow(
+            user_id=str(uid),
+            email=email,
+            username=username,
+            log_count=int(lc),
+            events_total=int(ev),
+        )
+        for uid, email, username, lc, ev in per_user_rows
+    ]
+
+    if include_disk:
+        settings = get_settings()
+
+        def _walk(uid: str) -> int:
+            base = settings.users_dir / uid
+            return _dir_size_bytes(base) if base.exists() else 0
+
+        for row in per_user:
+            row.disk_bytes = await asyncio.to_thread(_walk, row.user_id)
+
+    largest_logs = [
+        StorageLogRow(
+            id=str(lid),
+            name=name,
+            owner_id=str(owner),
+            events_count=ev,
+            cases_count=cs,
+        )
+        for lid, name, owner, ev, cs in (
+            await session.execute(
+                select(
+                    EventLog.id,
+                    EventLog.name,
+                    EventLog.user_id,
+                    EventLog.events_count,
+                    EventLog.cases_count,
+                )
+                .where(live)
+                .order_by(func.coalesce(EventLog.events_count, 0).desc())
+                .limit(10)
+            )
+        ).all()
+    ]
+
+    cfg = await session.get(StorageConfig, StorageConfig.SINGLETON_ID)
+    mode = cfg.mode if cfg is not None else "local"
+    s3_used: int | None = None
+    s3_objects: int | None = None
+    s3_quota: int | None = None
+    s3_error: str | None = None
+    s = get_storage_settings()
+    if s.is_s3:
+        s3_quota = s.quota_bytes
+        try:
+            usage = await run_in_threadpool(storage_s3.usage, s.prefix, s)
+            s3_used = usage.used_bytes
+            s3_objects = usage.object_count
+        except storage_s3.StorageError as exc:
+            s3_error = str(exc)
+
+    return StorageInsights(
+        backend_mode=mode,
+        s3_used_bytes=s3_used,
+        s3_object_count=s3_objects,
+        s3_quota_bytes=s3_quota,
+        s3_error=s3_error,
+        total_logs=total_logs,
+        total_events=total_events,
+        per_user=per_user,
+        largest_logs=largest_logs,
+        disk_included=bool(include_disk),
+    )
+
+
+# --------------------------------------------------------------------------
+# Metric group: jobs & system health
+# --------------------------------------------------------------------------
+
+
+class JobsRuntimeStats(BaseModel):
+    concurrency: int
+    live_workers: int
+    queue_depth: int
+    running: int
+    paused_users: int
+
+
+class JobsInsights(BaseModel):
+    days: int
+    runtime: JobsRuntimeStats
+    by_status: list[LabelCount]
+    by_type: list[LabelCount]
+    failures_by_day: list[DayCount]
+    completions_by_day: list[DayCount]
+    avg_duration_seconds: int
+    slowest_seconds: int
+
+
+@router.get("/jobs", response_model=JobsInsights)
+async def jobs_insights(user: AdminUserDep, session: SessionDep, days: int = 90) -> JobsInsights:
+    """Job & system-health metrics: live runtime snapshot + persisted outcomes."""
+    days = max(1, min(days, 365))
+    cutoff = _naive_utc_now() - timedelta(days=days)
+
+    stats = get_job_runtime().live_stats()
+
+    by_status = _labels(
+        (
+            await session.execute(
+                select(Job.status, func.count()).group_by(Job.status).order_by(func.count().desc())
+            )
+        ).all()
+    )
+    by_type = _labels(
+        (
+            await session.execute(
+                select(Job.type, func.count())
+                .group_by(Job.type)
+                .order_by(func.count().desc())
+                .limit(15)
+            )
+        ).all()
+    )
+    failures_by_day = _day_series(
+        (
+            await session.execute(
+                select(func.date(Job.finished_at), func.count())
+                .where(
+                    Job.status == "failed",
+                    Job.finished_at.is_not(None),
+                    Job.finished_at >= cutoff,
+                )
+                .group_by(func.date(Job.finished_at))
+                .order_by(func.date(Job.finished_at))
+            )
+        ).all()
+    )
+    completions_by_day = _day_series(
+        (
+            await session.execute(
+                select(func.date(Job.finished_at), func.count())
+                .where(
+                    Job.status == "completed",
+                    Job.finished_at.is_not(None),
+                    Job.finished_at >= cutoff,
+                )
+                .group_by(func.date(Job.finished_at))
+                .order_by(func.date(Job.finished_at))
+            )
+        ).all()
+    )
+
+    duration_expr = (func.julianday(Job.finished_at) - func.julianday(Job.started_at)) * 86400.0
+    finished_filter = (
+        Job.status == "completed",
+        Job.started_at.is_not(None),
+        Job.finished_at.is_not(None),
+    )
+    avg_duration = float(
+        await session.scalar(select(func.avg(duration_expr)).where(*finished_filter)) or 0.0
+    )
+    slowest = float(
+        await session.scalar(select(func.max(duration_expr)).where(*finished_filter)) or 0.0
+    )
+
+    return JobsInsights(
+        days=days,
+        runtime=JobsRuntimeStats(**stats),
+        by_status=by_status,
+        by_type=by_type,
+        failures_by_day=failures_by_day,
+        completions_by_day=completions_by_day,
+        avg_duration_seconds=round(avg_duration),
+        slowest_seconds=round(slowest),
+    )
+
+
+# --------------------------------------------------------------------------
+# Metric group: module & AI usage
+# --------------------------------------------------------------------------
+
+
+class ModuleUsageRow(BaseModel):
+    module_id: str
+    installs: int
+    runs: int
+    avg_duration_seconds: int
+
+
+class AiUsage(BaseModel):
+    chat_requests: int
+    guidance_requests: int
+    # AI token counts and cost are not tracked anywhere today - surfaced so the
+    # UI can show "not tracked" rather than a misleading zero.
+    tokens_tracked: bool = False
+
+
+class UsageInsights(BaseModel):
+    days: int
+    installs_by_module: list[LabelCount]
+    modules: list[ModuleUsageRow]
+    most_used_module: str | None
+    ai: AiUsage
+
+
+@router.get("/usage", response_model=UsageInsights)
+async def usage_insights(user: AdminUserDep, session: SessionDep, days: int = 90) -> UsageInsights:
+    """Module & AI usage metrics across all users (admin-only, read-only)."""
+    days = max(1, min(days, 365))
+    cutoff = _naive_utc_now() - timedelta(days=days)
+
+    installs_by_module = _labels(
+        (
+            await session.execute(
+                select(ModuleInstall.module_id, func.count())
+                .group_by(ModuleInstall.module_id)
+                .order_by(func.count().desc())
+            )
+        ).all()
+    )
+    installs_map = {lc.label: lc.count for lc in installs_by_module}
+
+    duration_expr = (func.julianday(Job.finished_at) - func.julianday(Job.started_at)) * 86400.0
+    run_rows = (
+        await session.execute(
+            select(
+                Job.module_id,
+                func.count(),
+                func.avg(duration_expr),
+            )
+            .where(
+                Job.module_id.is_not(None),
+                Job.created_at >= cutoff,
+            )
+            .group_by(Job.module_id)
+            .order_by(func.count().desc())
+        )
+    ).all()
+
+    runs_map = {str(mid): (int(c), float(avg or 0.0)) for mid, c, avg in run_rows if mid}
+    module_ids = sorted(set(installs_map) | set(runs_map))
+    modules = [
+        ModuleUsageRow(
+            module_id=mid,
+            installs=installs_map.get(mid, 0),
+            runs=runs_map.get(mid, (0, 0.0))[0],
+            avg_duration_seconds=round(runs_map.get(mid, (0, 0.0))[1]),
+        )
+        for mid in module_ids
+    ]
+    most_used = run_rows[0][0] if run_rows else None
+
+    chat_requests = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(AnalyticsEvent)
+            .where(
+                AnalyticsEvent.event_name == "ai_chat",
+                AnalyticsEvent.occurred_at >= cutoff,
+            )
+        )
+        or 0
+    )
+    guidance_requests = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(AnalyticsEvent)
+            .where(
+                AnalyticsEvent.event_name == "ai_guidance",
+                AnalyticsEvent.occurred_at >= cutoff,
+            )
+        )
+        or 0
+    )
+
+    return UsageInsights(
+        days=days,
+        installs_by_module=installs_by_module,
+        modules=modules,
+        most_used_module=str(most_used) if most_used is not None else None,
+        ai=AiUsage(chat_requests=chat_requests, guidance_requests=guidance_requests),
+    )
+
+
+# --------------------------------------------------------------------------
 # Cross-user event-log listing
 # --------------------------------------------------------------------------
 
@@ -423,7 +966,7 @@ async def event_logs(
     """List every (non-deleted) event log across all users with its owner.
 
     ``q`` matches the log name or the owner's email/username (case-insensitive).
-    Read-only — there are no mutate-other-users'-logs endpoints by design.
+    Read-only - there are no mutate-other-users'-logs endpoints by design.
     """
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
@@ -493,7 +1036,7 @@ async def event_logs(
 async def download_event_log(log_id: str, user: AdminUserDep, session: SessionDep) -> FileResponse:
     """Download the original upload of any user's event log (admin-only).
 
-    Cross-user by design — the same admin gate as the listing above. Returns the
+    Cross-user by design - the same admin gate as the listing above. Returns the
     retained ``original.{ext}`` (the bytes the owner uploaded), not the derived
     Parquet. In S3 mode the log dir is hydrated first so a cold cache still works.
     """
@@ -502,7 +1045,7 @@ async def download_event_log(log_id: str, user: AdminUserDep, session: SessionDe
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event log not found")
 
     paths = log_paths(log_id, row.user_id)
-    # The retained upload may live only in S3 on a cold cache — pull the log dir
+    # The retained upload may live only in S3 on a cold cache - pull the log dir
     # back before locating it (no-op in local mode), mirroring re-import.
     await storage_sync.hydrate_log(row.user_id, log_id)
     located = paths.find_original()

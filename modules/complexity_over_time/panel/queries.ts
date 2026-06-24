@@ -15,7 +15,7 @@ export interface TimeseriesParams {
   step?: number;
 }
 
-// Mirrors modules/complexity/panel/queries.ts — every KPI travels in each
+// Mirrors modules/complexity/panel/queries.ts – every KPI travels in each
 // slice so the panel can switch the Y-axis metric without refetching.
 export interface ComplexityMetrics {
   magnitude: number;

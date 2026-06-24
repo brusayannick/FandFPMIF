@@ -1,4 +1,4 @@
-"""Chatbot agent — follow-up Q&A bound to a completed analysis state.
+"""Chatbot agent - follow-up Q&A bound to a completed analysis state.
 
 Adapted from `backend/agents/chatbot_agent.py`. Topical guardrail + final
 answer generation, with the LLM client injected from the graph builder.

@@ -8,12 +8,12 @@ valid on each per-slice sub-log.
 
 Three slicing modes:
 
-* **absolute** — the timeline ``[min_start, max_start]`` is cut into ``N``
+* **absolute** - the timeline ``[min_start, max_start]`` is cut into ``N``
   equal-duration bins. Empty bins are kept (they become null points).
-* **calendar** — cases bucketed by a calendar period (D/W/M/Q/Y). The full
+* **calendar** - cases bucketed by a calendar period (D/W/M/Q/Y). The full
   period range is reindexed so gaps render as nulls. ``granularity="auto"``
   targets ~20-60 points based on the timespan.
-* **sliding** — overlapping windows ``[s, s+window)`` advancing by ``step``
+* **sliding** - overlapping windows ``[s, s+window)`` advancing by ``step``
   (both in days). A case is counted in every window its start falls in.
 
 ``compute_timeseries`` is the public entry point; it returns the result
@@ -27,7 +27,7 @@ from typing import Any
 
 import pandas as pd
 
-# Vendored from ``modules/complexity`` so this module stays self-contained —
+# Vendored from ``modules/complexity`` so this module stays self-contained -
 # see modules/complexity_over_time/manifest.yaml and the module plan.
 from .complexity_core import compute_basic_metrics
 
@@ -282,7 +282,7 @@ def compute_timeseries(
         )
 
     if metric_keys is None:
-        # No slice cleared min_cases — fall back to the whole-log key set so
+        # No slice cleared min_cases - fall back to the whole-log key set so
         # the dropdown is still populated.
         full = compute_basic_metrics(df, exponential_k=exponential_k)
         metric_keys = _numeric_metric_keys(full) if full else []

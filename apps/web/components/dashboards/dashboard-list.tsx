@@ -311,7 +311,7 @@ export function DashboardList() {
           <DialogHeader>
             <DialogTitle>New dashboard</DialogTitle>
             <DialogDescription>
-              Name it and pick its process type. The type is fixed once created — it
+              Name it and pick its process type. The type is fixed once created – it
               decides which cards and event logs the board can use.
             </DialogDescription>
           </DialogHeader>

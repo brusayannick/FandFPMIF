@@ -1,4 +1,4 @@
-"""CSV ingestion — applies a column mapping to a flat CSV.
+"""CSV ingestion - applies a column mapping to a flat CSV.
 
 The frontend column-mapping wizard (phase 7) supplies a CsvColumnMapping; in
 v1 we accept the mapping as a JSON form-field on the upload. Without a mapping
@@ -99,7 +99,7 @@ def parse_csv(
     effective = mapping or autodetect_mapping(columns)
     if effective is None:
         # Best-effort import: hand the raw (all-string) columns back so the
-        # central role resolver in `dispatch` can map them — and flag the log
+        # central role resolver in `dispatch` can map them - and flag the log
         # for manual review there. We still return a CsvColumnMapping shell so
         # callers relying on the tuple shape keep working.
         detected = {"csv_columns": columns, "canonical_columns": [], "mapping": None}

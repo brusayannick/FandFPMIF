@@ -8,9 +8,9 @@ import { Position, type Edge, type Node } from "@xyflow/react";
  * Spacing is derived from node dimensions so the graph never looks cramped
  * or wasteful regardless of node count:
  *
- *   phaseGapMultiplier   — inter-column edge gap as a multiple of nodeSize.height
+ *   phaseGapMultiplier   – inter-column edge gap as a multiple of nodeSize.height
  *                          (e.g. 3 → gap = 3 × nodeHeight between adjacent columns)
- *   nodeSpacing          — within-column gap as a multiple of nodeSize.height
+ *   nodeSpacing          – within-column gap as a multiple of nodeSize.height
  *                          (defaults to 1 → gap = 1 × nodeHeight between stacked nodes)
  *
  * The total axis length is computed as:
@@ -68,7 +68,7 @@ export function temporalPhasesLayout<TNodeData extends Record<string, unknown>, 
   const axisSize = horizontal ? opts.nodeSize.width : opts.nodeSize.height;
   const perpSize = horizontal ? opts.nodeSize.height : opts.nodeSize.width;
 
-  // nodeHeight is always opts.nodeSize.height — used as the spacing base unit
+  // nodeHeight is always opts.nodeSize.height – used as the spacing base unit
   // so that the multipliers feel consistent regardless of layout direction.
   const nodeHeight = opts.nodeSize.height;
 

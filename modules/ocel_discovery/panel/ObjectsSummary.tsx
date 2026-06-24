@@ -12,7 +12,7 @@ import {
 
 import type { ObjectsSummaryData, ObjectTypeLifecycle } from "./queries";
 
-/** Per-object-type lifecycle stats — reused by the panel tab and the dashboard
+/** Per-object-type lifecycle stats – reused by the panel tab and the dashboard
  *  widget. Reproduces the pm4py `ocel_objects_summary` aggregates. */
 export function ObjectTypeStats({
   types,
@@ -44,7 +44,7 @@ export function ObjectTypeStats({
             {!compact && <Stat label="avg lifecycle" value={formatDuration(t.avg_duration_s)} />}
             <Stat
               label="avg events"
-              value={t.avg_events != null ? formatNumber(Math.round(t.avg_events * 10) / 10) : "—"}
+              value={t.avg_events != null ? formatNumber(Math.round(t.avg_events * 10) / 10) : "–"}
             />
             {hasInteracting && (
               <Stat
@@ -52,7 +52,7 @@ export function ObjectTypeStats({
                 value={
                   t.avg_interacting != null
                     ? formatNumber(Math.round(t.avg_interacting * 10) / 10)
-                    : "—"
+                    : "–"
                 }
               />
             )}

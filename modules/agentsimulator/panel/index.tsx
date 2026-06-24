@@ -194,7 +194,7 @@ export default function AgentSimulatorPanel({ logId }: { logId: string; moduleId
                 disabled={running}
               />
               <p className="text-[11px] text-muted-foreground">
-                Repetitions of the same model — more runs give a stabler fidelity score.
+                Repetitions of the same model – more runs give a stabler fidelity score.
               </p>
             </div>
             <div className="space-y-3">
@@ -309,7 +309,7 @@ function Results({
               </ChartBox>
             </TabsContent>
             <TabsContent value="circadian">
-              <ChartBox caption="Events by hour of day — does the simulator respect working hours?">
+              <ChartBox caption="Events by hour of day – does the simulator respect working hours?">
                 <Circadian data={data} />
               </ChartBox>
             </TabsContent>
@@ -341,22 +341,22 @@ function SummaryStats({ data }: { data: AgentSimResult }) {
     {
       icon: Users,
       label: "Test cases",
-      value: `${data.test?.cases ?? "—"} (${data.test?.events ?? "—"} events)`,
+      value: `${data.test?.cases ?? "–"} (${data.test?.events ?? "–"} events)`,
     },
     {
       icon: Gauge,
       label: "Sim cases / run",
-      value: `${data.simulation?.avg_cases ?? "—"}`,
+      value: `${data.simulation?.avg_cases ?? "–"}`,
     },
     {
       icon: Clock,
       label: "Real cycle (median)",
-      value: `${data.cycle_time?.real_stats.median_h ?? "—"}h`,
+      value: `${data.cycle_time?.real_stats.median_h ?? "–"}h`,
     },
     {
       icon: Clock,
       label: "Sim cycle (median)",
-      value: `${data.cycle_time?.sim_stats.median_h ?? "—"}h`,
+      value: `${data.cycle_time?.sim_stats.median_h ?? "–"}h`,
     },
   ];
   return (
@@ -582,7 +582,7 @@ function cycleCaption(data: AgentSimResult): string {
   const r = data.cycle_time?.real_stats;
   const s = data.cycle_time?.sim_stats;
   if (!r || !s) return "Case-duration distribution.";
-  return `Case duration — real median ${r.median_h}h / p90 ${r.p90_h}h · simulated median ${s.median_h}h / p90 ${s.p90_h}h.`;
+  return `Case duration – real median ${r.median_h}h / p90 ${r.p90_h}h · simulated median ${s.median_h}h / p90 ${s.p90_h}h.`;
 }
 
 function withAlpha(hex: string, alpha: number): string {

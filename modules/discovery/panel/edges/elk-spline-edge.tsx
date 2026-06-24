@@ -23,14 +23,14 @@ export interface ElkSplineEdgeData extends Record<string, unknown> {
  *   through the bend points (gives splines that hug the routing channels
  *   ELK chose, not stray off through other nodes).
  * - When the user has dragged the source or target node, the captured points
- *   are stale — fall back to xyflow's plain bezier so the arrow still tracks
+ *   are stale – fall back to xyflow's plain bezier so the arrow still tracks
  *   the new handle positions.
  *
  * Arrow head is rendered manually (instead of via SVG `marker-end` +
  * `orient="auto"`) because the SVG-default orientation derives from the very
  * last sub-segment of the path, which can collapse in a smoothed corner and
  * snap the arrow to a default angle. We compute the geometric tangent from
- * the last two bend points directly — that's reliable in every case.
+ * the last two bend points directly – that's reliable in every case.
  */
 export function ElkSplineEdge(props: EdgeProps) {
   const {

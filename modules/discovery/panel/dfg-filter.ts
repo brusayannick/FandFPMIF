@@ -1,5 +1,5 @@
 /**
- * Celonis-style DFG filtering — pure utility shared by `DfgCanvas` (rendering)
+ * Celonis-style DFG filtering – pure utility shared by `DfgCanvas` (rendering)
  * and `DfgTab` (slider count labels) so the two never disagree.
  *
  * Semantics:
@@ -11,7 +11,7 @@
  *      slider operates on. Top-N by frequency.
  *   4. **Connectivity floor**: even at slider = 0, we still include enough
  *      edges to keep every visible activity reachable. This is a minimum
- *      spanning forest over the candidate edges (Kruskal — sort by frequency
+ *      spanning forest over the candidate edges (Kruskal – sort by frequency
  *      desc, greedy union-find), so the chosen "must-keep" edges are the
  *      most-frequent ones.
  *
@@ -28,7 +28,7 @@ export interface DfgFilterResult {
   candidateEdges: DfgEdge[];
   /** Edges that ended up rendered (top-N ∪ spanning, then optional 95% cut). */
   visibleEdges: DfgEdge[];
-  /** Edges in the spanning forest — the "floor" the connections slider can't go below. */
+  /** Edges in the spanning forest – the "floor" the connections slider can't go below. */
   spanningEdgeIds: Set<string>;
 }
 
@@ -54,7 +54,7 @@ export function computeDfgVisibility(
 
   const sortedEdges = [...candidateEdges].sort((a, b) => b.frequency - a.frequency);
 
-  // 4. Spanning forest by Kruskal — greedy over frequency-sorted edges.
+  // 4. Spanning forest by Kruskal – greedy over frequency-sorted edges.
   const parent = new Map<string, string>();
   for (const id of visibleActivityIds) parent.set(id, id);
 

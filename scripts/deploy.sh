@@ -2,7 +2,7 @@
 #
 # Local push-to-deploy for the uni VM (pm-mate.uni-muenster.de).
 #
-# Run this from your laptop **while connected to the FB4-DEV-VPN** — the VM's
+# Run this from your laptop **while connected to the FB4-DEV-VPN** – the VM's
 # SSH port (2222) is only reachable through the VPN. It:
 #   1. pushes the current branch to GitHub,
 #   2. SSHes into the VM, updates the deploy clone to match origin, and
@@ -59,7 +59,7 @@ EOF
 echo "▶ Waiting for $PUBLIC_URL/health …"
 for _ in $(seq 1 36); do
   if curl -fsS -o /dev/null "$PUBLIC_URL/health"; then
-    echo "✔ Deployed — $PUBLIC_URL is healthy."
+    echo "✔ Deployed – $PUBLIC_URL is healthy."
     exit 0
   fi
   sleep 5

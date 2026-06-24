@@ -1,4 +1,4 @@
-"""Pure comparison primitives — no ModuleContext, so they're unit-testable.
+"""Pure comparison primitives - no ModuleContext, so they're unit-testable.
 
 Everything here takes plain pandas DataFrames with the canonical platform
 columns (``case_id`` / ``activity`` / ``timestamp``) and returns plain Python
@@ -13,7 +13,7 @@ from typing import Any
 # Cap the stochastic language fed to EMD: compute_emd is ~O(n·m) edit-distance
 # pairs over variants, so a pathological log (thousands of unique variants)
 # would dominate the request. Top-K by frequency keeps it bounded and the
-# result barely moves — the long tail carries little probability mass.
+# result barely moves - the long tail carries little probability mass.
 _EMD_VARIANT_CAP = 100
 
 
@@ -33,7 +33,7 @@ def variant_counts(df: Any) -> dict[tuple[str, ...], int]:
 
     Computed directly from the frame (sort by case + timestamp, collect each
     case's activity sequence) rather than via ``pm4py.get_variants`` whose
-    return shape drifts across versions — this is deterministic and version-proof.
+    return shape drifts across versions - this is deterministic and version-proof.
     """
     sorted_df = df.sort_values(["case_id", "timestamp"], kind="mergesort")
     counts: dict[tuple[str, ...], int] = {}

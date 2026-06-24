@@ -36,7 +36,7 @@ const DRIFT_META: Record<
 };
 
 function fmtTs(iso: string): string {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString(undefined, {
@@ -60,7 +60,7 @@ export function DriftTable({
   if (drifts.length === 0) {
     return (
       <p className="py-6 text-center text-xs text-muted-foreground">
-        No drifts available yet — run CV4CDD against this log first.
+        No drifts available yet – run CV4CDD against this log first.
       </p>
     );
   }
@@ -107,11 +107,11 @@ export function DriftTable({
                 <TableCell className="text-xs">
                   <div className="flex flex-col gap-0.5">
                     <span className="truncate">
-                      {d.start_activity || <em>—</em>}
+                      {d.start_activity || <em>–</em>}
                     </span>
                     <span className="text-muted-foreground">↓</span>
                     <span className="truncate">
-                      {d.end_activity || <em>—</em>}
+                      {d.end_activity || <em>–</em>}
                     </span>
                   </div>
                 </TableCell>

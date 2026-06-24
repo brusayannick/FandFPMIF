@@ -15,7 +15,7 @@ import { formatNumber } from "@/lib/format";
 import { usePerformanceKpis } from "../panel/queries";
 import { CardShell } from "./_kit";
 
-/** Event frequency per activity — the busiest steps in the process. */
+/** Event frequency per activity – the busiest steps in the process. */
 export default function ActivityThroughput({
   logId,
   config,

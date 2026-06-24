@@ -6,7 +6,7 @@ Builds the graph against trivial fakes and asserts:
 
 Full-pipeline integration is best validated against real OpenAI / Pinecone /
 Anthropic in a verification run (see README "Setup"). Mocking LangChain's
-structured-output internals from pytest is brittle — the agents are
+structured-output internals from pytest is brittle - the agents are
 individually unit-tested via the public seam (the drift adapter test) and
 through manual verification.
 """
@@ -75,7 +75,7 @@ def test_build_graph_compiles():
 
 
 def test_drift_adapter_chain_imports_cleanly():
-    """Trivial — guards against future refactors breaking the import surface
+    """Trivial - guards against future refactors breaking the import surface
     that module.py depends on (drift_record builder + the canonical map)."""
     from modules.concept_drift_explainer.agents.drift_agent import (
         build_drift_record,

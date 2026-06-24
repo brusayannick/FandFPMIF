@@ -37,7 +37,9 @@ declare module "react-grid-layout" {
     compactType?: "vertical" | "horizontal" | null;
     droppingItem?: { i: string; w: number; h: number };
     onLayoutChange?: (layout: Layout[]) => void;
-    onDrop?: (layout: Layout[], item: Layout, event: Event) => void;
+    // `item` is undefined when RGL tears down its dropping placeholder before the
+    // drop lands (its HTML5 droppable is racy) — callers must tolerate it.
+    onDrop?: (layout: Layout[], item: Layout | undefined, event: Event) => void;
     children?: React.ReactNode;
   }
 

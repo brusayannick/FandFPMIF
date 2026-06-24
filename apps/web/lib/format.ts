@@ -1,19 +1,19 @@
 /**
- * Small formatting helpers shared across pages. Keep these dependency-free —
+ * Small formatting helpers shared across pages. Keep these dependency-free –
  * heavier date/locale code can come in if/when we add Intl.DateTimeFormat
  * customisation in Settings → General → Locale.
  */
 
 export function formatNumber(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
+  if (n === null || n === undefined) return "–";
   return new Intl.NumberFormat().format(n);
 }
 
 export function formatDateRange(min: string | null, max: string | null): string {
-  if (!min || !max) return "—";
+  if (!min || !max) return "–";
   const a = new Date(min);
   const b = new Date(max);
-  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return "—";
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return "–";
   const fmt = new Intl.DateTimeFormat(undefined, {
     year: "numeric",
     month: "short",
@@ -33,9 +33,9 @@ const RELATIVE_THRESHOLDS: [number, Intl.RelativeTimeFormatUnit][] = [
 ];
 
 export function formatRelative(iso: string | null | undefined): string {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const ts = new Date(iso).getTime();
-  if (Number.isNaN(ts)) return "—";
+  if (Number.isNaN(ts)) return "–";
   const deltaSec = Math.round((ts - Date.now()) / 1000);
   const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
   const abs = Math.abs(deltaSec);
@@ -57,7 +57,7 @@ const SECONDS_PER_MONTH = SECONDS_PER_DAY * 30;
 const SECONDS_PER_YEAR = SECONDS_PER_DAY * 365;
 
 export function formatDuration(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "—";
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "–";
   if (seconds === 0) return "0 s";
 
   const sign = seconds < 0 ? "-" : "";

@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import { useCdeDrifts } from "../panel/queries";
 
-/** Detected concept drifts with confidence — surfaced from the explainer. */
+/** Detected concept drifts with confidence – surfaced from the explainer. */
 export default function DriftOverview({
   logId,
   config,

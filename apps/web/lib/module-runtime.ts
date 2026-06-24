@@ -29,7 +29,7 @@ let _installPromise: Promise<void> | null = null;
 /**
  * Idempotent. Returns a Promise that resolves after `window.__FF_RUNTIME__`
  * is populated with every external the bundler expects. Safe to call from
- * SSR — it resolves immediately on the server (where no module bundle
+ * SSR – it resolves immediately on the server (where no module bundle
  * runs).
  */
 export function installModuleRuntime(): Promise<void> {

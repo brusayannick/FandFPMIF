@@ -5,7 +5,7 @@ import { Position, type Edge, type Node } from "@xyflow/react";
  * in [0, 1] (typically `mean_trace_position` from the discovery serializer)
  * and stacks them into perpendicular "lanes" to resolve overlaps.
  *
- * Reads like a Gantt chart for processes — earlier activities sit further
+ * Reads like a Gantt chart for processes – earlier activities sit further
  * along the time axis. For highly cyclical DFGs the layered (Sugiyama) mode
  * still looks cleaner; this is the literal "x = mean trace position" view.
  *

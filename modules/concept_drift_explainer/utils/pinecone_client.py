@@ -6,8 +6,8 @@ ready-to-query `Index` handle. Creates the index on first use, matching the
 original repository's serverless defaults (aws / us-east-1, cosine).
 
 The vector ``dimension`` is taken from the module's own embedding config
-(``cfg["ai"]["embedding_dimensions"]``) and falls back to 1536 — the native
-size of OpenAI's ``text-embedding-3-small`` — when unset.
+(``cfg["ai"]["embedding_dimensions"]``) and falls back to 1536 - the native
+size of OpenAI's ``text-embedding-3-small`` - when unset.
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ def recreate_index(cfg: dict) -> dict:
     """Delete (if exists) and recreate the configured Pinecone index.
 
     Returns ``{"index_name": ..., "dimension": ...}`` so the UI can confirm
-    what was provisioned. All previously ingested vectors are lost — the
+    what was provisioned. All previously ingested vectors are lost - the
     caller is responsible for re-ingesting documents afterwards.
     """
     api_key = _require_api_key(cfg)

@@ -47,10 +47,10 @@ export function CaseList({
             <TableRow key={c.case_id} className="h-12">
               <TableCell className="font-mono text-sm">{c.case_id}</TableCell>
               <TableCell className="text-sm text-muted-foreground">
-                {c.case_start ? new Date(c.case_start).toLocaleString() : "—"}
+                {c.case_start ? new Date(c.case_start).toLocaleString() : "–"}
               </TableCell>
               <TableCell className="text-sm text-muted-foreground">
-                {c.case_end ? new Date(c.case_end).toLocaleString() : "—"}
+                {c.case_end ? new Date(c.case_end).toLocaleString() : "–"}
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {formatDuration(c.case_duration_seconds)}

@@ -1,8 +1,8 @@
-"""AgentSimulator — multi-agent business-process simulation as a Mate module.
+"""AgentSimulator - multi-agent business-process simulation as a Mate module.
 
 Runs `isolation: subprocess` (manifest): the upstream code pins numpy 1.x /
 pandas 2.x, incompatible with the platform's numpy 2.x / pandas 3.x, so it needs
-its own venv (built on 3.12 — the SDK requires >=3.12; the pinned deps ship
+its own venv (built on 3.12 - the SDK requires >=3.12; the pinned deps ship
 cp312 wheels). The platform spawns a worker on that venv; handlers run there and
 reach the event log + cache + progress over the SDK's RPC bridge.
 
@@ -79,7 +79,7 @@ class AgentSimulatorModule(Module):
     # ── the simulation run ─────────────────────────────────────────────────
 
     @route.post("/simulate")
-    @job(progress=True, title="AgentSimulator — generate logs", cancellable=True)
+    @job(progress=True, title="AgentSimulator - generate logs", cancellable=True)
     async def simulate(self, ctx: ModuleContext, **_kw: Any) -> dict[str, Any]:
         import time
 

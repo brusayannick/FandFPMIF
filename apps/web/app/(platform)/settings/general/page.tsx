@@ -42,7 +42,7 @@ export default function GeneralSettingsPage() {
   const setExperienceLevel = (level: ExperienceLevel) => {
     if (!onboardingQuery.data) return;
     updateOnboarding.mutate({
-      // Preserve the completed flag — this only re-tunes the proficiency the
+      // Preserve the completed flag – this only re-tunes the proficiency the
       // welcome flow captured, it doesn't re-open onboarding.
       completed: onboardingQuery.data.completed,
       experience_level: level,

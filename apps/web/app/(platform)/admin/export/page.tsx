@@ -31,7 +31,7 @@ interface ExportInfo {
 }
 
 function formatBytes(n: number | null): string {
-  if (n == null) return "—";
+  if (n == null) return "–";
   if (n < 1024) return `${n} B`;
   const units = ["KB", "MB", "GB"];
   let v = n / 1024;
@@ -123,7 +123,7 @@ function MetadataDbCard({ info }: { info: ExportInfo | null }) {
         </p>
 
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <Stat label="Users" value={info?.user_count ?? "—"} />
+          <Stat label="Users" value={info?.user_count ?? "–"} />
           <Stat label="Database size" value={formatBytes(info?.db_size_bytes ?? null)} />
         </div>
 

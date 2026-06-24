@@ -7,7 +7,7 @@ import type { ExportFacets, ExportFilters, ExportPreview } from "@/lib/api-types
 
 /**
  * Read-only TanStack Query hooks for the admin behaviour-export filter UI.
- * Mirrors ``lib/analytics-queries.ts``. No mutations here — the actual export
+ * Mirrors ``lib/analytics-queries.ts``. No mutations here – the actual export
  * is a streamed download (``downloadBlob``), not a query.
  */
 

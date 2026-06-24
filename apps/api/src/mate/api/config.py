@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     )
     database_url: str = Field(
         default="sqlite+aiosqlite:///data/metadata.db",
-        description="aiosqlite URL — async SQLAlchemy engine.",
+        description="aiosqlite URL - async SQLAlchemy engine.",
     )
 
     log_level: Literal["debug", "info", "warning", "error"] = "info"
@@ -37,13 +37,13 @@ class Settings(BaseSettings):
 
     # Behaviour-tracking policy & onboarding default. Read by the frontend via
     # GET /api/v1/usage/config (surfaced as `onboarding_mode`):
-    #   force — tracking is ON for every user; the onboarding privacy step and
+    #   force - tracking is ON for every user; the onboarding privacy step and
     #           the Settings → Privacy tab are hidden, and users cannot opt out.
-    #   on    — tracking is enabled by default during onboarding (opt-out flow).
-    #   off   — tracking is disabled by default during onboarding (opt-in flow).
+    #   on    - tracking is enabled by default during onboarding (opt-out flow).
+    #   off   - tracking is disabled by default during onboarding (opt-in flow).
     user_tracking_onboarding: Literal["force", "on", "off"] = Field(
         default="force",
-        description="USER_TRACKING_ONBOARDING — tracking default/policy (force|on|off).",
+        description="USER_TRACKING_ONBOARDING - tracking default/policy (force|on|off).",
     )
 
     # Job queue. ``worker_concurrency`` is the boot default for the asyncio
@@ -54,6 +54,19 @@ class Settings(BaseSettings):
         default=1000,
         description="Persist job progress to SQLite every N processed events.",
     )
+    # Soft-cancel grace for subprocess-isolated module jobs (§7.9). On cancel the
+    # worker is asked to wind down cooperatively (RPC-error on its next ctx call);
+    # if it hasn't stopped after this many seconds the host hard-kills+respawns it
+    # (the existing SIGKILL fallback). Keep small so a stuck native job dies
+    # promptly, but non-zero so a cooperative worker gets a chance to unwind.
+    subprocess_cancel_grace_seconds: float = Field(default=3.0, ge=0, le=60)
+
+    # Live system-resource sampler (Admin → System). A background task samples
+    # CPU/RAM every ``metrics_sample_interval_seconds`` into a ring buffer of the
+    # last ``metrics_history_samples`` points (default 90 x 2s = 3 min of history).
+    # Cheap enough to run always-on; not persisted.
+    metrics_sample_interval_seconds: float = Field(default=2.0, ge=0.5, le=30)
+    metrics_history_samples: int = Field(default=90, ge=10, le=600)
 
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000"],
@@ -63,11 +76,11 @@ class Settings(BaseSettings):
     # Keycloak / OIDC. Set in docker-compose; required for any authenticated
     # request to succeed. The `iss` claim on issued tokens must equal
     # ``keycloak_issuer`` (browser-facing URL). The JWKS endpoint can live on
-    # a different host (e.g. the docker DNS name) — ``keycloak_jwks_url`` lets
+    # a different host (e.g. the docker DNS name) - ``keycloak_jwks_url`` lets
     # the API fetch keys without going via the browser-facing hostname.
     keycloak_issuer: str = Field(
         default="http://localhost:8080/realms/flows-funds",
-        description="OIDC issuer URL — must match the `iss` claim on tokens.",
+        description="OIDC issuer URL - must match the `iss` claim on tokens.",
     )
     keycloak_jwks_url: str = Field(
         default="http://localhost:8080/realms/flows-funds/protocol/openid-connect/certs",
@@ -83,11 +96,11 @@ class Settings(BaseSettings):
     # demo sentinel (see auth/dependencies.DEMO_ACCESS_TOKEN) is resolved to a
     # fixed, non-admin demo user WITHOUT any Keycloak/JWKS validation. Pairs with
     # DEMO_MODE on the web app, which auto-signs that demo session in.
-    # NEVER enable in a multi-tenant or public production deployment — it lets
+    # NEVER enable in a multi-tenant or public production deployment - it lets
     # anyone in as the demo user with no credentials.
     demo_mode: bool = Field(
         default=False,
-        description="DEMO_MODE — accept the demo sentinel token as a fixed demo user (no auth).",
+        description="DEMO_MODE - accept the demo sentinel token as a fixed demo user (no auth).",
     )
 
     # When DEMO_MODE is on, grant the fixed demo user the realm "admin" role so it
@@ -95,17 +108,17 @@ class Settings(BaseSettings):
     # Pairs with DEMO_ADMIN on the web app, which flags the demo session isAdmin.
     demo_admin: bool = Field(
         default=False,
-        description="DEMO_ADMIN — give the demo user the admin role (only when DEMO_MODE is on).",
+        description="DEMO_ADMIN - give the demo user the admin role (only when DEMO_MODE is on).",
     )
 
     # Secret used to derive the Fernet key that encrypts the S3 secret-access-key
     # stored in the metadata DB (Admin → Storage). Must be set and STABLE in
-    # production — rotating it makes the stored S3 secret undecryptable and the
+    # production - rotating it makes the stored S3 secret undecryptable and the
     # admin has to re-enter it. Falls back to ``database_url`` when unset so dev
     # works out of the box (acceptable: the DB is local-only there).
     storage_encryption_key: str | None = Field(
         default=None,
-        description="STORAGE_ENCRYPTION_KEY — encrypts the stored S3 secret key.",
+        description="STORAGE_ENCRYPTION_KEY - encrypts the stored S3 secret key.",
     )
 
     @property

@@ -2,12 +2,16 @@ id: complexity
 name: Complexity
 version: 1.0.0
 category: advanced
-description: EPA-based complexity measures - variant/sequence entropy (with linear and exponential forgetting), Lempel-Ziv, affinity, structure, Pentland's task and process complexity, plus an enriched-EPA variant when trace/event attributes from the IEEE XES standard are present.
+description: >-
+  Measures how complex your process is with entropy-based metrics over its
+  variants and activity sequences, plus Lempel-Ziv, affinity, structure, and
+  Pentland's task and process complexity. Uses richer XES trace and event
+  attributes automatically when they are present.
 keywords: ["complexity", "entropy", "variant entropy", "lempel-ziv", "pentland", "structure", "affinity", "epa"]
 author: E. Langer
 license: MIT
 default_enabled: true
-# Runs entirely locally — safe to use against confidential event logs.
+# Runs entirely locally – safe to use against confidential event logs.
 isConfidentialSafe: true
 
 requirements:
@@ -49,6 +53,8 @@ frontend:
       icon: Layers
       default_w: 6
       default_h: 7
+      min_w: 5
+      min_h: 5
     - id: entropy-comparison
       entry: ./widgets/EntropyComparison.tsx
       title: Entropy comparison
@@ -56,6 +62,8 @@ frontend:
       icon: BarChart3
       default_w: 6
       default_h: 8
+      min_w: 5
+      min_h: 6
 
 permissions:
   - read:event_log

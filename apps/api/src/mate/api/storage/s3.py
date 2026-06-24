@@ -134,7 +134,7 @@ class S3Object:
 def list_objects(prefix: str, s: StorageSettings | None = None) -> list[S3Object]:
     """List every object directly relevant under ``prefix`` (recursive).
 
-    ``prefix`` is used literally against the configured bucket — it is NOT
+    ``prefix`` is used literally against the configured bucket - it is NOT
     combined with the admin ``prefix`` setting, so a watch can point at any
     location an upstream pipeline writes to. Directory markers (keys ending in
     ``/``) are skipped.

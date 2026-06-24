@@ -28,7 +28,7 @@ import pandas as pd
 INPUT_COLUMNS = ("case_id", "activity", "resource", "start_time", "end_time")
 
 # Canonical Mate event columns we require (see apps/api/.../event_log_access.py).
-# `end_timestamp` is optional — handled separately in build_input_csv.
+# `end_timestamp` is optional - handled separately in build_input_csv.
 _CANON_REQUIRED = ("case_id", "activity", "timestamp", "resource")
 
 ProgressCb = Callable[[int, int, str], Awaitable[None]]
@@ -54,7 +54,7 @@ def build_input_csv(df: pd.DataFrame, out_path: Path) -> dict[str, int]:
 
     start = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
     # end_timestamp is optional: most real logs carry a single timestamp. When
-    # it's absent (or null for a row) we fall back to the start — a zero-duration
+    # it's absent (or null for a row) we fall back to the start - a zero-duration
     # activity. AgentSimulator still models arrivals, control flow and handovers;
     # only per-activity durations degrade.
     if "end_timestamp" in df.columns:
@@ -112,7 +112,7 @@ async def run_simulate(
     Earlier versions shelled out to ``simulate.py``. Spawning that grandchild
     from inside the platform's asyncio subprocess worker proved fatally fragile
     (the worker was SIGKILLed ~30s in, mid-run), so we import the pipeline and run
-    it directly — no fork, no pipe, no os.system. ``output_dir`` is passed through
+    it directly - no fork, no pipe, no os.system. ``output_dir`` is passed through
     ``params`` so the simulator writes under our scratch dir without an os.chdir.
     """
     module_dir = module_dir.resolve()
@@ -213,7 +213,7 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     start = pd.to_datetime(df[sct], utc=True, format="mixed", errors="coerce")
     # end falls back to start when missing/unparseable (mirrors build_input_csv):
     # real logs are often single-timestamp, and a NaT end must not delete the row
-    # — that would silently empty whole distributions. We only drop on a missing
+    # - that would silently empty whole distributions. We only drop on a missing
     # *start* (a row we genuinely can't place in time).
     end = pd.to_datetime(df[ect], utc=True, format="mixed", errors="coerce").fillna(start)
     d = pd.DataFrame(

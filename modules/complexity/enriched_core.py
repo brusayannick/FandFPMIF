@@ -115,7 +115,7 @@ def _build_enriched_key_fn(df: pd.DataFrame) -> Any:
     """
     event_cols = _attr_columns(df, set(REQUIRED_EVENT_ATTRS))
     trace_cols = _attr_columns(df, set(REQUIRED_TRACE_ATTRS))
-    # Avoid re-using case_id / activity / timestamp inside the key — they
+    # Avoid re-using case_id / activity / timestamp inside the key - they
     # already determine the prefix or the edge label.
     skip = {"case_id", "activity", "timestamp"}
     attr_cols = [c for c in (event_cols + trace_cols) if c not in skip]

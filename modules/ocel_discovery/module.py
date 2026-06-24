@@ -1,4 +1,4 @@
-"""Object-Centric Discovery — OC-DFG + object-type summary for OCEL logs.
+"""Object-Centric Discovery - OC-DFG + object-type summary for OCEL logs.
 
 Proves the object-centric module path end-to-end: every handler reads through
 ``ctx.object_log`` (the OCEL access layer), never ``ctx.event_log``. The module
@@ -125,8 +125,8 @@ def _aggregate_object_pairs(
 ) -> tuple[dict[tuple[str, str], int], dict[str, int]]:
     """Aggregate a pm4py object-graph (a set of ``(oid, oid)`` tuples) to the
     object-type level. Returns ``(cross_type_edges, intra_type_counts)`` where
-    edges are keyed by ``(source_type, target_type)`` — normalised to a sorted
-    pair for undirected graphs — and counted by distinct object pairs."""
+    edges are keyed by ``(source_type, target_type)`` - normalised to a sorted
+    pair for undirected graphs - and counted by distinct object pairs."""
     seen: set[tuple[str, str]] = set()
     edges: dict[tuple[str, str], int] = {}
     intra: dict[str, int] = {}
@@ -160,7 +160,7 @@ def _serialize_ocpn(ocpn: Any) -> dict[str, Any]:
     pm4py projects the OCPN into one classic Petri net per object type:
     ``ocpn["petri_nets"][ot] == (net, initial_marking, final_marking)``. A
     transition with ``label is None`` is a silent (tau) transition. The
-    ``double_arcs_on_activity[ot][activity]`` flag marks variable arcs — drawn
+    ``double_arcs_on_activity[ot][activity]`` flag marks variable arcs - drawn
     thicker, mirroring pm4py's own OCPN visualiser.
     """
     petri_nets = ocpn["petri_nets"]
@@ -289,8 +289,8 @@ class OcelDiscoveryModule(Module):
     ) -> dict[str, Any]:
         """Object-to-object graph aggregated to the object-type level.
 
-        ``object_interaction`` (the default) is computed directly in DuckDB —
-        objects that share an event, counted by distinct object pairs — which
+        ``object_interaction`` (the default) is computed directly in DuckDB -
+        objects that share an event, counted by distinct object pairs - which
         avoids materialising every object pair. The other variants
         (descendants / inheritance / cobirth / codeath) come from
         ``pm4py.discover_objects_graph`` and are aggregated the same way.

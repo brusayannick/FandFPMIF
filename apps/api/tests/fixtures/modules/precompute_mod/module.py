@@ -9,7 +9,7 @@ class PrecomputeModule(Module):
     @on_event("log.imported")
     @job(progress=True, title="Precompute on import")
     async def precompute(self, ctx: ModuleContext, payload: dict) -> None:
-        # The body is irrelevant to the processing-lifecycle tests — they assert
+        # The body is irrelevant to the processing-lifecycle tests - they assert
         # on the resulting `Job` row + log status, not on any output. Touch the
         # event log so the job does real (cheap) work and the import-time
         # availability gate (min_events/min_cases) is exercised.

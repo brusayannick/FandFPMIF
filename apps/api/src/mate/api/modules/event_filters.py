@@ -5,8 +5,8 @@ into SQL, and they need it in two different shapes:
 
 * The events route binds values as ``?`` parameters (``build_filter_where``).
 * :class:`EventLogAccess` bakes the *applied* filter straight into a
-  ``CREATE VIEW`` — and DuckDB rejects parameter binding inside a view
-  definition — so it needs the predicate with inlined, escaped literals
+  ``CREATE VIEW`` - and DuckDB rejects parameter binding inside a view
+  definition - so it needs the predicate with inlined, escaped literals
   (``render_filter_sql``).
 
 Both paths share one validation + op vocabulary so the editor preview and the
@@ -31,7 +31,7 @@ _VALUELESS_OPS: frozenset[str] = frozenset({"is_null", "is_not_null"})
 
 
 def quote_ident(name: str) -> str:
-    """DuckDB identifier quoting — doubles internal quotes."""
+    """DuckDB identifier quoting - doubles internal quotes."""
     return '"' + name.replace('"', '""') + '"'
 
 
@@ -93,7 +93,7 @@ def build_filter_where(
         elif op == "in":
             values = f.get("value") or []
             if not values:
-                # An empty pick-list matches nothing — make that explicit
+                # An empty pick-list matches nothing - make that explicit
                 # rather than degrading to "no filter".
                 clauses.append("FALSE")
                 continue
@@ -104,7 +104,7 @@ def build_filter_where(
 
 
 def render_filter_sql(filters: list[dict[str, Any]], column_names: set[str]) -> str:
-    """Predicate with inlined literals — for embedding in a ``CREATE VIEW``.
+    """Predicate with inlined literals - for embedding in a ``CREATE VIEW``.
 
     DuckDB won't bind ``?`` inside a view definition, so values are rendered as
     escaped SQL literals here. Identifiers are still validated against
@@ -116,7 +116,7 @@ def render_filter_sql(filters: list[dict[str, Any]], column_names: set[str]) -> 
     for f in filters:
         field = f["field"]
         if field not in column_names:
-            # Stale filter referencing a since-removed column — drop it rather
+            # Stale filter referencing a since-removed column - drop it rather
             # than poisoning every downstream read.
             continue
         ident = quote_ident(field)

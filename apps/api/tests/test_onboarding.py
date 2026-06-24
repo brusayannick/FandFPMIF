@@ -1,4 +1,4 @@
-"""Per-user onboarding state — drives whether the welcome overlay shows."""
+"""Per-user onboarding state - drives whether the welcome overlay shows."""
 
 from __future__ import annotations
 

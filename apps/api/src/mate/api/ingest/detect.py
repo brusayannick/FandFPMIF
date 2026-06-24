@@ -2,10 +2,10 @@
 
 Two stages:
 
-1. ``detect_format(filename)`` — a *coarse* guess from the extension alone. Used
+1. ``detect_format(filename)`` - a *coarse* guess from the extension alone. Used
    before the upload is staged, to reject obviously-unsupported files (415) and
    to name the retained ``original.<ext>`` on disk.
-2. ``sniff_format(path, coarse)`` — refines the coarse guess by looking at the
+2. ``sniff_format(path, coarse)`` - refines the coarse guess by looking at the
    file's actual *content*. This is where ``.json`` / ``.xml`` are auto-routed
    to either the case-centric pipeline or the object-centric (OCEL) one: real
    OCEL 2.0 files are routinely named plain ``.json`` / ``.xml``, and a plain
@@ -68,7 +68,7 @@ def original_extension(filename: str, source_format: str) -> str:
 
     We keep the upload under its real suffix so the file stays meaningful on
     disk and ``find_original`` can locate it. OCEL reader selection no longer
-    depends on this — :func:`sniff_format` carries the flavor explicitly.
+    depends on this - :func:`sniff_format` carries the flavor explicitly.
     """
     lower = filename.lower()
     for ext in (

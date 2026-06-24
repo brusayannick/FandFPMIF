@@ -26,6 +26,12 @@ import {
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { rawFetch } from "@/lib/api";
+import type {
+  JobsInsights,
+  StorageInsights,
+  UsageInsights,
+  UsersInsights,
+} from "@/lib/api-types";
 import { formatNumber } from "@/lib/format";
 
 interface DayCount {
@@ -85,7 +91,7 @@ function shortDay(day: string): string {
 
 /** Seconds → compact "Xh Ym" / "Xm Ys" / "Xs" for the avg-session KPI. */
 function formatDuration(seconds: number): string {
-  if (seconds <= 0) return "—";
+  if (seconds <= 0) return "–";
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.round(seconds % 60);
@@ -255,9 +261,193 @@ export default function AdminOverviewPage() {
               <LabelBarChart data={data.activity_by_weekday} />
             </ChartCard>
           </div>
+
+          <UsersSection days={days} />
+          <StorageSection days={days} />
+          <JobsSection days={days} />
+          <UsageSection days={days} />
         </>
       )}
     </div>
+  );
+}
+
+/** Fetch one admin-insights metric group, mirroring the page's rawFetch + 403
+ *  handling (the page itself only renders these once the overview loaded, i.e.
+ *  the caller is already an admin). */
+function useInsight<T>(path: string, days: number): T | null {
+  const [data, setData] = useState<T | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await rawFetch(`${path}?days=${days}`);
+        if (!res.ok) return;
+        const json = (await res.json()) as T;
+        if (!cancelled) setData(json);
+      } catch {
+        /* surfaced by the overview-level error state */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [path, days]);
+  return data;
+}
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return <h2 className="pt-2 text-sm font-semibold">{children}</h2>;
+}
+
+function UsersSection({ days }: { days: number }) {
+  const data = useInsight<UsersInsights>("/api/v1/admin/insights/users", days);
+  if (!data) return null;
+  return (
+    <>
+      <SectionHeading>User activity</SectionHeading>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Kpi label="Users" value={data.user_count} />
+        <Kpi label="Active (range)" value={data.active_users_in_range} />
+        <Kpi label="Onboarded" value={data.onboarding_completed} />
+        <Kpi label="Onboard %" value={`${data.onboarding_completion_pct}%`} />
+      </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <ChartCard title="Active users / day" icon={Users} empty={data.active_users_by_day.length === 0}>
+          <DayLineChart data={data.active_users_by_day} />
+        </ChartCard>
+        <ChartCard title="Last seen" icon={Clock} empty={data.last_seen_buckets.every((b) => b.count === 0)}>
+          <LabelBarChart data={data.last_seen_buckets.map((b) => ({ label: b.bucket, count: b.count }))} />
+        </ChartCard>
+        <ChartCard
+          title="Top users by events"
+          icon={Users}
+          empty={data.top_users_by_events.length === 0}
+        >
+          <LabelBarChart
+            data={data.top_users_by_events.map((u) => ({
+              label: u.username || u.email || u.user_id.slice(0, 8),
+              count: u.count,
+            }))}
+            horizontal
+          />
+        </ChartCard>
+        <ChartCard title="Sessions / day" icon={Activity} empty={data.sessions_by_day.length === 0}>
+          <DayLineChart data={data.sessions_by_day} />
+        </ChartCard>
+      </div>
+    </>
+  );
+}
+
+function formatBytes(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "–";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function StorageSection({ days }: { days: number }) {
+  const data = useInsight<StorageInsights>("/api/v1/admin/insights/storage", days);
+  if (!data) return null;
+  return (
+    <>
+      <SectionHeading>Storage &amp; data</SectionHeading>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Kpi label="Backend" value={data.backend_mode} />
+        <Kpi label="Total logs" value={data.total_logs} />
+        <Kpi label="Total events" value={data.total_events} />
+        <Kpi
+          label={data.backend_mode === "s3" ? "S3 used" : "S3"}
+          value={data.backend_mode === "s3" ? formatBytes(data.s3_used_bytes) : "–"}
+        />
+      </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <ChartCard title="Events by user" icon={Users} empty={data.per_user.length === 0}>
+          <LabelBarChart
+            data={data.per_user.map((u) => ({
+              label: u.username || u.email || u.user_id.slice(0, 8),
+              count: u.events_total,
+            }))}
+            horizontal
+          />
+        </ChartCard>
+        <ChartCard title="Largest logs" icon={FileStack} empty={data.largest_logs.length === 0}>
+          <LabelBarChart
+            data={data.largest_logs.map((l) => ({ label: l.name, count: l.events_count ?? 0 }))}
+            horizontal
+          />
+        </ChartCard>
+      </div>
+    </>
+  );
+}
+
+function JobsSection({ days }: { days: number }) {
+  const data = useInsight<JobsInsights>("/api/v1/admin/insights/jobs", days);
+  if (!data) return null;
+  return (
+    <>
+      <SectionHeading>Jobs &amp; system health</SectionHeading>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <Kpi label="Concurrency" value={data.runtime.concurrency} />
+        <Kpi label="Live workers" value={data.runtime.live_workers} />
+        <Kpi label="Queue depth" value={data.runtime.queue_depth} />
+        <Kpi label="Running" value={data.runtime.running} />
+        <Kpi label="Avg. runtime" value={formatDuration(data.avg_duration_seconds)} />
+        <Kpi label="Slowest" value={formatDuration(data.slowest_seconds)} />
+      </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <ChartCard title="Jobs by type" icon={Briefcase} empty={data.by_type.length === 0}>
+          <LabelBarChart data={data.by_type} horizontal />
+        </ChartCard>
+        <ChartCard title="Jobs by status" icon={Briefcase} empty={data.by_status.length === 0}>
+          <LabelBarChart data={data.by_status} />
+        </ChartCard>
+        <ChartCard title="Completions / day" icon={Activity} empty={data.completions_by_day.length === 0}>
+          <DayLineChart data={data.completions_by_day} />
+        </ChartCard>
+        <ChartCard title="Failures / day" icon={Briefcase} empty={data.failures_by_day.length === 0}>
+          <DayLineChart data={data.failures_by_day} />
+        </ChartCard>
+      </div>
+    </>
+  );
+}
+
+function UsageSection({ days }: { days: number }) {
+  const data = useInsight<UsageInsights>("/api/v1/admin/insights/usage", days);
+  if (!data) return null;
+  return (
+    <>
+      <SectionHeading>Module &amp; AI usage</SectionHeading>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Kpi label="AI chat requests" value={data.ai.chat_requests} />
+        <Kpi label="AI guidance" value={data.ai.guidance_requests} />
+        <Kpi label="Tokens / cost" value={data.ai.tokens_tracked ? "tracked" : "not tracked"} />
+        <Kpi label="Most-used module" value={data.most_used_module ?? "–"} />
+      </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <ChartCard title="Installs by module" icon={Database} empty={data.installs_by_module.length === 0}>
+          <LabelBarChart data={data.installs_by_module} horizontal />
+        </ChartCard>
+        <ChartCard
+          title="Runs by module"
+          icon={Briefcase}
+          empty={data.modules.every((m) => m.runs === 0)}
+        >
+          <LabelBarChart
+            data={data.modules.map((m) => ({ label: m.module_id, count: m.runs }))}
+            horizontal
+          />
+        </ChartCard>
+      </div>
+    </>
   );
 }
 

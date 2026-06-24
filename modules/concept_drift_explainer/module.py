@@ -1,4 +1,4 @@
-"""Concept Drift Explainer — module entry point.
+"""Concept Drift Explainer - module entry point.
 
 Routes:
   GET    /drifts                    → list adapted drifts from cv4cdd's cache
@@ -102,18 +102,20 @@ class ConceptDriftExplainerModule(Module):
 
     # ── triggers ──────────────────────────────────────────────────────────────
 
-    @on_event("cv4cdd.detect")
-    async def on_cv4cdd_detect(
+    @on_event("cv4cdd.completed")
+    async def on_cv4cdd_completed(
         self, ctx: ModuleContext, payload: dict[str, Any]
     ) -> None:
-        """Cheap refresh hook — no LLM cost.
+        """Cheap refresh hook - no LLM cost.
 
-        cv4cdd does not currently emit this topic, but if/when it does the
-        platform will fire this handler so the panel can show a fresh drift
-        list without the user having to refresh. The handler intentionally
-        does *not* trigger the explanation pipeline (which costs real money).
+        The platform auto-emits `<module_id>.completed` when a module's precompute
+        job succeeds, so this fires after cv4cdd finishes detecting drifts and the
+        panel can show a fresh drift list without the user having to refresh. It is
+        *not* a `@job` (no `progress`/`@job` stacked) so it never gates the log's
+        `processing → ready` transition, and it intentionally does *not* trigger
+        the explanation pipeline (which costs real money).
         """
-        ctx.logger.info("cv4cdd.detect arrived; drift list will refresh on next poll")
+        ctx.logger.info("cv4cdd.completed arrived; drift list will refresh on next poll")
 
     # ── drift listing ────────────────────────────────────────────────────────
 
@@ -196,14 +198,14 @@ class ConceptDriftExplainerModule(Module):
                 index, namespace=_ns_for(ctx.log_id), source_document_name=name
             )
         except HTTPException:
-            # Pinecone not configured — the file is gone, that's enough.
+            # Pinecone not configured - the file is gone, that's enough.
             pass
         return {"deleted": name}
 
     # ── ingestion ────────────────────────────────────────────────────────────
 
     @route.post("/ingest")
-    @job(progress=True, title="CDE — indexing documents")
+    @job(progress=True, title="CDE - indexing documents")
     async def ingest(self, ctx: ModuleContext) -> dict[str, Any]:
         cfg = ctx.config.value or {}
         async with ctx.event_log as log:
@@ -304,7 +306,7 @@ class ConceptDriftExplainerModule(Module):
     # ── explanation pipeline ─────────────────────────────────────────────────
 
     @route.post("/explain")
-    @job(progress=True, title="CDE — explaining drift")
+    @job(progress=True, title="CDE - explaining drift")
     async def explain(
         self, ctx: ModuleContext, body: ExplainRequest
     ) -> dict[str, Any]:
@@ -408,7 +410,7 @@ class ConceptDriftExplainerModule(Module):
             raise HTTPException(
                 status_code=404,
                 detail=(
-                    "Run /explain for this drift before chatting — the chatbot "
+                    "Run /explain for this drift before chatting - the chatbot "
                     "needs the analysis state."
                 ),
             )
@@ -426,7 +428,7 @@ class ConceptDriftExplainerModule(Module):
         # retrieval/re-rank stages re-execute, but their LLM responses are
         # cached on the per-invocation closures so the cost is bounded.
         # Simpler alternative: invoke the chatbot agent directly using the
-        # cached state. We do the latter — cheaper and avoids re-spending on
+        # cached state. We do the latter - cheaper and avoids re-spending on
         # retrieval and re-ranking.
         from .agents.chatbot_agent import make_chatbot_agent
 
@@ -487,10 +489,10 @@ class ConceptDriftExplainerModule(Module):
         """Return the platform's events.parquet as a pandas DataFrame.
 
         Timestamps in this dataframe are tz-naive UTC (the platform's ingest
-        path normalises them at write time —
+        path normalises them at write time -
         [apps/api/src/mate/api/ingest/dispatch.py:121](../../apps/api/src/mate/api/ingest/dispatch.py#L121)).
         Downstream code must NOT call ``pd.to_datetime(..., utc=False)`` on
-        them — that path silently drops mixed-offset rows.
+        them - that path silently drops mixed-offset rows.
         """
         async with ctx.event_log as log:
             return await log.pandas()

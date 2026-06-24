@@ -179,7 +179,7 @@ async def stream_interpretation(
         yield chunk
 
 
-# ── Anthropic — tool-use for structured output ─────────────────────────────
+# ── Anthropic - tool-use for structured output ─────────────────────────────
 
 
 async def _anthropic_tool_use(
@@ -268,7 +268,7 @@ async def _anthropic_stream_text(
                     yield delta["text"]
 
 
-# ── OpenAI-compatible — json_schema response format, with prompted fallback ─
+# ── OpenAI-compatible - json_schema response format, with prompted fallback ─
 
 
 async def _openai_compat_structured(
@@ -307,7 +307,7 @@ async def _openai_compat_structured(
         # Strict json_schema isn't universally supported. Many proxies
         # (litellm-fronted LibreChat, Azure-style deployments, etc.) return
         # 400/422/500 with a payload that mentions `response_format`. Auth
-        # and rate-limit errors stay terminal — no point burning tokens to
+        # and rate-limit errors stay terminal - no point burning tokens to
         # retry them.
         if r.status_code in (401, 403, 429):
             raise GuidanceError(f"{r.status_code}: {r.text[:300]}")
@@ -375,7 +375,7 @@ async def _openai_compat_prompted(
                     "role": "user",
                     "content": (
                         "Your last reply was not valid JSON. Reply with ONLY a "
-                        "JSON object matching the schema — no prose, no fences."
+                        "JSON object matching the schema - no prose, no fences."
                     ),
                 }
             )

@@ -1,4 +1,4 @@
-"""`@route`, `@on_event`, `@job` — metadata decorators (§5.6).
+"""`@route`, `@on_event`, `@job` - metadata decorators (§5.6).
 
 These do **not** run any platform machinery. They tag the wrapped function
 with a small marker the loader picks up at mount time. The auto-wrap in §5.5
@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 # Attribute names used to attach metadata to handler functions. Authors don't
-# touch these — the loader reads them.
+# touch these - the loader reads them.
 _ATTR_ROUTE = "__ff_route__"
 _ATTR_ON_EVENT = "__ff_on_event__"
 _ATTR_JOB = "__ff_job__"

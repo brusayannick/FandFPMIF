@@ -17,10 +17,11 @@ import {
 } from "@/components/ui/select";
 import {
   cleanDisplayName,
+  providerKeySet,
   useAiConfig,
   useFetchProviderModels,
   useProviderModels,
-  type AiConfig,
+  type AiConfigOut,
   type AiProvider,
   type ModelInfo,
 } from "@/lib/ai-queries";
@@ -48,10 +49,13 @@ const PROVIDER_LABELS: Record<AiProvider, string> = {
 
 const ALL_PROVIDERS: AiProvider[] = ["anthropic", "openai", "unigpt", "custom"];
 
-function isProviderConfigured(provider: AiProvider, cfg: AiConfig): boolean {
-  const p = cfg[provider];
-  if (!p?.api_key) return false;
-  if ((provider === "unigpt" || provider === "custom") && !p.base_url) return false;
+function isProviderConfigured(provider: AiProvider, cfg: AiConfigOut): boolean {
+  // Masked config: a stored key (key_set) plus a base URL when the provider
+  // needs one. The platform key flows to the proxy server-side.
+  if (!providerKeySet(cfg, provider)) return false;
+  if ((provider === "unigpt" || provider === "custom") && !cfg[`${provider}_base_url`]) {
+    return false;
+  }
   return true;
 }
 

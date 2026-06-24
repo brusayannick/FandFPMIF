@@ -6,7 +6,7 @@ import { useComplexityMetrics } from "../panel/queries";
 import { CardShell, KpiTile } from "./_kit";
 
 const fmt = (n: number | null | undefined, digits = 2) =>
-  n == null ? "—" : n.toLocaleString(undefined, { maximumFractionDigits: digits });
+  n == null ? "–" : n.toLocaleString(undefined, { maximumFractionDigits: digits });
 
 /** Headline EPA-based complexity measures for the log. */
 export default function ComplexityMetrics({ logId }: { logId: string }) {

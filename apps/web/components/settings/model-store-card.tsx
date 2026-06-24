@@ -40,7 +40,7 @@ function formatBytes(bytes: number): string {
 /**
  * Generic "model files" card for modules that declare `model_store` in their
  * manifest. Models are uploaded to platform-shared storage (any user's upload
- * is visible to everyone); the *selection* — which model this account uses —
+ * is visible to everyone); the *selection* – which model this account uses –
  * is per-user and persisted into the module config via `onSelect`.
  */
 export function ModelStoreCard({

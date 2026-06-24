@@ -34,7 +34,7 @@ export function FormatBadge({
   className?: string;
 }) {
   if (!format) {
-    return <span className="text-xs text-muted-foreground">—</span>;
+    return <span className="text-xs text-muted-foreground">–</span>;
   }
   const style = FORMAT_STYLES[format.toLowerCase()] ?? {
     label: format.toUpperCase(),

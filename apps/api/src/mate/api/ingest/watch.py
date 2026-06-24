@@ -77,7 +77,7 @@ def _unchanged(row: WatchedFolderFile, sf: SourceFile) -> bool:
         return sf.etag == row.etag
     if sf.mtime is not None and row.mtime is not None:
         return sf.mtime == row.mtime
-    # Neither side carries a strong fingerprint — fall back to size equality.
+    # Neither side carries a strong fingerprint - fall back to size equality.
     return sf.size == row.size
 
 

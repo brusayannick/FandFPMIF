@@ -19,10 +19,11 @@ A module author writes:
 
 The decorators only attach metadata; the platform's module loader (in
 ``mate.api.modules``) reads it at startup and binds the right
-machinery — there is no SDK-side runtime.
+machinery - there is no SDK-side runtime.
 """
 
 from mate.sdk.context import (
+    CancellationProtocol,
     EventBusProtocol,
     EventLogAccessProtocol,
     ModuleConfigProtocol,
@@ -33,7 +34,7 @@ from mate.sdk.context import (
     ResultCacheProtocol,
 )
 from mate.sdk.decorators import job, on_event, route
-from mate.sdk.errors import ModuleError, ModuleManifestError
+from mate.sdk.errors import Cancelled, ModuleError, ModuleManifestError
 from mate.sdk.manifest import (
     DependenciesPython,
     EventLogRequirements,
@@ -45,9 +46,11 @@ from mate.sdk.manifest import (
 )
 from mate.sdk.module import Module
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
+    "CancellationProtocol",
+    "Cancelled",
     "DependenciesPython",
     "EventBusProtocol",
     "EventLogAccessProtocol",

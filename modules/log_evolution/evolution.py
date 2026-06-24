@@ -1,4 +1,4 @@
-"""Log-evolution aggregations — how the event log develops over time.
+"""Log-evolution aggregations - how the event log develops over time.
 
 Pure functions over a normalised event table (``case_id, activity,
 timestamp``). No ``ModuleContext`` is needed, so every function here is unit
@@ -7,10 +7,10 @@ tested directly against a synthetic DataFrame (mirrors the approach in
 
 Two entry points:
 
-* :func:`compute_evolution` — per-period volume series (case arrivals,
+* :func:`compute_evolution` - per-period volume series (case arrivals,
   completions, work-in-progress, total events, and the activity mix), all
   reindexed onto the full calendar range so gaps render as explicit zeros.
-* :func:`compute_dotted` — the classic *dotted chart*: one point per event,
+* :func:`compute_dotted` - the classic *dotted chart*: one point per event,
   ``x = time``, ``y = case rank`` (cases ordered by start time), coloured by
   activity. Deterministically down-sampled above ``max_points``.
 """
@@ -97,8 +97,8 @@ def compute_evolution(df: pd.DataFrame, granularity: str = "auto") -> dict[str, 
 
     A case *arrives* in the period of its first event and *completes* in the
     period of its last event. Work-in-progress (``active``) at the end of each
-    period is the running open-case count — ``cumsum(arrivals) -
-    cumsum(completions)`` — which is non-negative and returns to zero once every
+    period is the running open-case count - ``cumsum(arrivals) -
+    cumsum(completions)`` - which is non-negative and returns to zero once every
     case has completed.
     """
     df = _coerce(df)

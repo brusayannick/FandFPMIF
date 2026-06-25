@@ -5,6 +5,7 @@ import { signOut, useSession } from "next-auth/react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PageContainer } from "@/components/page";
 import { initials } from "@/components/user-menu";
 
@@ -30,10 +31,14 @@ export default function ProfilePage() {
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/15 text-base font-semibold text-primary">
               {user ? initials(user.name, user.email) : <UserRound className="h-6 w-6" />}
             </span>
-            <div className="min-w-0">
-              <p className="truncate text-base font-medium">
-                {isLoading ? "Loading…" : user?.name || "Signed in"}
-              </p>
+            <div className="min-w-0 space-y-1">
+              {isLoading ? (
+                <Skeleton className="h-5 w-32" />
+              ) : (
+                <p className="truncate text-base font-medium">
+                  {user?.name || "Signed in"}
+                </p>
+              )}
               {user?.email && (
                 <p className="truncate text-muted-foreground">{user.email}</p>
               )}

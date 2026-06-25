@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CardGridSkeleton } from "@/components/skeletons";
 import {
   Select,
   SelectContent,
@@ -161,9 +162,16 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
 
   if (isLoading) {
     return (
-      <div className="space-y-4 px-4 py-6 sm:px-6 lg:px-8">
-        <Skeleton className="h-9 w-64" />
-        <Skeleton className="h-[60vh] w-full" />
+      <div className="flex h-full flex-col">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5 sm:px-6 lg:px-8">
+          <Skeleton className="h-8 w-8 rounded-md" />
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="ml-auto h-8 w-24 rounded-md" />
+          <Skeleton className="h-8 w-20 rounded-md" />
+        </div>
+        <div className="flex-1 overflow-auto px-4 py-6 sm:px-6 lg:px-8">
+          <CardGridSkeleton count={6} />
+        </div>
       </div>
     );
   }

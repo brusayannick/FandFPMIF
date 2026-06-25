@@ -222,7 +222,21 @@ export function DashboardCanvas({
     () =>
       displayItems.map((it) => {
         const { minW, minH } = minSizeFor(it.module_id, it.widget_id);
-        return { i: it.i, x: it.x, y: it.y, w: it.w, h: it.h, minW, minH };
+        // RGL only enforces minW/minH during an interactive resize – it never
+        // grows an already-placed item on load. So a card stored below its
+        // minimum (placed before the minimum existed, or before it was raised)
+        // would keep rendering too small. Clamp w/h up to the minimum here so
+        // the floor is applied to the rendered size too; in edit mode RGL's
+        // mount `onLayoutChange` then persists the corrected geometry.
+        return {
+          i: it.i,
+          x: it.x,
+          y: it.y,
+          w: Math.max(it.w, minW),
+          h: Math.max(it.h, minH),
+          minW,
+          minH,
+        };
       }),
     [displayItems, minSizeFor],
   );

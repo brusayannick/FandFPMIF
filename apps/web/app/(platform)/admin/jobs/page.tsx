@@ -16,8 +16,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { PageContainer, PageTitle, PageDescription } from "@/components/page";
-import { AdminTabs } from "@/components/admin/admin-tabs";
+import { TableSkeleton } from "@/components/skeletons";
 import { rawFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { formatDuration, formatNumber, formatRelative } from "@/lib/format";
@@ -195,17 +194,7 @@ export default function AdminJobsPage() {
   );
 
   return (
-    <PageContainer className="space-y-4">
-      <div className="space-y-1">
-        <PageTitle>Jobs</PageTitle>
-        <PageDescription>
-          Every job across all users, grouped by owner or event log. Monitor progress and
-          cancel, retry, or pause queues. Auto-refreshes every {POLL_MS / 1000}s.
-        </PageDescription>
-      </div>
-
-      <AdminTabs />
-
+    <div className="space-y-4">
       {state === "forbidden" ? (
         <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
@@ -298,9 +287,7 @@ export default function AdminJobsPage() {
 
           {/* Groups */}
           {state === "loading" && !data ? (
-            <div className="rounded-md border border-border px-3 py-8 text-center text-xs text-muted-foreground">
-              Loading…
-            </div>
+            <TableSkeleton />
           ) : state === "error" ? (
             <div className="rounded-md border border-border px-3 py-8 text-center text-xs text-destructive">
               Failed to load jobs.
@@ -404,7 +391,7 @@ export default function AdminJobsPage() {
           ) : null}
         </>
       )}
-    </PageContainer>
+    </div>
   );
 }
 

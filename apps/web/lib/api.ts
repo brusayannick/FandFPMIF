@@ -79,8 +79,10 @@ async function browserToken(): Promise<string | undefined> {
 // token triggers exactly one sign-out, not one per in-flight request.
 let signingOut = false;
 
-/** No usable token in the browser → end the session and go to /login. */
-async function logoutToLogin(): Promise<void> {
+/** No usable token in the browser → end the session and go to /login. Exported
+ * so the session guard (`components/session-guard.tsx`) reuses the same
+ * single-flight sign-out + on-/login no-op guard instead of racing its own. */
+export async function logoutToLogin(): Promise<void> {
   if (typeof window === "undefined") return;
   if (signingOut) return;
   // Already on the login surface – nothing to do (and avoids a redirect loop).
@@ -122,6 +124,13 @@ export async function api<T = unknown>(
   applyAmbientHeaders(headers);
   await attachAuth(headers);
   const res = await fetch(`${apiBase()}${path}`, { ...init, headers, cache: "no-store" });
+  // Token was present but the backend rejected it (expired access token that
+  // passed the local expiry check, JWKS/clock skew, rotated session). Bounce to
+  // login rather than letting a raw 401 surface into the UI; still throw below
+  // so the caller stops. 403 (authenticated but not allowed) is left untouched.
+  if (res.status === 401 && typeof window !== "undefined") {
+    await logoutToLogin();
+  }
   if (!res.ok) {
     let detail: unknown = await res.text();
     try {
@@ -148,7 +157,13 @@ export async function rawFetch(
   }
   applyAmbientHeaders(headers);
   await attachAuth(headers);
-  return fetch(`${apiBase()}${path}`, { ...init, headers });
+  const res = await fetch(`${apiBase()}${path}`, { ...init, headers });
+  // Same 401 → re-auth bounce as api(); the caller (e.g. SSE in lib/ws.ts) still
+  // gets the Response back to handle as it sees fit.
+  if (res.status === 401 && typeof window !== "undefined") {
+    await logoutToLogin();
+  }
+  return res;
 }
 
 /** Build an absolute URL pointing at the backend. Use for `<img src>`, `<a href>`,

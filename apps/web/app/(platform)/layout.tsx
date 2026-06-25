@@ -10,6 +10,7 @@ import { JobsDrawer } from "@/components/jobs/jobs-drawer";
 import { OnboardingOverlay } from "@/components/onboarding";
 import { MateAiSidebar } from "@/components/mate-ai/mate-ai-sidebar";
 import { RouteProgress } from "@/components/route-progress";
+import { SessionGuard } from "@/components/session-guard";
 
 export default async function PlatformLayout({
   children,
@@ -27,6 +28,7 @@ export default async function PlatformLayout({
   }
   return (
     <div className="flex h-screen w-screen overflow-hidden">
+      <SessionGuard />
       <Suspense fallback={null}>
         <RouteProgress />
       </Suspense>

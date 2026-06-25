@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -172,7 +173,14 @@ export default function PrivacySettingsPage() {
               />
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">Loading…</p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="space-y-1.5">
+                  <Skeleton className="h-3 w-16" />
+                  <Skeleton className="h-6 w-12" />
+                </div>
+              ))}
+            </div>
           )}
 
           {summaryQuery.data && summaryQuery.data.by_type.length > 0 && (

@@ -33,6 +33,8 @@ import type {
   UsersInsights,
 } from "@/lib/api-types";
 import { formatNumber } from "@/lib/format";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StatCardsSkeleton, ChartCardSkeleton } from "@/components/skeletons";
 
 interface DayCount {
   day: string;
@@ -143,7 +145,17 @@ export default function AdminOverviewPage() {
       ) : state === "error" ? (
         <p className="text-xs text-destructive">Failed to load admin overview.</p>
       ) : state === "loading" || data === null ? (
-        <p className="text-xs text-muted-foreground">Loading…</p>
+        <div className="space-y-4">
+          <div className="flex items-center justify-end">
+            <Skeleton className="h-7 w-28 rounded-md" />
+          </div>
+          <StatCardsSkeleton />
+          <div className="grid gap-4 lg:grid-cols-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <ChartCardSkeleton key={i} />
+            ))}
+          </div>
+        </div>
       ) : (
         <>
           <div className="flex items-center justify-end gap-2">

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -126,7 +127,11 @@ export default function AdminTeamsPage() {
         </div>
 
         {teams.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 w-full rounded-xl" />
+            ))}
+          </div>
         ) : (teams.data ?? []).length === 0 ? (
           <p className="text-sm text-muted-foreground">No teams yet.</p>
         ) : (
@@ -268,7 +273,11 @@ function TeamMembersPanel({ teamId }: { teamId: string }) {
         </div>
 
         {members.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <div className="space-y-2 rounded-md border p-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-8 w-full" />
+            ))}
+          </div>
         ) : (members.data ?? []).length === 0 ? (
           <p className="text-sm text-muted-foreground">No members yet.</p>
         ) : (
@@ -313,7 +322,11 @@ function ShareOversight() {
       </div>
 
       {shares.isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <div className="space-y-2 rounded-md border p-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-9 w-full" />
+          ))}
+        </div>
       ) : (shares.data ?? []).length === 0 ? (
         <p className="text-sm text-muted-foreground">No dashboards are shared.</p>
       ) : (

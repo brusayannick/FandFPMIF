@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Download, Search, ShieldAlert } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { rawFetch } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
 import { cn } from "@/lib/cn";
@@ -184,11 +185,13 @@ export default function AdminLogsPage() {
               </thead>
               <tbody>
                 {state === "loading" ? (
-                  <tr>
-                    <td colSpan={10} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                      Loading…
-                    </td>
-                  </tr>
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <tr key={i} className="border-b border-border last:border-0">
+                      <td colSpan={10} className="px-3 py-2.5">
+                        <Skeleton className="h-5 w-full" />
+                      </td>
+                    </tr>
+                  ))
                 ) : state === "error" ? (
                   <tr>
                     <td colSpan={10} className="px-3 py-8 text-center text-xs text-destructive">

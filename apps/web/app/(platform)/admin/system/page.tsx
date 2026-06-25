@@ -15,6 +15,8 @@ import {
 import { Activity, Cpu, MemoryStick, Server, ShieldAlert } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ChartCardSkeleton } from "@/components/skeletons";
 import { rawFetch } from "@/lib/api";
 import type {
   ResourceBreakdownSlice,
@@ -123,8 +125,17 @@ export default function AdminSystemPage() {
           Failed to load system metrics.
         </div>
       ) : !data ? (
-        <div className="rounded-md border border-border px-3 py-8 text-center text-xs text-muted-foreground">
-          Loading…
+        <div className="space-y-3">
+          <Skeleton className="h-3 w-80" />
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <ChartCardSkeleton />
+            <ChartCardSkeleton />
+          </div>
+          <ChartCardSkeleton />
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <ChartCardSkeleton />
+            <ChartCardSkeleton />
+          </div>
         </div>
       ) : (
         <>

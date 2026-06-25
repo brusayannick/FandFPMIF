@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { rawFetch } from "@/lib/api";
 import {
   exportQueryString,
@@ -86,7 +87,18 @@ export default function AdminExportPage() {
   return (
     <div className="space-y-4">
       {loading ? (
-        <p className="text-xs text-muted-foreground">Checking access…</p>
+        <div className="space-y-4">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div
+              key={i}
+              className="space-y-3 rounded-xl border border-border bg-card p-5"
+            >
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-72" />
+              <Skeleton className="h-9 w-full max-w-md rounded-md" />
+            </div>
+          ))}
+        </div>
       ) : !isAdmin ? (
         <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
@@ -404,7 +416,14 @@ function PreviewPanel({
         Live preview {fetching && !loading ? "(updating…)" : ""}
       </div>
       {loading ? (
-        <p className="text-xs text-muted-foreground">Loading…</p>
+        <div className="grid grid-cols-3 gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="space-y-1.5">
+              <Skeleton className="h-3 w-12" />
+              <Skeleton className="h-6 w-16" />
+            </div>
+          ))}
+        </div>
       ) : (
         <>
           <div className="grid grid-cols-3 gap-3 text-sm">

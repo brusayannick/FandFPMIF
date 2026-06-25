@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Slider } from "@/components/ui/slider";
+import { Skeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
 
 interface JobsConfig {
@@ -68,7 +69,15 @@ export function WorkerConcurrency() {
   }
 
   if (config === null) {
-    return <p className="text-xs text-muted-foreground">Loading…</p>;
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-3 w-10" />
+        </div>
+        <Skeleton className="h-2 w-full rounded-full" />
+      </div>
+    );
   }
 
   const { min, max, is_admin: isAdmin } = config;

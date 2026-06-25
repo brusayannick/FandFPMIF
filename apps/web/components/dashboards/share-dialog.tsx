@@ -5,6 +5,7 @@ import { Loader2, Trash2, Users, User as UserIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
@@ -71,7 +72,7 @@ export function ShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Share "{dashboardName}"</DialogTitle>
           <DialogDescription>
@@ -82,7 +83,7 @@ export function ShareDialog({
 
         {/* Add a target */}
         {targets.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <Skeleton className="h-10 w-full" />
         ) : (targets.data ?? []).length === 0 ? (
           <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
             You're not in any team yet. Ask an admin to add you to a team – you can then share
@@ -129,7 +130,11 @@ export function ShareDialog({
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted-foreground">Shared with</p>
           {shares.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <div className="space-y-2">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <Skeleton key={i} className="h-9 w-full" />
+              ))}
+            </div>
           ) : (shares.data ?? []).length === 0 ? (
             <p className="text-sm text-muted-foreground">Not shared with anyone yet.</p>
           ) : (

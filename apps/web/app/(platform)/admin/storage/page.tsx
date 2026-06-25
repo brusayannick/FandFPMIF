@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { rawFetch } from "@/lib/api";
 
 type Mode = "local" | "s3";
@@ -194,7 +195,18 @@ export default function AdminStoragePage() {
   return (
     <div className="space-y-4">
       {loading ? (
-        <p className="text-xs text-muted-foreground">Checking access…</p>
+        <div className="space-y-4">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div
+              key={i}
+              className="space-y-3 rounded-xl border border-border bg-card p-5"
+            >
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-72" />
+              <Skeleton className="h-9 w-full max-w-md rounded-md" />
+            </div>
+          ))}
+        </div>
       ) : !isAdmin ? (
         <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />

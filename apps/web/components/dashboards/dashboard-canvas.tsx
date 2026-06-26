@@ -77,6 +77,22 @@ type FreeDrag = {
   snapshot: DashboardItem[];
 };
 
+type FreeResize = {
+  id: string;
+  pointerX: number;
+  pointerY: number;
+  stepX: number;
+  stepY: number;
+  x: number;
+  y: number;
+  startW: number;
+  startH: number;
+  minW: number;
+  minH: number;
+  cols: number;
+  snapshot: DashboardItem[];
+};
+
 /** Synchronously begins a palette→canvas add at the pointer's position. The
  * canvas hands one of these to the palette (via a ref) so the palette's
  * `pointerdown` attaches the drag listeners in the same tick — identical to the
@@ -170,6 +186,7 @@ export function DashboardCanvas({
   // it tracks the cursor instead of easing behind it.
   const [liveItems, setLiveItems] = useState<DashboardItem[] | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [resizingId, setResizingId] = useState<string | null>(null);
   // Live palette→canvas add state. `addCard` is the card being added (drives the
   // ghost + chip); `addPointer` positions the chip; `addCell` is the snapped grid
   // cell under the cursor (null when off-grid).
@@ -177,6 +194,7 @@ export function DashboardCanvas({
   const [addPointer, setAddPointer] = useState<{ x: number; y: number } | null>(null);
   const [addCell, setAddCell] = useState<{ x: number; y: number } | null>(null);
   const dragRef = useRef<FreeDrag | null>(null);
+  const resizeRef = useRef<FreeResize | null>(null);
   const liveRef = useRef<DashboardItem[] | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   // Detach in-flight drag/add listeners if we unmount mid-gesture.
@@ -269,9 +287,9 @@ export function DashboardCanvas({
 
   const handleLayoutChange = (next: Layout[]) => {
     // RGL fires this on mount, on resize, and on its own (non-free) drags. While
-    // a free drag or palette add is in flight the layout prop is ours (it carries
-    // the ghost/reflow), so ignore the echo or we'd persist the preview.
-    if (!editing || dragRef.current || addCard) return;
+    // a free drag/resize or palette add is in flight the layout prop is ours (it
+    // carries the ghost/reflow), so ignore the echo or we'd persist the preview.
+    if (!editing || dragRef.current || resizeRef.current || addCard) return;
     const byId = new Map(next.map((l) => [l.i, l]));
     const merged = items.map((it) => {
       const l = byId.get(it.i);
@@ -288,15 +306,18 @@ export function DashboardCanvas({
     if (changed) onItemsChange(merged);
   };
 
-  // Free-mode pointer drag. Bubble phase (not capture) so the header's control
-  // buttons, which `stopPropagation`, never start a drag.
+  // Free-mode pointer gestures: move (drag handle) and resize (corner handle).
+  // Both make the active card the fixed obstacle and reflow the rest via
+  // `reflowFree`, so the manipulated card has priority and others yield — RGL's
+  // native drag/resize (which instead clamps a growing card against its
+  // neighbours) is disabled in free mode. Bubble phase (not capture) so the
+  // header's control buttons, which `stopPropagation`, never start a gesture.
   const onPointerDown = (e: React.PointerEvent) => {
-    if (!freeReflow || dragRef.current) return;
+    if (!freeReflow || dragRef.current || resizeRef.current) return;
     const target = e.target as HTMLElement;
-    if (!target.closest(".dashboard-drag-handle")) return;
     const cardEl = target.closest("[data-grid-id]") as HTMLElement | null;
     const id = cardEl?.dataset.gridId;
-    if (!id) return;
+    if (!id || id === ADD_GHOST_ID) return;
     const it = itemsRef.current.find((i) => i.i === id);
     if (!it) return;
     const gridEl = wrapRef.current?.querySelector(".react-grid-layout") as HTMLElement | null;
@@ -307,21 +328,93 @@ export function DashboardCanvas({
     // `margin`. Mirror calcGridColWidth/calcXY so snapping matches RGL exactly.
     const [marginX, marginY] = grid.margin;
     const colW = (width - marginX * (cols - 1) - marginX * 2) / cols;
-    const drag: FreeDrag = {
+    const stepX = colW + marginX;
+    const stepY = grid.rowHeight + marginY;
+
+    // Resize: the corner handle. The card keeps its (x, y); only w/h grow, and
+    // the cards it now overlaps reflow below it.
+    if (target.closest(".dashboard-resize-handle")) {
+      const { minW, minH } = minSizeFor(it.module_id, it.widget_id);
+      resizeRef.current = {
+        id,
+        pointerX: e.clientX,
+        pointerY: e.clientY,
+        stepX,
+        stepY,
+        x: it.x,
+        y: it.y,
+        startW: it.w,
+        startH: it.h,
+        minW,
+        minH,
+        cols,
+        snapshot: itemsRef.current,
+      };
+      liveRef.current = itemsRef.current;
+      setResizingId(id);
+      setLiveItems(itemsRef.current);
+      e.preventDefault();
+
+      const move = (ev: PointerEvent) => {
+        const r = resizeRef.current;
+        if (!r) return;
+        const w = Math.max(
+          r.minW,
+          Math.min(r.cols - r.x, r.startW + Math.round((ev.clientX - r.pointerX) / r.stepX)),
+        );
+        const h = Math.max(r.minH, r.startH + Math.round((ev.clientY - r.pointerY) / r.stepY));
+        const baseline = r.snapshot.map((s) => (s.i === r.id ? { ...s, w, h } : s));
+        const nextLayout = reflowFree(baseline, r.id, r.x, r.y);
+        liveRef.current = nextLayout;
+        setLiveItems(nextLayout);
+      };
+      const end = (commit: boolean) => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", cancel);
+        teardownRef.current = () => {};
+        const final = liveRef.current;
+        resizeRef.current = null;
+        liveRef.current = null;
+        setResizingId(null);
+        setLiveItems(null);
+        if (commit && final) {
+          const changed = final.some((m) => {
+            const o = itemsRef.current.find((i) => i.i === m.i);
+            return !o || o.x !== m.x || o.y !== m.y || o.w !== m.w || o.h !== m.h;
+          });
+          if (changed) onItemsChangeRef.current(final);
+        }
+      };
+      const up = () => end(true);
+      const cancel = () => end(false);
+      teardownRef.current = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", cancel);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", cancel);
+      return;
+    }
+
+    // Move: the drag handle (card header).
+    if (!target.closest(".dashboard-drag-handle")) return;
+    dragRef.current = {
       id,
       pointerX: e.clientX,
       pointerY: e.clientY,
-      startLeft: marginX + it.x * (colW + marginX),
-      startTop: marginY + it.y * (grid.rowHeight + marginY),
-      stepX: colW + marginX,
-      stepY: grid.rowHeight + marginY,
+      startLeft: marginX + it.x * stepX,
+      startTop: marginY + it.y * stepY,
+      stepX,
+      stepY,
       padX: marginX,
       padY: marginY,
       w: it.w,
       cols,
       snapshot: itemsRef.current,
     };
-    dragRef.current = drag;
     liveRef.current = itemsRef.current;
     setDraggingId(id);
     setLiveItems(itemsRef.current);
@@ -390,16 +483,30 @@ export function DashboardCanvas({
   }, []);
 
   // Snap a viewport point to a grid cell, mirroring RGL's calcXY (the cursor is
-  // the new card's top-left). Returns null when the point is outside the grid,
+  // the new card's top-left). Returns null when the point is outside the canvas,
   // which the add-gesture treats as "not a drop target".
   const cellWithinGrid = useCallback(
     (clientX: number, clientY: number, w: number) => {
-      const gridEl = wrapRef.current?.querySelector(".react-grid-layout") as HTMLElement | null;
-      if (!gridEl) return null;
-      const rect = gridEl.getBoundingClientRect();
-      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom)
+      const wrapEl = wrapRef.current;
+      if (!wrapEl) return null;
+      // Bound the droppable area by the wrapper, NOT `.react-grid-layout`: the
+      // grid collapses to its content height, so on an EMPTY board its rect is
+      // ~0px tall and every point reads as "below the grid". The wrapper is
+      // reliably full-height (`min-h-full`), so it covers the visible canvas.
+      const bounds = wrapEl.getBoundingClientRect();
+      if (
+        clientX < bounds.left ||
+        clientX > bounds.right ||
+        clientY < bounds.top ||
+        clientY > bounds.bottom
+      )
         return null;
-      const width = gridEl.clientWidth || rect.width;
+      // Snap against the grid's own origin/width so it matches RGL exactly (its
+      // left/top/width stay correct even when its height has collapsed); fall
+      // back to the wrapper if the grid node isn't mounted yet.
+      const gridEl = wrapEl.querySelector(".react-grid-layout") as HTMLElement | null;
+      const rect = gridEl?.getBoundingClientRect() ?? bounds;
+      const width = gridEl?.clientWidth || rect.width;
       if (!width) return null;
       const [mx, my] = grid.margin;
       const colW = (width - mx * (cols - 1) - mx * 2) / cols;
@@ -477,7 +584,7 @@ export function DashboardCanvas({
         rowHeight={grid.rowHeight}
         margin={grid.margin}
         isDraggable={editing && grid.compactType !== null}
-        isResizable={editing}
+        isResizable={editing && grid.compactType !== null}
         draggableHandle=".dashboard-drag-handle"
         onLayoutChange={handleLayoutChange}
         compactType={grid.compactType}
@@ -488,7 +595,11 @@ export function DashboardCanvas({
             <div
               key={it.i}
               data-grid-id={it.i}
-              className={cn(draggingId === it.i && "rgl-free-dragging")}
+              className={cn(
+                "group",
+                draggingId === it.i && "rgl-free-dragging",
+                resizingId === it.i && "rgl-free-resizing",
+              )}
             >
               <DashboardCard
                 item={it}
@@ -499,6 +610,15 @@ export function DashboardCanvas({
                 onUpdate={h?.onUpdate ?? (() => {})}
                 onRemove={h?.onRemove ?? (() => {})}
               />
+              {freeReflow && (
+                // Custom resize grip (RGL's native resize is off in free mode):
+                // `onPointerDown` reads `.dashboard-resize-handle` to start a
+                // reflow-driven resize. Clickable even at opacity 0.
+                <div
+                  className="dashboard-resize-handle absolute bottom-0.5 right-0.5 z-[4] h-3.5 w-3.5 cursor-se-resize touch-none rounded-[2px] border-b-2 border-r-2 border-muted-foreground/40 opacity-0 transition-opacity group-hover:opacity-100"
+                  aria-hidden
+                />
+              )}
             </div>
           );
         })}

@@ -278,6 +278,14 @@
   cursor: grabbing;
 }
 
+/* Free-mode resize (canvas-driven, same as the drag above): the resized card
+   tracks the cursor with no easing and sits above the cards reflowing below it. */
+.react-grid-item.rgl-free-resizing {
+  transition: none !important;
+  z-index: 3;
+  cursor: se-resize;
+}
+
 /* The header doubles as the drag handle; stop touch scrolling from hijacking a
    drag gesture on it. */
 .dashboard-drag-handle {

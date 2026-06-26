@@ -655,6 +655,7 @@ export interface JobsInsights {
   by_type: InsightsLabelCount[];
   failures_by_day: InsightsDayCount[];
   completions_by_day: InsightsDayCount[];
+  avg_duration_by_day: InsightsDayCount[];
   avg_duration_seconds: number;
   slowest_seconds: number;
 }

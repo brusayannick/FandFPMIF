@@ -13,7 +13,13 @@ export default function middleware(req: NextRequest) {
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   if (isPublic) return NextResponse.next();
 
-  const hasSession = SESSION_COOKIES.some((name) => req.cookies.has(name));
+  // Match the base cookie name OR a chunk (`<name>.0`, `.1`, …). Auth.js splits
+  // a session cookie larger than ~4KB into numbered chunks, so an exact
+  // `cookies.has(name)` would miss a large client-side session and wrongly
+  // bounce every request to /login.
+  const hasSession = req.cookies
+    .getAll()
+    .some((c) => SESSION_COOKIES.some((name) => c.name === name || c.name.startsWith(`${name}.`)));
   if (!hasSession) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";

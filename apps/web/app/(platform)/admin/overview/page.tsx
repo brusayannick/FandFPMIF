@@ -427,6 +427,16 @@ function JobsSection({ days }: { days: number }) {
         <ChartCard title="Failures / day" icon={Briefcase} empty={data.failures_by_day.length === 0}>
           <DayLineChart data={data.failures_by_day} />
         </ChartCard>
+        <ChartCard
+          title="Avg. runtime / day"
+          icon={Clock}
+          empty={data.avg_duration_by_day.length === 0}
+        >
+          <DayLineChart
+            data={data.avg_duration_by_day}
+            valueFormat={(s) => (s > 0 ? formatDuration(s) : "0s")}
+          />
+        </ChartCard>
       </div>
     </>
   );
@@ -438,11 +448,10 @@ function UsageSection({ days }: { days: number }) {
   return (
     <>
       <SectionHeading>Module &amp; AI usage</SectionHeading>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Kpi label="AI chat requests" value={data.ai.chat_requests} />
         <Kpi label="AI guidance" value={data.ai.guidance_requests} />
         <Kpi label="Tokens / cost" value={data.ai.tokens_tracked ? "tracked" : "not tracked"} />
-        <Kpi label="Most-used module" value={data.most_used_module ?? "–"} />
       </div>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <ChartCard title="Installs by module" icon={Database} empty={data.installs_by_module.length === 0}>
@@ -504,7 +513,13 @@ function ChartCard({
   );
 }
 
-function DayLineChart({ data }: { data: DayCount[] }) {
+function DayLineChart({
+  data,
+  valueFormat,
+}: {
+  data: DayCount[];
+  valueFormat?: (value: number) => string;
+}) {
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -515,8 +530,16 @@ function DayLineChart({ data }: { data: DayCount[] }) {
           interval="preserveStartEnd"
           minTickGap={24}
         />
-        <YAxis tick={{ fontSize: 10 }} allowDecimals={false} width={28} />
-        <Tooltip contentStyle={{ fontSize: 12 }} />
+        <YAxis
+          tick={{ fontSize: 10 }}
+          allowDecimals={false}
+          width={valueFormat ? 48 : 28}
+          tickFormatter={valueFormat ? (v) => valueFormat(Number(v)) : undefined}
+        />
+        <Tooltip
+          contentStyle={{ fontSize: 12 }}
+          formatter={valueFormat ? (v) => valueFormat(Number(v)) : undefined}
+        />
         <Line
           type="monotone"
           dataKey="count"

@@ -65,11 +65,11 @@ services:
       # resolve to our Caddy on the internal network instead. Caddy serves the
       # pm-mate-vm cert (name mismatch for pm-mate) → skip verify on this hop.
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
-      # Option 3: keep the session (access+refresh tokens) server-side on disk;
-      # the cookie carries only an opaque id → tiny, no proxy header-buffer 502.
-      SESSION_STORE_DIR: /app/sessions
-    volumes:
-      - ./data/web-sessions:/app/sessions
+      # Sessions are client-side cookie JWE (Auth.js default): SESSION_STORE_DIR is
+      # intentionally unset. The full access+refresh cookie (chunked if >4KB) now
+      # fits the uni edge proxy's enlarged header buffer, so the on-disk store
+      # (Option 3, the 502 workaround) is no longer needed. To revert, restore
+      # SESSION_STORE_DIR + the ./data/web-sessions volume.
     ports: !reset []
 
   api:

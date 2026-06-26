@@ -124,13 +124,6 @@ export async function api<T = unknown>(
   applyAmbientHeaders(headers);
   await attachAuth(headers);
   const res = await fetch(`${apiBase()}${path}`, { ...init, headers, cache: "no-store" });
-  // Token was present but the backend rejected it (expired access token that
-  // passed the local expiry check, JWKS/clock skew, rotated session). Bounce to
-  // login rather than letting a raw 401 surface into the UI; still throw below
-  // so the caller stops. 403 (authenticated but not allowed) is left untouched.
-  if (res.status === 401 && typeof window !== "undefined") {
-    await logoutToLogin();
-  }
   if (!res.ok) {
     let detail: unknown = await res.text();
     try {
@@ -157,13 +150,7 @@ export async function rawFetch(
   }
   applyAmbientHeaders(headers);
   await attachAuth(headers);
-  const res = await fetch(`${apiBase()}${path}`, { ...init, headers });
-  // Same 401 → re-auth bounce as api(); the caller (e.g. SSE in lib/ws.ts) still
-  // gets the Response back to handle as it sees fit.
-  if (res.status === 401 && typeof window !== "undefined") {
-    await logoutToLogin();
-  }
-  return res;
+  return fetch(`${apiBase()}${path}`, { ...init, headers });
 }
 
 /** Build an absolute URL pointing at the backend. Use for `<img src>`, `<a href>`,

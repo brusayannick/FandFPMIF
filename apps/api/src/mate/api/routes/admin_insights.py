@@ -725,6 +725,7 @@ class JobsInsights(BaseModel):
     by_type: list[LabelCount]
     failures_by_day: list[DayCount]
     completions_by_day: list[DayCount]
+    avg_duration_by_day: list[DayCount]
     avg_duration_seconds: int
     slowest_seconds: int
 
@@ -795,6 +796,16 @@ async def jobs_insights(user: AdminUserDep, session: SessionDep, days: int = 90)
     slowest = float(
         await session.scalar(select(func.max(duration_expr)).where(*finished_filter)) or 0.0
     )
+    avg_duration_by_day = _day_series(
+        (
+            await session.execute(
+                select(func.date(Job.finished_at), func.avg(duration_expr))
+                .where(*finished_filter, Job.finished_at >= cutoff)
+                .group_by(func.date(Job.finished_at))
+                .order_by(func.date(Job.finished_at))
+            )
+        ).all()
+    )
 
     return JobsInsights(
         days=days,
@@ -803,6 +814,7 @@ async def jobs_insights(user: AdminUserDep, session: SessionDep, days: int = 90)
         by_type=by_type,
         failures_by_day=failures_by_day,
         completions_by_day=completions_by_day,
+        avg_duration_by_day=avg_duration_by_day,
         avg_duration_seconds=round(avg_duration),
         slowest_seconds=round(slowest),
     )

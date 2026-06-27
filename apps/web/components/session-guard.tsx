@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useSession } from "next-auth/react";
 
 import { logoutToLogin } from "@/lib/api";
+import { LOGIN_RECOVERY_KEY } from "@/lib/auth-recovery";
 
 /**
  * Watches the Auth.js session and signs the user out to /login the moment the
@@ -19,6 +20,15 @@ export function SessionGuard() {
   useEffect(() => {
     if (session?.error !== "RefreshAccessTokenError") {
       fired.current = false;
+      // Healthy session → re-arm the login page's one-shot auto-recovery so a
+      // later refresh-token death can recover hands-free again.
+      if (session) {
+        try {
+          sessionStorage.removeItem(LOGIN_RECOVERY_KEY);
+        } catch {
+          /* storage blocked – nothing to clear */
+        }
+      }
       return;
     }
     if (fired.current) return;

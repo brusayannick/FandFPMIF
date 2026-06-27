@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { auth, signIn, DEMO_MODE } from "@/auth";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { Button } from "@/components/ui/button";
-import { clearSessionCookies } from "@/lib/clear-session";
+import { clearAuthCookies } from "@/lib/clear-session";
 import { DemoAutoSignIn } from "./demo-auto-signin";
 import { RecoveryAutoRetry } from "./recovery-auto-retry";
 
@@ -31,7 +31,7 @@ export default async function LoginPage({
 
   async function startKeycloakLogin() {
     "use server";
-    await clearSessionCookies();
+    await clearAuthCookies();
     await signIn(
       "keycloak",
       { redirectTo: callbackUrl },

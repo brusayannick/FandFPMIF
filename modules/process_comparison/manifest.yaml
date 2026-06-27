@@ -7,7 +7,7 @@ description: >-
   directly-follows-graph diff, variant differences, similarity scores (EMD and
   footprints), and per-activity frequency changes.
 keywords: ["compare", "comparison", "diff", "difference", "versus", "overlay", "two logs", "process comparison"]
-author: Mate
+author: FlowFactory
 license: MIT
 # Runs entirely locally (pm4py / duckdb) – safe against confidential logs.
 isConfidentialSafe: true

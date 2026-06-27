@@ -6,7 +6,7 @@ description: >-
   Tests whether two event logs differ in a statistically meaningful way,
   comparing them with Earth Mover's Distance via a permutation or bootstrap test
   and reporting a p-value.
-author: Cameron Pitsch
+author: C. Pitsch
 license: MIT
 isConfidentialSafe: true
 

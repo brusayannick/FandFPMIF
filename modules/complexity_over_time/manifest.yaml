@@ -5,9 +5,9 @@ category: advanced
 description: >-
   Tracks how your process complexity changes over time. It splits the log into
   time slices, scores each one, and plots the trend so you can see when the
-  process became simpler or more chaotic.
+  process became simpler or more chaotic. Based on paper by Augusto et al.
 keywords: ["complexity over time", "complexity trend", "entropy over time", "complexity timeline", "kpi over time"]
-author: E. Langer
+author: FlowFactory
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

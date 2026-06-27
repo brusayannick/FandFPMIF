@@ -6,7 +6,7 @@ description: >-
   Discovers a process from object-centric (OCEL) logs, showing the object types,
   the activities, and the object-centric directly-follows graph (OC-DFG).
 keywords: ["object-centric", "object centric", "ocel", "oc-dfg", "object types", "ocpm"]
-author: Mate
+author: FlowFactory
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

@@ -8,7 +8,7 @@ description: >-
   citation-backed causes. Sends data to an external LLM, so it is not safe for
   confidential logs.
 keywords: ["explain drift", "drift explanation", "why drift", "drift reason", "root cause drift", "drift cause"]
-author: J. Schaffner (ported by FF team)
+author: J. Schaffner
 license: MIT
 default_enabled: true
 # Sends event-log excerpts and uploaded documents to an external LLM – not

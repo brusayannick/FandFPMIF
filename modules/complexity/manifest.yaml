@@ -8,7 +8,7 @@ description: >-
   Pentland's task and process complexity. Uses richer XES trace and event
   attributes automatically when they are present.
 keywords: ["complexity", "entropy", "variant entropy", "lempel-ziv", "pentland", "structure", "affinity", "epa"]
-author: E. Langer
+author: Augusto et al.
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

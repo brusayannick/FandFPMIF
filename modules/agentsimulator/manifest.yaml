@@ -7,7 +7,7 @@ description: >-
   resource's behaviour, working calendars, and handovers from your log,
   generates realistic synthetic logs, and scores them against a held-out slice
   of the real data.
-author: Lukas Kirchdorfer et al. (AgentSimulator) – Mate module wrapper
+author: Lukas Kirchdorfer et al.
 license: MIT
 
 requirements:

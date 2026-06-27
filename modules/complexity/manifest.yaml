@@ -51,10 +51,10 @@ frontend:
       title: Complexity metrics
       description: Headline EPA-based measures - magnitude, variety, entropy, Lempel–Ziv.
       icon: Layers
-      default_w: 6
-      default_h: 7
-      min_w: 5
-      min_h: 5
+      # Fixed-size metric scorecard (8 tiles): locked to a size that shows them all.
+      default_w: 7
+      default_h: 15
+      resizable: false
     - id: entropy-comparison
       entry: ./widgets/EntropyComparison.tsx
       title: Entropy comparison

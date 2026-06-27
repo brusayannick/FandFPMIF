@@ -280,14 +280,22 @@ def pentland_task(states: dict[int, State]) -> int:
     )
 
 
-def pentland_process(df: pd.DataFrame) -> float:
+def pentland_process(df: pd.DataFrame) -> float | None:
     v = int(df["activity"].nunique())
     _counts, patterns = _variant_df_patterns(df)
     df_edges: set[tuple[str, str]] = set()
     for s in patterns.values():
         df_edges |= s
     e = len(df_edges)
-    return 10 ** (0.08 * (1 + e - v))
+    # 10 ** (0.08 * (1 + e - v)) overflows float64 once the exponent passes ~308
+    # - a wide log (many directly-follows edges e relative to activities v) makes
+    # the metric astronomically large. Return None ("out of representable range",
+    # like the other optional metrics here) rather than raising OverflowError and
+    # failing the whole precompute job.
+    exponent = 0.08 * (1 + e - v)
+    if exponent > 300.0:
+        return None
+    return 10.0**exponent
 
 
 # ── Deviation from random ─────────────────────────────────────────────────────

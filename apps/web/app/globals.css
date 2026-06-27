@@ -262,6 +262,15 @@
   opacity: 0.15 !important;
 }
 
+/* Reflow easing: the cards that spring aside when another is dragged, resized,
+   or removed ease in snappily. Lower specificity than the `none` rules below
+   (the active card + mount slide), so those still win for the active item. */
+.react-grid-item {
+  transition-property: transform, width, height;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
 /* Kill the one-time mount slide (WidthProvider reflows from its 1280px default
    to the measured width). The canvas drops `.rgl-mounting` after the first two
    frames, restoring transitions for drag/resize. */
@@ -286,6 +295,23 @@
   cursor: se-resize;
 }
 
+/* Tactile lift on the active card. Applied to the *inner* card root (not the
+   grid-item, whose `transform` RGL owns) so it composes with RGL's translate.
+   `.dashboard-card-root` carries its own transition so this eases in/out. */
+.react-grid-item.rgl-free-dragging .dashboard-card-root {
+  box-shadow:
+    0 10px 24px -10px rgb(0 0 0 / 0.35),
+    0 4px 10px -6px rgb(0 0 0 / 0.25);
+  transform: translateY(-2px);
+}
+.react-grid-item.rgl-free-resizing .dashboard-card-root {
+  box-shadow:
+    0 10px 24px -10px rgb(0 0 0 / 0.35),
+    0 4px 10px -6px rgb(0 0 0 / 0.25);
+  outline: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+  outline-offset: -1px;
+}
+
 /* The header doubles as the drag handle; stop touch scrolling from hijacking a
    drag gesture on it. */
 .dashboard-drag-handle {
@@ -294,13 +320,30 @@
 
 /* Dashboard canvas: subtle dotted grid so the board area reads as a workspace
    and card placement is easier to eyeball. Themed via --border so it adapts to
-   light/dark. */
+   light/dark. `isolation` contains the dotted ::before (z-index -1) so it paints
+   below the cards. */
 .dashboard-canvas-bg {
+  position: relative;
+  isolation: isolate;
   background-color: var(--background);
+}
+
+/* The dots live on a ::before overlay (not the element background) so their
+   opacity can transition: the texture is quiet at rest and "wakes up" to full
+   when the board enters edit mode (`data-editing`). A fixed, neutral backdrop —
+   not a snap guide; the real snap grid is the board's granularity. */
+.dashboard-canvas-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background-image: radial-gradient(var(--border) 1px, transparent 1px);
-  /* A fixed, neutral dot texture – a workspace backdrop, not a snap guide. The
-     actual snap grid is driven by the board's granularity (column count + row
-     height in react-grid-layout) and intentionally isn't reflected here. */
   background-size: 24px 24px;
   background-position: -1px -1px;
+  opacity: 0.55;
+  transition: opacity 200ms ease;
+}
+.dashboard-canvas-bg[data-editing="true"]::before {
+  opacity: 1;
 }

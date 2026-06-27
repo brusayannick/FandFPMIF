@@ -17,6 +17,8 @@ Covered:
 from __future__ import annotations
 
 import asyncio
+import os
+import tempfile
 
 import pandas as pd
 from modules.discovery.module import DiscoveryModule
@@ -40,6 +42,14 @@ class _FakeEventLog:
 
     async def pandas(self) -> pd.DataFrame:
         return self._df
+
+    async def materialize_parquet(self) -> tuple[str, bool]:
+        # Mirrors the real `EventLogAccess.materialize_parquet`: hand the worker a
+        # Parquet path (temp here) so it reads via `pandas.read_parquet`.
+        fd, tmp = tempfile.mkstemp(suffix=".parquet")
+        os.close(fd)
+        self._df.to_parquet(tmp, index=False)
+        return tmp, True
 
 
 class _FakeCache:
@@ -72,6 +82,11 @@ class _FakeCtx:
         self.module_id = "discovery"
         self.event_log = _FakeEventLog(df)
         self.cache = _FakeCache()
+
+    async def run_in_process(self, fn: object, *args: object, **kwargs: object) -> object:
+        # The real ctx ships `fn` to a process pool; tests run the worker
+        # in-process so it still exercises the parquet-read + compute path.
+        return fn(*args, **kwargs)  # type: ignore[operator]
 
 
 def _sample_log() -> pd.DataFrame:

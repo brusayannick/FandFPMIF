@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -118,6 +119,40 @@ def _assemble(values: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ── Process-pool offload (§8.3) ──────────────────────────────────────────────
+#
+# The metric suite + transition matrix are CPU-bound; each runs on its own core
+# via `ctx.run_in_process`. Workers are top-level pure fns that read a Parquet
+# *path* (handed over by `materialize_parquet`) - no DataFrame is pickled, no
+# platform import in the worker.
+
+
+async def _offload(ctx: ModuleContext, worker: Callable[..., Any], *args: Any) -> dict[str, Any]:
+    async with ctx.event_log as log:
+        path, is_temp = await log.materialize_parquet()
+    try:
+        return await ctx.run_in_process(worker, path, *args)
+    finally:
+        if is_temp:
+            await asyncio.to_thread(os.remove, path)
+
+
+def _metrics_worker(
+    path: str, detected_schema: dict[str, Any] | None, max_variants: int
+) -> dict[str, Any]:
+    import pandas as pd
+
+    df = pd.read_parquet(path)
+    return _assemble(compute_all(df, detected_schema=detected_schema, max_variants=max_variants))
+
+
+def _matrix_worker(path: str) -> dict[str, Any]:
+    import pandas as pd
+
+    df = pd.read_parquet(path)
+    return transition_probability_matrix(df, top_k=_TRANSITION_TOP_K)
+
+
 # ── Module ─────────────────────────────────────────────────────────────────────
 
 
@@ -156,19 +191,13 @@ class ComplexityV2Module(Module):
     @job(progress=True, title="Complexity v2 - precompute")
     async def precompute(self, ctx: ModuleContext, payload: dict[str, Any]) -> None:
         await ctx.progress.update(0.0, "Loading log")
-        async with ctx.event_log as log:
-            df = await log.pandas()
         schema = _read_detected_schema(ctx)
         max_variants = _max_variants(ctx)
 
         await ctx.progress.update(0.2, "Computing metrics (entropy, variation, distance)")
-        metrics = await asyncio.to_thread(
-            lambda: _assemble(compute_all(df, detected_schema=schema, max_variants=max_variants))
-        )
+        metrics = await _offload(ctx, _metrics_worker, schema, max_variants)
         await ctx.progress.update(0.85, "Computing transition matrix")
-        matrix = await asyncio.to_thread(
-            lambda: transition_probability_matrix(df, top_k=_TRANSITION_TOP_K)
-        )
+        matrix = await _offload(ctx, _matrix_worker)
 
         await ctx.cache.set("metrics", metrics)
         await ctx.cache.set("transition_matrix", matrix)
@@ -177,15 +206,7 @@ class ComplexityV2Module(Module):
     async def _compute(self, ctx: ModuleContext) -> dict[str, Any]:
         schema = _read_detected_schema(ctx)
         max_variants = _max_variants(ctx)
-        async with ctx.event_log as log:
-            df = await log.pandas()
-        return await asyncio.to_thread(
-            lambda: _assemble(compute_all(df, detected_schema=schema, max_variants=max_variants))
-        )
+        return await _offload(ctx, _metrics_worker, schema, max_variants)
 
     async def _compute_matrix(self, ctx: ModuleContext) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-        return await asyncio.to_thread(
-            lambda: transition_probability_matrix(df, top_k=_TRANSITION_TOP_K)
-        )
+        return await _offload(ctx, _matrix_worker)

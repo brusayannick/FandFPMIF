@@ -49,8 +49,12 @@ export const DashboardCard = memo(function DashboardCard({
   return (
     <div
       className={cn(
-        "flex h-full flex-col overflow-hidden rounded-lg bg-card shadow-sm",
+        // `dashboard-card-root` is the lift target for the active-drag/resize
+        // CSS in globals.css; the transition eases that lift and the edit ring.
+        "dashboard-card-root flex h-full flex-col overflow-hidden rounded-lg bg-card shadow-sm",
+        "transition-[box-shadow,transform,outline-color] duration-200 ease-out",
         chrome.border && "border border-border",
+        editing && "ring-1 ring-border/60",
       )}
     >
       <div
@@ -60,13 +64,13 @@ export const DashboardCard = memo(function DashboardCard({
         )}
       >
         {editing && (
-          <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+          <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60 animate-in fade-in-0 slide-in-from-left-2 duration-150" />
         )}
         <span className="min-w-0 flex-1 truncate text-xs font-medium tracking-tight">
           {title}
         </span>
         {editing && (
-          <>
+          <span className="flex shrink-0 items-center gap-1.5 animate-in fade-in-0 slide-in-from-right-2 duration-150">
             <Popover>
               <PopoverTrigger asChild>
                 <Button
@@ -105,10 +109,10 @@ export const DashboardCard = memo(function DashboardCard({
             >
               <X className="h-3.5 w-3.5" />
             </Button>
-          </>
+          </span>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div className="min-h-0 flex-1 overflow-auto p-3 animate-in fade-in-0 duration-300">
         {logId ? (
           <Widget logId={logId} moduleId={item.module_id} config={item.config} />
         ) : (

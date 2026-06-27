@@ -54,10 +54,10 @@ frontend:
       title: Process overview
       description: Activity, connection and start/end counts of the discovered map.
       icon: Workflow
-      default_w: 5
-      default_h: 5
-      min_w: 4
-      min_h: 4
+      # Fixed-size summary scorecard (4 counts): locked to a size that shows them all.
+      default_w: 7
+      default_h: 8
+      resizable: false
     - id: activity-frequency
       entry: ./widgets/ActivityFrequency.tsx
       title: Activity frequency

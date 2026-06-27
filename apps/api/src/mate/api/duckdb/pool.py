@@ -48,6 +48,26 @@ class DuckDBPool:
     def _new_connection(self) -> duckdb.DuckDBPyConnection:
         conn = duckdb.connect(database=":memory:")
         settings = get_settings()
+
+        # Tuning (§9). Each statement is best-effort - older/newer DuckDB builds
+        # differ on which PRAGMAs exist, and a missing one must never break the
+        # connection. Object cache keeps Parquet footers between queries (big win
+        # when many widgets scan the same file); unordered scans cut memory/time
+        # for aggregations; the optional thread cap curbs core oversubscription
+        # when many widget queries run at once.
+        def _try(sql: str) -> None:
+            try:
+                conn.execute(sql)
+            except duckdb.Error:
+                pass
+
+        if settings.duckdb_threads > 0:
+            _try(f"PRAGMA threads={int(settings.duckdb_threads)}")
+        if settings.duckdb_memory_limit:
+            _try(f"PRAGMA memory_limit='{settings.duckdb_memory_limit}'")
+        _try("PRAGMA enable_object_cache=true")
+        _try("SET preserve_insertion_order=false")
+
         sqlite_path = _sqlite_path_from_url(settings.database_url)
         if sqlite_path is not None and sqlite_path.exists():
             try:

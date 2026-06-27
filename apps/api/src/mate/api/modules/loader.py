@@ -47,7 +47,7 @@ from mate.api.modules.discovery import DiscoveredModule, discover, topo_sort
 from mate.api.modules.event_filters import FILTER_OPS
 from mate.api.modules.event_log_access import EventLogAccess
 from mate.api.modules.finder import get_finder, module_namespace, reset_finder
-from mate.api.modules.installer import install_module
+from mate.api.modules.installer import install_module, venv_site_packages
 from mate.api.modules.installs import user_module_ids, user_owns_module
 from mate.api.modules.object_centric_log_access import ObjectCentricLogAccess
 from mate.api.modules.registry import CapabilityRegistry
@@ -520,6 +520,10 @@ class ModuleLoader:
         self.registry = registry
         self.api_app = api_app
         self.loaded: dict[str, LoadedModule] = {}
+        # Memoised `(folder, site_packages, module_file)` per module for
+        # `ctx.run_in_process` offload (avoids re-reading pyvenv.cfg every call);
+        # cleared per id on (re)load below.
+        self._offload_meta_cache: dict[str, tuple[str, str, str] | None] = {}
         # Ids discovered under ``modules_dir`` at boot - the shared "default"
         # set every user is seeded with. Uploads added later via ``load_one``
         # must never land here, so it is only ever populated in ``load_all``.
@@ -653,6 +657,7 @@ class ModuleLoader:
         )
         self._bind(loaded)
         self.loaded[d.id] = loaded
+        self._offload_meta_cache.pop(d.id, None)
         self.registry.add_module(d.id)
         await self._seed_module_config(d.manifest)
 
@@ -671,6 +676,7 @@ class ModuleLoader:
         gated on `self.loaded`, so calls return 404 cleanly.
         """
         loaded = self.loaded.pop(module_id, None)
+        self._offload_meta_cache.pop(module_id, None)
         if loaded is None:
             return False
         bridge = self._bridges.pop(module_id, None)
@@ -1281,6 +1287,33 @@ class ModuleLoader:
             log.exception("modules.ownership_check_failed", module_id=module_id)
             return False
 
+    def _offload_meta(self, module_id: str) -> tuple[str, str, str] | None:
+        """`(folder, site_packages, module_file)` a worker needs to import this
+        module by path for `ctx.run_in_process`; None for an unknown module."""
+        if module_id in self._offload_meta_cache:
+            return self._offload_meta_cache[module_id]
+        lm = self.loaded.get(module_id)
+        meta: tuple[str, str, str] | None = None
+        if lm is not None:
+            folder = lm.discovered.folder
+            meta = (
+                str(folder),
+                str(venv_site_packages(folder)),
+                str(folder / "module.py"),
+            )
+        self._offload_meta_cache[module_id] = meta
+        return meta
+
+    def _bind_run_in_process(self, module_id: str) -> Callable[..., Awaitable[Any]]:
+        """Per-module `ctx.run_in_process`: offload that ships this module's
+        import metadata so a spawned/forkserver worker can reach its functions."""
+        meta = self._offload_meta(module_id)
+
+        async def _run_in_process(fn: Any, /, *args: Any, **kwargs: Any) -> Any:
+            return await self.runtime.run_offloaded(meta, fn, *args, **kwargs)
+
+        return _run_in_process
+
     async def _make_context(
         self,
         module_id: str,
@@ -1414,7 +1447,7 @@ class ModuleLoader:
                 user_id,
             ),
             workdir=workdir,
-            run_in_process=self.runtime.run_in_process,  # type: ignore[arg-type]
+            run_in_process=self._bind_run_in_process(module_id),  # type: ignore[arg-type]
             open_event_log=_open_event_log,  # type: ignore[arg-type]
         )
 

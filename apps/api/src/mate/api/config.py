@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -60,6 +61,41 @@ class Settings(BaseSettings):
     # (the existing SIGKILL fallback). Keep small so a stuck native job dies
     # promptly, but non-zero so a cooperative worker gets a chance to unwind.
     subprocess_cancel_grace_seconds: float = Field(default=3.0, ge=0, le=60)
+
+    # Wall-clock backstop for a single job execution. A handler still running
+    # after this many seconds is force-stopped (cooperative token + the subprocess
+    # two-phase kill) and recorded as a timeout failure, so a wedged job can never
+    # hold its worker slot forever - the slot leak behind the cross-user starvation
+    # we saw (one user's stuck precompute jobs draining the shared pool). A safety
+    # net, not a tuning knob: keep it well above a legitimate large-log import.
+    # `0` disables it. Tune down only if every job on the deployment is known-fast.
+    job_execution_timeout_seconds: int = Field(default=1800, ge=0, le=86400)
+
+    # CPU offload (§8.3). `ctx.run_in_process` ships the heaviest module compute
+    # (pm4py/networkx mining) to a `ProcessPoolExecutor` so it runs on multiple
+    # cores instead of contending on the GIL. Sized independently of
+    # `worker_concurrency` (which only gates asyncio job slots) - default to the
+    # box's cores, capped so a many-core host doesn't fork an absurd pool.
+    module_process_pool_size: int = Field(
+        default_factory=lambda: min((os.cpu_count() or 2), 8),
+        ge=1,
+        le=64,
+        description="MODULE_PROCESS_POOL_SIZE - worker processes for ctx.run_in_process.",
+    )
+
+    # DuckDB tuning (§9). `duckdb_threads=0` leaves DuckDB's default (all cores -
+    # right for single-query ingest); set a positive cap to stop a many-card
+    # dashboard's concurrent widget queries from oversubscribing the box.
+    # `duckdb_memory_limit` is a DuckDB size string (e.g. "4GB"); empty leaves
+    # DuckDB's own default. Object-cache + unordered scans are always applied.
+    duckdb_threads: int = Field(default=0, ge=0, le=256)
+    duckdb_memory_limit: str = Field(default="", description="DUCKDB_MEMORY_LIMIT e.g. '4GB'.")
+
+    # Shared, mtime-guarded Parquet read cache (§5.5). Many dashboard widgets on
+    # one log each call `event_log.pandas()`, re-reading the same Parquet; this
+    # caps how many materialised frames we keep so N widgets collapse to one read
+    # within the freshness window. 0 disables; bounded by a per-frame size guard.
+    event_log_cache_entries: int = Field(default=3, ge=0, le=64)
 
     # Live system-resource sampler (Admin → System). A background task samples
     # CPU/RAM every ``metrics_sample_interval_seconds`` into a ring buffer of the

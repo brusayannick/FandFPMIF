@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ProcessPoolExecutor
@@ -233,6 +234,21 @@ class RunningJobInfo:
     started_at: float
 
 
+def _mp_context():
+    """Start method for the CPU-offload pool. Never plain ``fork``: the asyncio
+    loop + DuckDB threads are already running, so a forked child can deadlock on
+    an inherited lock. ``forkserver`` (Linux) forks from a clean server process;
+    macOS uses ``spawn`` (its ``fork`` is unsafe with native libs)."""
+    import multiprocessing as mp
+
+    if sys.platform == "darwin":
+        return mp.get_context("spawn")
+    try:
+        return mp.get_context("forkserver")
+    except ValueError:  # pragma: no cover - forkserver unavailable
+        return mp.get_context("spawn")
+
+
 class JobRuntime:
     """Asyncio queue + worker pool. Handlers register by `type`."""
 
@@ -270,6 +286,11 @@ class JobRuntime:
         # Grace-window watchdogs spawned by `cancel()`; tracked so they're
         # cleaned up when the job ends (`_run_one` finally) or the runtime stops.
         self._escalation_tasks: dict[str, asyncio.Task[None]] = {}
+        # Wall-clock reaper watchdogs (one per running job) + the set of job-ids a
+        # reaper has fired on, so `_run_one` records a timeout as a failure rather
+        # than a user-cancel. Both cleared in `_run_one`'s finally.
+        self._timeout_tasks: dict[str, asyncio.Task[None]] = {}
+        self._timed_out: set[str] = set()
 
     def set_subprocess_soft_canceller(
         self, fn: Callable[[str, str], Awaitable[None]] | None
@@ -303,34 +324,54 @@ class JobRuntime:
         return self._bus if self._bus is not None else get_event_bus()
 
     def _ensure_process_pool(self) -> ProcessPoolExecutor:
-        """Lazily build a `ProcessPoolExecutor` for CPU-bound module work
-        (§8.3). Sized to match `worker_concurrency` so heavy parallel mining
-        on a multi-core box doesn't starve other workers. We don't create
-        the pool eagerly because not every deployment uses module CPU
-        offloading - paying the fork cost on every boot would be wasteful.
+        """Lazily build the CPU-offload `ProcessPoolExecutor` (§8.3), sized by
+        `module_process_pool_size` (independent of `worker_concurrency`, which
+        only gates asyncio slots) and using a fork-safe start method. Built
+        lazily so deployments that never offload don't pay the startup cost.
         """
         if self._process_pool is None:
-            self._process_pool = ProcessPoolExecutor(
-                max_workers=max(1, self.settings.worker_concurrency)
-            )
+            size = max(1, int(self.settings.module_process_pool_size))
+            self._process_pool = ProcessPoolExecutor(max_workers=size, mp_context=_mp_context())
         return self._process_pool
 
-    async def run_in_process(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
-        """Run `fn(*args, **kwargs)` in the platform's `ProcessPoolExecutor`.
+    async def run_offloaded(
+        self,
+        offload: tuple[str, str, str] | None,
+        fn: Callable[..., Any],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """Run `fn` in the offload pool.
 
-        Exposed to module authors via `ctx.run_in_process`. Standard pickling
-        rules apply: `fn` must be importable by qualified name, and all
-        args/return values must be picklable. For non-CPU-bound async I/O,
-        prefer `asyncio.to_thread` (or just `await`); the process pool only
-        wins when GIL contention is the bottleneck.
+        When `offload` is the calling module's `(folder, site_packages,
+        module_file)` - bound per-module by the loader - the worker imports that
+        module by path and calls `fn` by name, so a spawned/forkserver worker can
+        reach a *dynamically-loaded* module's function (which isn't importable by
+        its synthetic `sys.modules` name). `offload=None` is the direct path for
+        platform callers, where `fn` must be importable by qualified name. Args +
+        return must be picklable either way.
         """
         pool = self._ensure_process_pool()
         loop = asyncio.get_running_loop()
-        if kwargs:
-            from functools import partial
+        if offload is None:
+            if kwargs:
+                from functools import partial
 
-            return await loop.run_in_executor(pool, partial(fn, *args, **kwargs))
-        return await loop.run_in_executor(pool, fn, *args)
+                return await loop.run_in_executor(pool, partial(fn, *args, **kwargs))
+            return await loop.run_in_executor(pool, fn, *args)
+        from mate.api.modules.process_offload import invoke
+
+        folder, site_packages, module_file = offload
+        return await loop.run_in_executor(
+            pool, invoke, folder, site_packages, module_file, fn.__qualname__, args, kwargs
+        )
+
+    async def run_in_process(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        """Direct CPU offload for platform callers (`fn` importable by qualified
+        name). Module handlers instead get a per-module-bound `ctx.run_in_process`
+        that also ships the module's import metadata (see `run_offloaded`)."""
+        return await self.run_offloaded(None, fn, *args, **kwargs)
 
     def register(self, type_: str, handler: JobHandler) -> None:
         if type_ in self._handlers:
@@ -393,6 +434,12 @@ class JobRuntime:
         if self._escalation_tasks:
             await asyncio.gather(*self._escalation_tasks.values(), return_exceptions=True)
         self._escalation_tasks.clear()
+        for reaper in self._timeout_tasks.values():
+            reaper.cancel()
+        if self._timeout_tasks:
+            await asyncio.gather(*self._timeout_tasks.values(), return_exceptions=True)
+        self._timeout_tasks.clear()
+        self._timed_out.clear()
         for tok in self._cancel_tokens.values():
             tok.cancel()
         self._cancel_tokens.clear()
@@ -652,6 +699,28 @@ class JobRuntime:
         finally:
             self._escalation_tasks.pop(job_id, None)
 
+    async def _reap_after_timeout(self, job_id: str, timeout: float) -> None:
+        """Wall-clock backstop for one running job.
+
+        A handler still running after `timeout` seconds is force-stopped via the
+        normal `cancel()` path (cooperative token + asyncio task-cancel + the
+        subprocess two-phase soft->hard kill), then recorded as a timeout failure
+        by `_run_one`. This is what stops a wedged job from holding its worker slot
+        forever - the slot leak behind cross-user job starvation. Cancelled by
+        `_run_one`'s finally the instant the job ends, so a job that finishes
+        within budget is never reaped.
+        """
+        try:
+            await asyncio.sleep(timeout)
+        except asyncio.CancelledError:
+            return
+        # Lost the race with normal completion - the finally already pulled it.
+        if job_id not in self._running_tasks:
+            return
+        self._timed_out.add(job_id)
+        log.warning("job_runtime.job_timed_out", job_id=job_id, timeout_seconds=timeout)
+        await self.cancel(job_id)
+
     async def cancel_for_logs(self, log_ids: list[str]) -> int:
         """Cancel every queued/running job whose payload references one of `log_ids`.
 
@@ -834,6 +903,11 @@ class JobRuntime:
         handler_task = asyncio.create_task(self._handlers[handle_type](handle))
         self._running_tasks[job_id] = handler_task
         self._running_handles[job_id] = handle
+        timeout = self.settings.job_execution_timeout_seconds
+        if timeout and timeout > 0:
+            self._timeout_tasks[job_id] = asyncio.create_task(
+                self._reap_after_timeout(job_id, float(timeout))
+            )
         try:
             await handler_task
         except _COOPERATIVE_CANCEL_EXC as exc:
@@ -847,6 +921,31 @@ class JobRuntime:
                 with contextlib.suppress(Exception, asyncio.CancelledError):
                     await handler_task
                 raise
+            # A reaper-fired timeout reuses this cooperative-cancel path (the reaper
+            # calls `cancel()`), but it's an operator-relevant failure, not a user
+            # cancel - record it as failed-timeout so it surfaces in the jobs UI.
+            if job_id in self._timed_out:
+                error = (
+                    f"Job exceeded the {self.settings.job_execution_timeout_seconds}s "
+                    "execution timeout and was stopped."
+                )
+                async with sm() as session:
+                    await session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(status="failed", error=error, finished_at=_utcnow_naive()),
+                    )
+                    await session.commit()
+                await bus.publish(
+                    "job.failed",
+                    {
+                        "id": job_id,
+                        "user_id": handle_user_id,
+                        "type": handle_type,
+                        "error": error,
+                    },
+                )
+                return
             async with sm() as session:
                 await session.execute(
                     update(Job)
@@ -886,6 +985,12 @@ class JobRuntime:
             self._running_tasks.pop(job_id, None)
             self._running_handles.pop(job_id, None)
             self._cancel_tokens.pop(job_id, None)
+            self._timed_out.discard(job_id)
+            # The job ended (any outcome) - stop its wall-clock reaper so a job that
+            # finished within budget is never reaped after the fact.
+            reaper = self._timeout_tasks.pop(job_id, None)
+            if reaper is not None:
+                reaper.cancel()
             # The job ended (any outcome) - cancel its grace watchdog so a
             # cooperatively-cancelled (or just-completed) subprocess worker is
             # never hard-killed after the fact, and a reused worker isn't poisoned.

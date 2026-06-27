@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useProgressRouter } from "@/lib/use-progress-router";
 import { toast } from "sonner";
 
 import { toastError } from "@/lib/toast";
@@ -25,7 +25,7 @@ export function JobsProvider() {
   const apply = useJobsStore((s) => s.applyEvent);
   const muted = useUi((s) => s.notificationsMuted);
   const qc = useQueryClient();
-  const router = useRouter();
+  const router = useProgressRouter();
 
   // Initial hydration.
   useEffect(() => {

@@ -58,10 +58,10 @@ frontend:
       title: Performance KPIs
       description: Cases, events, variants, throughput and cycle-time summary.
       icon: Gauge
-      default_w: 6
-      default_h: 7
-      min_w: 5
-      min_h: 5
+      # Fixed-size KPI scorecard (8 tiles): locked to a size that shows them all.
+      default_w: 7
+      default_h: 15
+      resizable: false
     - id: bottlenecks
       entry: ./widgets/Bottlenecks.tsx
       title: Bottlenecks

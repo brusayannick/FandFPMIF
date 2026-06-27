@@ -9,11 +9,16 @@ don't block the event loop on large logs.
 from __future__ import annotations
 
 import asyncio
+import collections
+import os
+import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
 import duckdb
 
+from mate.api.config import get_settings
 from mate.api.ingest.storage import log_paths
 from mate.api.modules.event_filters import quote_ident as _quote_ident
 from mate.api.modules.event_filters import render_filter_sql
@@ -38,6 +43,42 @@ CANONICAL_ROLES: dict[str, ColumnRole] = {
 }
 REQUIRED_COLUMNS: frozenset[str] = frozenset({"case_id", "activity", "timestamp"})
 ENUM_DETECT_THRESHOLD = 25  # cardinality below which a string column is treated as enum
+
+# Shared, mtime-guarded read cache (§5.5/§8.3). Many dashboard widgets on one log
+# each call `pandas()`/`polars()`, re-reading the same Parquet. We cache the
+# *immutable* Arrow table per `(path, mtime)` and serve fresh frames from it, so
+# N widgets collapse to one disk read + decode without any mutation-sharing risk.
+# Bounded by `event_log_cache_entries` (0 disables) and a per-table byte cap.
+_READ_CACHE: collections.OrderedDict[tuple[str, float], Any] = collections.OrderedDict()
+_READ_CACHE_LOCK = threading.Lock()
+_READ_CACHE_MAX_BYTES = 512 * 1024 * 1024
+
+
+def _read_arrow_cached(path: Path) -> Any:
+    """Read `path` to an Arrow table, caching it by `(path, mtime)`. Only the
+    unfiltered full-log read goes through here; filtered views vary per request."""
+    import pyarrow.parquet as pq
+
+    max_entries = get_settings().event_log_cache_entries
+    if max_entries <= 0:
+        return pq.read_table(path)
+    try:
+        key = (str(path), os.path.getmtime(path))
+    except OSError:
+        return pq.read_table(path)
+    with _READ_CACHE_LOCK:
+        hit = _READ_CACHE.get(key)
+        if hit is not None:
+            _READ_CACHE.move_to_end(key)
+            return hit
+    table = pq.read_table(path)
+    if table.nbytes <= _READ_CACHE_MAX_BYTES:
+        with _READ_CACHE_LOCK:
+            _READ_CACHE[key] = table
+            _READ_CACHE.move_to_end(key)
+            while len(_READ_CACHE) > max_entries:
+                _READ_CACHE.popitem(last=False)
+    return table
 
 
 class EventLogAccess:
@@ -93,11 +134,17 @@ class EventLogAccess:
     def cases_path(self) -> Path:
         return self._paths.cases
 
-    async def pandas(self) -> Any:
-        import pandas as pd
+    @property
+    def active_filter(self) -> list[dict[str, Any]] | None:
+        """The applied Events-tab filter (or None). Exposed alongside
+        `materialize_parquet` so offloaded compute can reason about the view (§8.3)."""
+        return self._active_filter
 
+    async def pandas(self) -> Any:
         if not self._active_filter:
-            return await asyncio.to_thread(pd.read_parquet, self._paths.events)
+            return await asyncio.to_thread(
+                lambda: _read_arrow_cached(self._paths.events).to_pandas()
+            )
 
         def _run() -> Any:
             self._ensure_conn()
@@ -105,6 +152,22 @@ class EventLogAccess:
             return self._conn.execute("SELECT * FROM events").df()
 
         return await asyncio.to_thread(_run)
+
+    async def materialize_parquet(self) -> tuple[str, bool]:
+        """Hand the *current view* to a `ctx.run_in_process` worker as a Parquet
+        path (§8.3). Returns `(path, is_temp)`: the raw events Parquet when no
+        filter is applied (zero-copy - the common precompute case), else a temp
+        Parquet of the filtered rows that the caller must delete. Lets offloaded
+        compute read the exact rows with a plain `pandas.read_parquet` - no event
+        loop, no `EventLogAccess`, and no platform import inside the worker.
+        """
+        if not self._active_filter:
+            return str(self._paths.events), False
+        df = await self.pandas()
+        fd, tmp = tempfile.mkstemp(prefix="ff_offload_", suffix=".parquet")
+        os.close(fd)
+        await asyncio.to_thread(df.to_parquet, tmp, index=False)
+        return tmp, True
 
     async def polars(self) -> Any:
         try:
@@ -115,7 +178,9 @@ class EventLogAccess:
                 "dependencies.python.inherit or .packages."
             ) from exc
         if not self._active_filter:
-            return await asyncio.to_thread(pl.read_parquet, self._paths.events)
+            return await asyncio.to_thread(
+                lambda: pl.from_arrow(_read_arrow_cached(self._paths.events))
+            )
 
         def _run() -> Any:
             self._ensure_conn()

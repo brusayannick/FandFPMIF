@@ -123,6 +123,16 @@ class EventLogAccessProtocol(Protocol):
     async def pm4py(self) -> Any: ...
     async def duckdb_fetch(self, sql: str, params: list | tuple | None = None) -> list[tuple]: ...
 
+    # Hand the current view to a `ctx.run_in_process` worker without pickling a
+    # multi-million-row DataFrame: `materialize_parquet()` returns a Parquet path
+    # the worker reads with a plain `pandas.read_parquet` (§8.3). `events_path` /
+    # `active_filter` expose the raw path + applied filter for advanced uses.
+    async def materialize_parquet(self) -> tuple[str, bool]: ...
+    @property
+    def events_path(self) -> Path: ...
+    @property
+    def active_filter(self) -> list[dict[str, Any]] | None: ...
+
 
 @runtime_checkable
 class OpenEventLogProtocol(Protocol):

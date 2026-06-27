@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useReducedMotion } from "framer-motion";
 import RGL, { WidthProvider, type Layout } from "react-grid-layout";
 
 import { cn } from "@/lib/cn";
@@ -161,21 +162,26 @@ export function DashboardCanvas({
     for (const c of catalog ?? []) map.set(`${c.module_id}:${c.widget_id}`, c.config_schema);
     return (moduleId: string, widgetId: string) => map.get(`${moduleId}:${widgetId}`);
   }, [catalog]);
-  // Each widget declares its own minimum size in its manifest; look it up by
-  // `(module_id, widget_id)` and feed it to RGL as the item's `minW`/`minH` so a
-  // card can't be resized below what it can render. RGL treats a missing minW/minH
-  // as `1` (GridItem default), so every field MUST resolve to a number — coerce
-  // per-field to the historical floor when the catalog hasn't loaded, predates the
-  // field, or no longer lists the card. (An undefined here = unbounded resize.)
-  const minSizeFor = useMemo(() => {
-    const FALLBACK = { minW: 2, minH: 3 };
+  // Per-widget grid constraints from the catalog, keyed by `module:widget`:
+  //  - `resizable`       whether the user may resize the card at all,
+  //  - `minW`/`minH`     the resize floor for a resizable card (and the size an
+  //                      under-sized placed card is grown to on load),
+  //  - `fixedW`/`fixedH` the locked size used when the card is NOT resizable.
+  // Every field MUST resolve to a positive number — RGL treats a missing min as
+  // `1` (GridItem default) — so coerce per-field to the historical floor when the
+  // catalog hasn't loaded, predates the field, or no longer lists the card.
+  const constraintsFor = useMemo(() => {
+    const FALLBACK = { resizable: true, minW: 2, minH: 3, fixedW: 6, fixedH: 8 };
     const num = (v: unknown, fallback: number) =>
       typeof v === "number" && Number.isFinite(v) && v > 0 ? v : fallback;
-    const map = new Map<string, { minW: number; minH: number }>();
+    const map = new Map<string, typeof FALLBACK>();
     for (const c of catalog ?? [])
       map.set(`${c.module_id}:${c.widget_id}`, {
+        resizable: c.resizable !== false,
         minW: num(c.min_w, FALLBACK.minW),
         minH: num(c.min_h, FALLBACK.minH),
+        fixedW: num(c.default_w, FALLBACK.fixedW),
+        fixedH: num(c.default_h, FALLBACK.fixedH),
       });
     return (moduleId: string, widgetId: string) =>
       map.get(`${moduleId}:${widgetId}`) ?? FALLBACK;
@@ -193,17 +199,33 @@ export function DashboardCanvas({
   const [addCard, setAddCard] = useState<CatalogCard | null>(null);
   const [addPointer, setAddPointer] = useState<{ x: number; y: number } | null>(null);
   const [addCell, setAddCell] = useState<{ x: number; y: number } | null>(null);
+  // Card lifecycle animation state. `recentlyAddedId` pops the just-dropped card
+  // in; `removingIds` plays the exit animation while the card lingers one tick
+  // before it's actually dropped from `items` (others then reflow into the gap).
+  const reduceMotion = useReducedMotion();
+  const [recentlyAddedId, setRecentlyAddedId] = useState<string | null>(null);
+  const [removingIds, setRemovingIds] = useState<Set<string>>(() => new Set());
   const dragRef = useRef<FreeDrag | null>(null);
   const resizeRef = useRef<FreeResize | null>(null);
   const liveRef = useRef<DashboardItem[] | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  // Detach in-flight drag/add listeners if we unmount mid-gesture.
+  // Detach in-flight drag/add listeners (and pending lifecycle timers) on unmount.
   const teardownRef = useRef<() => void>(() => {});
   const addTeardownRef = useRef<() => void>(() => {});
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const schedule = useCallback((fn: () => void, ms: number) => {
+    const t = setTimeout(() => {
+      timersRef.current.delete(t);
+      fn();
+    }, ms);
+    timersRef.current.add(t);
+  }, []);
   useEffect(
     () => () => {
       teardownRef.current();
       addTeardownRef.current();
+      timersRef.current.forEach(clearTimeout);
+      timersRef.current.clear();
     },
     [],
   );
@@ -239,24 +261,40 @@ export function DashboardCanvas({
   const layout = useMemo<Layout[]>(
     () =>
       displayItems.map((it) => {
-        const { minW, minH } = minSizeFor(it.module_id, it.widget_id);
-        // RGL only enforces minW/minH during an interactive resize – it never
-        // grows an already-placed item on load. So a card stored below its
-        // minimum (placed before the minimum existed, or before it was raised)
-        // would keep rendering too small. Clamp w/h up to the minimum here so
-        // the floor is applied to the rendered size too; in edit mode RGL's
-        // mount `onLayoutChange` then persists the corrected geometry.
+        const c = constraintsFor(it.module_id, it.widget_id);
+        if (!c.resizable) {
+          // Fixed-size card: lock to the declared size and forbid resize. The
+          // stored w/h is ignored so even an old placement renders at the fixed
+          // size; in edit mode RGL's mount `onLayoutChange` persists it.
+          return {
+            i: it.i,
+            x: it.x,
+            y: it.y,
+            w: c.fixedW,
+            h: c.fixedH,
+            minW: c.fixedW,
+            maxW: c.fixedW,
+            minH: c.fixedH,
+            maxH: c.fixedH,
+            isResizable: false,
+          };
+        }
+        // Resizable card: RGL only enforces minW/minH during an interactive
+        // resize – it never grows an already-placed item on load. So a card
+        // stored below its minimum would keep rendering too small. Clamp w/h up
+        // to the minimum here so the floor is applied to the rendered size too;
+        // in edit mode RGL's mount `onLayoutChange` persists the corrected size.
         return {
           i: it.i,
           x: it.x,
           y: it.y,
-          w: Math.max(it.w, minW),
-          h: Math.max(it.h, minH),
-          minW,
-          minH,
+          w: Math.max(it.w, c.minW),
+          h: Math.max(it.h, c.minH),
+          minW: c.minW,
+          minH: c.minH,
         };
       }),
-    [displayItems, minSizeFor],
+    [displayItems, constraintsFor],
   );
 
   // Stable refs/handlers so memoized cards don't re-render while dragging.
@@ -275,15 +313,35 @@ export function DashboardCanvas({
     (id: string) => onItemsChangeRef.current(itemsRef.current.filter((it) => it.i !== id)),
     [],
   );
+  // Play the card's exit animation, then drop it from `items` a tick later so the
+  // others reflow into the freed space. Under reduced motion, remove immediately.
+  const requestRemove = useCallback(
+    (id: string) => {
+      if (reduceMotion) {
+        removeItem(id);
+        return;
+      }
+      setRemovingIds((prev) => new Set(prev).add(id));
+      schedule(() => {
+        removeItem(id);
+        setRemovingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 170);
+    },
+    [reduceMotion, removeItem, schedule],
+  );
   const cardHandlers = useMemo(() => {
     const m = new Map<
       string,
       { onUpdate: (p: { title?: string; config?: Record<string, unknown> }) => void; onRemove: () => void }
     >();
     for (const it of items)
-      m.set(it.i, { onUpdate: (p) => updateItem(it.i, p), onRemove: () => removeItem(it.i) });
+      m.set(it.i, { onUpdate: (p) => updateItem(it.i, p), onRemove: () => requestRemove(it.i) });
     return m;
-  }, [items, updateItem, removeItem]);
+  }, [items, updateItem, requestRemove]);
 
   const handleLayoutChange = (next: Layout[]) => {
     // RGL fires this on mount, on resize, and on its own (non-free) drags. While
@@ -334,7 +392,9 @@ export function DashboardCanvas({
     // Resize: the corner handle. The card keeps its (x, y); only w/h grow, and
     // the cards it now overlaps reflow below it.
     if (target.closest(".dashboard-resize-handle")) {
-      const { minW, minH } = minSizeFor(it.module_id, it.widget_id);
+      const c = constraintsFor(it.module_id, it.widget_id);
+      if (!c.resizable) return;
+      const { minW, minH } = c;
       resizeRef.current = {
         id,
         pointerX: e.clientX,
@@ -480,7 +540,11 @@ export function DashboardCanvas({
       config: configDefaults(card.config_schema),
     };
     onItemsChangeRef.current(reflowFree([...itemsRef.current, newItem], newItem.i, x, y));
-  }, []);
+    // Pop the new card in; clear the flag after the animation (no-op under
+    // reduced motion, where the CSS guard strips the animation duration).
+    setRecentlyAddedId(newItem.i);
+    schedule(() => setRecentlyAddedId((cur) => (cur === newItem.i ? null : cur)), 260);
+  }, [schedule]);
 
   // Snap a viewport point to a grid cell, mirroring RGL's calcXY (the cursor is
   // the new card's top-left). Returns null when the point is outside the canvas,
@@ -601,19 +665,31 @@ export function DashboardCanvas({
                 resizingId === it.i && "rgl-free-resizing",
               )}
             >
-              <DashboardCard
-                item={it}
-                logId={logId}
-                editing={editing}
-                schema={schemaFor(it.module_id, it.widget_id)}
-                chrome={settings.chrome}
-                onUpdate={h?.onUpdate ?? (() => {})}
-                onRemove={h?.onRemove ?? (() => {})}
-              />
-              {freeReflow && (
+              {/* Inner wrapper carries the add/remove animation (transform/opacity)
+                  so it never fights RGL's `transform` on the grid-item above. */}
+              <div
+                className={cn(
+                  "h-full",
+                  recentlyAddedId === it.i && "animate-in fade-in-0 zoom-in-95 duration-200",
+                  removingIds.has(it.i) &&
+                    "animate-out fade-out-0 zoom-out-95 pointer-events-none duration-150",
+                )}
+              >
+                <DashboardCard
+                  item={it}
+                  logId={logId}
+                  editing={editing}
+                  schema={schemaFor(it.module_id, it.widget_id)}
+                  chrome={settings.chrome}
+                  onUpdate={h?.onUpdate ?? (() => {})}
+                  onRemove={h?.onRemove ?? (() => {})}
+                />
+              </div>
+              {freeReflow && constraintsFor(it.module_id, it.widget_id).resizable && (
                 // Custom resize grip (RGL's native resize is off in free mode):
                 // `onPointerDown` reads `.dashboard-resize-handle` to start a
-                // reflow-driven resize. Clickable even at opacity 0.
+                // reflow-driven resize. Clickable even at opacity 0. Omitted for
+                // fixed-size (non-resizable) cards.
                 <div
                   className="dashboard-resize-handle absolute bottom-0.5 right-0.5 z-[4] h-3.5 w-3.5 cursor-se-resize touch-none rounded-[2px] border-b-2 border-r-2 border-muted-foreground/40 opacity-0 transition-opacity group-hover:opacity-100"
                   aria-hidden
@@ -632,7 +708,7 @@ export function DashboardCanvas({
         addPointer &&
         createPortal(
           <div
-            className="pointer-events-none fixed z-50 max-w-[16rem] truncate rounded-md border border-border bg-card px-2 py-1 text-xs font-medium shadow-lg"
+            className="pointer-events-none fixed z-50 max-w-[16rem] truncate rounded-md border border-border bg-card px-2 py-1 text-xs font-medium shadow-lg animate-in fade-in-0 zoom-in-95 duration-150"
             style={{ left: addPointer.x + 12, top: addPointer.y + 12 }}
           >
             {addCard.title}

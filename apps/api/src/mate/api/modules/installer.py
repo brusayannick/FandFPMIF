@@ -77,6 +77,11 @@ def _venv_site_packages(folder: Path) -> Path:
     return folder / ".venv" / "lib" / f"python{major}.{minor}" / "site-packages"
 
 
+# Public alias: the loader needs a module's site-packages to build the
+# `ctx.run_in_process` offload metadata (§8.3).
+venv_site_packages = _venv_site_packages
+
+
 def _host_satisfies(requires_python: str | None) -> tuple[bool, str]:
     """Whether the running interpreter satisfies *requires_python*.
 

@@ -54,7 +54,14 @@ class AgentSimulator:
         else:
             df_train, df_test, num_cases_to_simulate = split_data(self.params['PATH_LOG'], self.params['column_names'])
 
-        self.data_dir = os.path.join(os.getcwd(), "simulated_data", file_name, file_name_extension)
+        # Write outputs under the base dir the platform hands us via params
+        # ('output_dir' = the per-run scratch dir set in adapter.run_simulate), not
+        # os.getcwd(): the subprocess worker's cwd is /app, so getcwd() sent every
+        # simulated log to /app/simulated_data/... while the host read them back
+        # from the run dir -> "AgentSimulator produced no output". Falls back to
+        # getcwd() when the upstream pipeline is run standalone (no platform).
+        base_dir = self.params.get("output_dir") or os.getcwd()
+        self.data_dir = os.path.join(base_dir, "simulated_data", file_name, file_name_extension)
 
         df_val = get_validation_data(df_train)
         num_cases_to_simulate_val = len(set(df_val['case_id']))

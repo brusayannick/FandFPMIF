@@ -10,26 +10,13 @@ import { Toaster } from "@/components/ui/sonner";
 import { useAnalytics } from "@/lib/stores/analytics";
 import { AnalyticsProvider } from "@/lib/analytics/provider";
 import { ServerStateSync } from "@/components/server-state-sync";
-
-function makeQueryClient() {
-  return new QueryClient({
-    defaultOptions: {
-      queries: {
-        staleTime: 30_000,
-        refetchOnWindowFocus: false,
-        retry: (count, err: unknown) => {
-          // Don't retry on 4xx – they're our fault, not the network's.
-          const status = (err as { status?: number } | null)?.status;
-          if (status && status >= 400 && status < 500) return false;
-          return count < 2;
-        },
-      },
-    },
-  });
-}
+import { makeQueryClient } from "@/lib/get-query-client";
 
 let _client: QueryClient | undefined;
 function getQueryClient() {
+  // Browser: one client for the tab's lifetime, so SSR-hydrated caches persist
+  // across client-side navigations. Server: a throwaway (RSC prefetch uses the
+  // request-scoped client in lib/prefetch.ts, never this one).
   if (typeof window === "undefined") return makeQueryClient();
   if (!_client) _client = makeQueryClient();
   return _client;

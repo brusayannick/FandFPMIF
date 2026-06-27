@@ -13,6 +13,7 @@ import {
   Share2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { AnimatePresence, motion, useReducedMotion, type Transition } from "framer-motion";
 
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,9 @@ import {
 
 const DEFAULT_COLS = 12;
 
+// Shared "subtle & snappy" timing for the view's enter/exit transitions.
+const MOTION: Transition = { duration: 0.18, ease: [0.2, 0, 0, 1] };
+
 export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const { data: dashboard, isLoading, isError } = useDashboard(dashboardId);
   const { data: logs } = useEventLogs({ status: "ready" });
@@ -70,6 +74,11 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   // synchronously from `pointerdown` so the gesture matches an in-canvas drag.
   const startAddRef = useRef<AddStarter | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  // Shared enter/exit timing for the framer-motion bits; zeroed (instant) under
+  // prefers-reduced-motion since width/height/opacity animations bypass the CSS
+  // guard. The CSS/tw-animate animations are handled by that guard separately.
+  const reduceMotion = useReducedMotion();
+  const motionTransition: Transition = reduceMotion ? { duration: 0 } : MOTION;
   // Shared boards open read-only for the recipient – no edit toolbar, no log
   // picker. The backend also 404s owner-only mutations, so this is just UX.
   const isOwner = dashboard?.is_owner ?? true;
@@ -306,16 +315,43 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           provider (above) scopes every widget's queries so a filter change
           skeletons and refetches them all without touching the rest of the app. */}
         <div className="flex min-h-0 flex-1 flex-col">
-          {logId && <DashboardFilterBarConnected logId={logId} />}
-          <div className="flex min-h-0 flex-1">
-            {editing && (
-              <CardPalette
-                onStartAdd={(card, e) => startAddRef.current?.(card, e)}
-                logModel={dashboard.log_model}
-              />
+          <AnimatePresence initial={false}>
+            {logId && (
+              <motion.div
+                key="filter-bar"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={motionTransition}
+                className="overflow-hidden"
+              >
+                <DashboardFilterBarConnected logId={logId} />
+              </motion.div>
             )}
+          </AnimatePresence>
+          <div className="flex min-h-0 flex-1">
+            <AnimatePresence initial={false}>
+              {editing && (
+                <motion.div
+                  key="palette"
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: "16rem", opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={motionTransition}
+                  className="shrink-0 overflow-hidden"
+                >
+                  <CardPalette
+                    onStartAdd={(card, e) => startAddRef.current?.(card, e)}
+                    logModel={dashboard.log_model}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
             <DashboardWidgetScope>
-              <div className="dashboard-canvas-bg relative min-h-0 flex-1 overflow-auto p-3">
+              <div
+                data-editing={editing}
+                className="dashboard-canvas-bg relative min-h-0 flex-1 overflow-auto p-3"
+              >
                 {items.length === 0 && !editing ? (
                   <EmptyState
                     icon={LayoutDashboard}
@@ -346,20 +382,42 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
                     onItemsChange={setItems}
                   />
                 )}
-                {items.length === 0 && editing && (
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-                    <div className="rounded-lg border border-dashed border-border bg-background/70 px-6 py-4 text-center backdrop-blur-sm">
-                      <p className="text-sm font-medium">Empty board</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Drag a card from the left onto the canvas, or click one to add it.
-                      </p>
-                    </div>
-                  </div>
-                )}
+                <AnimatePresence>
+                  {items.length === 0 && editing && (
+                    <motion.div
+                      key="empty-hint"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={motionTransition}
+                      className="pointer-events-none absolute inset-0 flex items-center justify-center p-6"
+                    >
+                      <div className="rounded-lg border border-dashed border-border bg-background/70 px-6 py-4 text-center backdrop-blur-sm">
+                        <p className="text-sm font-medium">Empty board</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Drag a card from the left onto the canvas, or click one to add it.
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </DashboardWidgetScope>
           </div>
-          {logId && <DashboardTimeRangeConnected logId={logId} />}
+          <AnimatePresence initial={false}>
+            {logId && (
+              <motion.div
+                key="time-range"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={motionTransition}
+                className="overflow-hidden"
+              >
+                <DashboardTimeRangeConnected logId={logId} />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
       {isOwner && (

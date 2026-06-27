@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 from typing import Any
 
 from fastapi import HTTPException
@@ -105,21 +106,6 @@ async def _cached_or_compute(
     result = await compute()
     await ctx.cache.set(key, result)
     return result
-
-
-def _guard_ilp_size(renamed: Any) -> None:
-    """Refuse ILP miner inputs that would OOM-kill the container."""
-    n_activities = int(renamed["concept:name"].nunique())
-    n_cases = int(renamed["case:concept:name"].nunique())
-    if n_activities > _ILP_MAX_ACTIVITIES or n_cases > _ILP_MAX_CASES:
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                f"ILP miner refused: log has {n_activities} distinct activities and "
-                f"{n_cases} cases (limits: {_ILP_MAX_ACTIVITIES} activities, "
-                f"{_ILP_MAX_CASES} cases). Try the Inductive or Alpha+ miner instead."
-            ),
-        )
 
 
 def _rename_pm4py(df: Any) -> Any:
@@ -214,71 +200,206 @@ def _edge_mean_durations(renamed: Any) -> dict[tuple[str, str], float]:
     return {k: sums[k] / counts[k] for k in sums}
 
 
+# -- process-pool offload -----------------------------------------------------
+#
+# pm4py mining is CPU-bound and GIL-heavy, so each algorithm runs on its own
+# core via `ctx.run_in_process` (§8.3). The worker is a top-level, pure function
+# that receives a Parquet *path* (handed over by `materialize_parquet`, so no
+# multi-million-row DataFrame is pickled) and reads it with plain pandas - it
+# never imports the platform. The reflows below are byte-identical to the former
+# `asyncio.to_thread` closures; only where the work runs changed.
+
+
+async def _offload(ctx: ModuleContext, worker: Any, *args: Any) -> dict[str, Any]:
+    """Run `worker(parquet_path, *args)` on a pool core, handing it the current
+    (filtered) view as a Parquet path and removing any temp file afterwards."""
+    async with ctx.event_log as log:
+        path, is_temp = await log.materialize_parquet()
+    try:
+        return await ctx.run_in_process(worker, path, *args)
+    finally:
+        if is_temp:
+            await asyncio.to_thread(os.remove, path)
+
+
+async def _guard_ilp_size(ctx: ModuleContext) -> None:
+    """Refuse ILP inputs that would OOM-kill the container. Counted cheaply in
+    DuckDB (GIL-free) in-process, so the worker only mines - and so the 413 is
+    raised here rather than across the pool boundary."""
+    async with ctx.event_log as log:
+        rows = await log.duckdb_fetch(
+            "SELECT COUNT(DISTINCT activity), COUNT(DISTINCT case_id) FROM events"
+        )
+    n_activities = int(rows[0][0]) if rows and rows[0][0] is not None else 0
+    n_cases = int(rows[0][1]) if rows and rows[0][1] is not None else 0
+    if n_activities > _ILP_MAX_ACTIVITIES or n_cases > _ILP_MAX_CASES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"ILP miner refused: log has {n_activities} distinct activities and "
+                f"{n_cases} cases (limits: {_ILP_MAX_ACTIVITIES} activities, "
+                f"{_ILP_MAX_CASES} cases). Try the Inductive or Alpha+ miner instead."
+            ),
+        )
+
+
+def _dfg_worker(path: str, variant_pct: float | None) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    renamed = _rename_pm4py(pd.read_parquet(path))
+    filtered = renamed
+    if variant_pct is not None and variant_pct < 1.0:
+        filtered = _filter_variants_coverage(renamed, variant_pct)
+    dfg, start, end = pm4py.discover_dfg(filtered)
+    durations = _edge_mean_durations(filtered)
+    mean_positions = _activity_mean_trace_position(filtered)
+    return serialize_dfg(dfg, start, end, durations=durations, mean_positions=mean_positions)
+
+
+def _petri_alpha_worker(path: str) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    net, im, fm = pm4py.discover_petri_net_alpha(_rename_pm4py(pd.read_parquet(path)))
+    return serialize_petri_net(net, im, fm)
+
+
+def _petri_alpha_plus_worker(path: str) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    net, im, fm = pm4py.discover_petri_net_alpha_plus(_rename_pm4py(pd.read_parquet(path)))
+    return serialize_petri_net(net, im, fm)
+
+
+def _petri_inductive_worker(path: str) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    net, im, fm = pm4py.discover_petri_net_inductive(_rename_pm4py(pd.read_parquet(path)))
+    return serialize_petri_net(net, im, fm)
+
+
+def _petri_imf_worker(path: str, noise_threshold: float) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    net, im, fm = pm4py.discover_petri_net_inductive(
+        _rename_pm4py(pd.read_parquet(path)), noise_threshold=noise_threshold
+    )
+    return serialize_petri_net(net, im, fm)
+
+
+def _petri_ilp_worker(path: str) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    net, im, fm = pm4py.discover_petri_net_ilp(_rename_pm4py(pd.read_parquet(path)))
+    return serialize_petri_net(net, im, fm)
+
+
+def _process_tree_worker(path: str) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    tree = pm4py.discover_process_tree_inductive(_rename_pm4py(pd.read_parquet(path)))
+    return serialize_process_tree(tree)
+
+
+def _process_tree_imf_worker(path: str, noise_threshold: float) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    tree = pm4py.discover_process_tree_inductive(
+        _rename_pm4py(pd.read_parquet(path)), noise_threshold=noise_threshold
+    )
+    return serialize_process_tree(tree)
+
+
+def _process_tree_via_petri_worker(path: str, algo: str) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    renamed = _rename_pm4py(pd.read_parquet(path))
+    if algo == "alpha":
+        net, im, fm = pm4py.discover_petri_net_alpha(renamed)
+    elif algo == "alpha-plus":
+        net, im, fm = pm4py.discover_petri_net_alpha_plus(renamed)
+    elif algo == "ilp":
+        net, im, fm = pm4py.discover_petri_net_ilp(renamed)
+    else:
+        raise ValueError(f"Unknown algo: {algo!r}")
+    tree = pm4py.convert_to_process_tree(net, im, fm)
+    return serialize_process_tree(tree)
+
+
+def _heuristics_net_worker(
+    path: str,
+    dependency_threshold: float,
+    and_threshold: float,
+    loop_two_threshold: float,
+) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    hnet = pm4py.discover_heuristics_net(
+        _rename_pm4py(pd.read_parquet(path)),
+        dependency_threshold=dependency_threshold,
+        and_threshold=and_threshold,
+        loop_two_threshold=loop_two_threshold,
+    )
+    return serialize_heuristics_net(hnet)
+
+
+def _bpmn_inductive_worker(path: str) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    return serialize_bpmn(pm4py.discover_bpmn_inductive(_rename_pm4py(pd.read_parquet(path))))
+
+
+def _bpmn_imf_worker(path: str, noise_threshold: float) -> dict[str, Any]:
+    import pandas as pd
+    import pm4py
+
+    bpmn_graph = pm4py.discover_bpmn_inductive(
+        _rename_pm4py(pd.read_parquet(path)), noise_threshold=noise_threshold
+    )
+    return serialize_bpmn(bpmn_graph)
+
+
+def _prefix_tree_worker(path: str) -> dict[str, Any]:
+    import pandas as pd
+
+    renamed = _rename_pm4py(pd.read_parquet(path))
+    sorted_df = renamed.sort_values(["case:concept:name", "time:timestamp"], kind="mergesort")
+    cases: list[list[str]] = (
+        sorted_df.groupby("case:concept:name", sort=False)["concept:name"].apply(list).tolist()
+    )
+    return serialize_prefix_tree(cases)
+
+
 class DiscoveryModule(Module):
     id = "discovery"
 
-    # -- compute helpers (reusable from routes + precompute) ------------------
+    # -- compute helpers (reusable from routes + precompute). Each offloads to a
+    # process-pool core via `_offload` + the top-level `_*_worker` fns above; the
+    # route/precompute callers and the `ctx.cache` keys are unchanged. ---------
 
     async def _compute_dfg(
         self, ctx: ModuleContext, *, variant_pct: float | None = None
     ) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            filtered = renamed
-            if variant_pct is not None and variant_pct < 1.0:
-                filtered = _filter_variants_coverage(renamed, variant_pct)
-            dfg, start, end = pm4py.discover_dfg(filtered)
-            durations = _edge_mean_durations(filtered)
-            mean_positions = _activity_mean_trace_position(filtered)
-            return serialize_dfg(
-                dfg, start, end, durations=durations, mean_positions=mean_positions
-            )
-
-        return await asyncio.to_thread(_run)
+        return await _offload(ctx, _dfg_worker, variant_pct)
 
     async def _compute_petri_alpha(self, ctx: ModuleContext) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            net, im, fm = pm4py.discover_petri_net_alpha(renamed)
-            return serialize_petri_net(net, im, fm)
-
-        return await asyncio.to_thread(_run)
+        return await _offload(ctx, _petri_alpha_worker)
 
     async def _compute_petri_inductive(self, ctx: ModuleContext) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            net, im, fm = pm4py.discover_petri_net_inductive(renamed)
-            return serialize_petri_net(net, im, fm)
-
-        return await asyncio.to_thread(_run)
+        return await _offload(ctx, _petri_inductive_worker)
 
     async def _compute_process_tree(self, ctx: ModuleContext) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            tree = pm4py.discover_process_tree_inductive(renamed)
-            return serialize_process_tree(tree)
-
-        return await asyncio.to_thread(_run)
+        return await _offload(ctx, _process_tree_worker)
 
     async def _compute_heuristics_net(
         self,
@@ -288,151 +409,44 @@ class DiscoveryModule(Module):
         and_threshold: float,
         loop_two_threshold: float,
     ) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            hnet = pm4py.discover_heuristics_net(
-                renamed,
-                dependency_threshold=dependency_threshold,
-                and_threshold=and_threshold,
-                loop_two_threshold=loop_two_threshold,
-            )
-            return serialize_heuristics_net(hnet)
-
-        return await asyncio.to_thread(_run)
+        return await _offload(
+            ctx, _heuristics_net_worker, dependency_threshold, and_threshold, loop_two_threshold
+        )
 
     async def _compute_petri_alpha_plus(self, ctx: ModuleContext) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            net, im, fm = pm4py.discover_petri_net_alpha_plus(renamed)
-            return serialize_petri_net(net, im, fm)
-
-        return await asyncio.to_thread(_run)
+        return await _offload(ctx, _petri_alpha_plus_worker)
 
     async def _compute_petri_ilp(self, ctx: ModuleContext) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            _guard_ilp_size(renamed)
-            net, im, fm = pm4py.discover_petri_net_ilp(renamed)
-            return serialize_petri_net(net, im, fm)
-
-        return await asyncio.to_thread(_run)
+        await _guard_ilp_size(ctx)
+        return await _offload(ctx, _petri_ilp_worker)
 
     async def _compute_petri_imf(
         self, ctx: ModuleContext, *, noise_threshold: float
     ) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            net, im, fm = pm4py.discover_petri_net_inductive(
-                renamed, noise_threshold=noise_threshold
-            )
-            return serialize_petri_net(net, im, fm)
-
-        return await asyncio.to_thread(_run)
+        return await _offload(ctx, _petri_imf_worker, noise_threshold)
 
     async def _compute_process_tree_imf(
         self, ctx: ModuleContext, *, noise_threshold: float
     ) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            tree = pm4py.discover_process_tree_inductive(renamed, noise_threshold=noise_threshold)
-            return serialize_process_tree(tree)
-
-        return await asyncio.to_thread(_run)
+        return await _offload(ctx, _process_tree_imf_worker, noise_threshold)
 
     async def _compute_process_tree_via_petri(
         self, ctx: ModuleContext, algo: str
     ) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            if algo == "alpha":
-                net, im, fm = pm4py.discover_petri_net_alpha(renamed)
-            elif algo == "alpha-plus":
-                net, im, fm = pm4py.discover_petri_net_alpha_plus(renamed)
-            elif algo == "ilp":
-                _guard_ilp_size(renamed)
-                net, im, fm = pm4py.discover_petri_net_ilp(renamed)
-            else:
-                raise ValueError(f"Unknown algo: {algo!r}")
-            tree = pm4py.convert_to_process_tree(net, im, fm)
-            return serialize_process_tree(tree)
-
-        return await asyncio.to_thread(_run)
+        if algo == "ilp":
+            await _guard_ilp_size(ctx)
+        return await _offload(ctx, _process_tree_via_petri_worker, algo)
 
     async def _compute_bpmn_inductive(self, ctx: ModuleContext) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            bpmn_graph = pm4py.discover_bpmn_inductive(renamed)
-            return serialize_bpmn(bpmn_graph)
-
-        return await asyncio.to_thread(_run)
+        return await _offload(ctx, _bpmn_inductive_worker)
 
     async def _compute_bpmn_imf(
         self, ctx: ModuleContext, *, noise_threshold: float
     ) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            import pm4py
-
-            renamed = _rename_pm4py(df)
-            bpmn_graph = pm4py.discover_bpmn_inductive(renamed, noise_threshold=noise_threshold)
-            return serialize_bpmn(bpmn_graph)
-
-        return await asyncio.to_thread(_run)
+        return await _offload(ctx, _bpmn_imf_worker, noise_threshold)
 
     async def _compute_prefix_tree(self, ctx: ModuleContext) -> dict[str, Any]:
-        async with ctx.event_log as log:
-            df = await log.pandas()
-
-        def _run() -> dict[str, Any]:
-            renamed = _rename_pm4py(df)
-            sorted_df = renamed.sort_values(
-                ["case:concept:name", "time:timestamp"], kind="mergesort"
-            )
-            cases: list[list[str]] = (
-                sorted_df.groupby("case:concept:name", sort=False)["concept:name"]
-                .apply(list)
-                .tolist()
-            )
-            return serialize_prefix_tree(cases)
-
-        return await asyncio.to_thread(_run)
+        return await _offload(ctx, _prefix_tree_worker)
 
     # -- routes ---------------------------------------------------------------
 

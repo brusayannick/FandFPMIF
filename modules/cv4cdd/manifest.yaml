@@ -66,8 +66,8 @@ frontend:
       icon: AlertTriangle
       default_w: 5
       default_h: 8
-      min_w: 4
-      min_h: 5
+      min_w: 5
+      min_h: 6
       config_schema:
         properties:
           min_confidence:

@@ -3,9 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
+import { dashboardKeys, dashboardsListPath, dashboardPath } from "@/lib/query-keys";
 import type { ColumnSpec, EventsPage, FilterEntry, LogModel } from "@/lib/api-types";
 
 export type { LogModel };
+// Re-exported from the pure `lib/query-keys.ts` (shared with the SSR prefetch layer).
+export { dashboardKeys };
 
 /**
  * Dashboards data layer.
@@ -216,8 +219,11 @@ export interface DashboardCard {
   icon: string | null;
   default_w: number;
   default_h: number;
-  /** Smallest size the card may be resized to (RGL cells); the canvas applies
-   * these as the grid item's `minW`/`minH`. */
+  /** Whether the card can be resized. When false it's a fixed size locked to
+   * `default_w`/`default_h`; when true it resizes no smaller than `min_w`/`min_h`. */
+  resizable: boolean;
+  /** Smallest size a resizable card may be shrunk to (RGL cells); the canvas
+   * applies these as the grid item's `minW`/`minH`. Ignored when not resizable. */
   min_w: number;
   min_h: number;
   config_schema: WidgetConfigSchema | null;
@@ -245,23 +251,17 @@ export interface DashboardExport {
   settings: CanvasSettings;
 }
 
-export const dashboardKeys = {
-  all: () => ["dashboards"] as const,
-  detail: (id: string) => ["dashboards", id] as const,
-  cards: () => ["dashboard-cards"] as const,
-};
-
 export function useDashboards() {
   return useQuery({
     queryKey: dashboardKeys.all(),
-    queryFn: () => api<DashboardSummary[]>("/api/v1/dashboards"),
+    queryFn: () => api<DashboardSummary[]>(dashboardsListPath()),
   });
 }
 
 export function useDashboard(id: string | null) {
   return useQuery({
     queryKey: id ? dashboardKeys.detail(id) : ["dashboards", "noop"],
-    queryFn: () => api<DashboardDetail>(`/api/v1/dashboards/${id}`),
+    queryFn: () => api<DashboardDetail>(dashboardPath(id ?? "")),
     enabled: !!id,
   });
 }

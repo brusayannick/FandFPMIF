@@ -2,6 +2,14 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import {
+  queryKeys,
+  eventLogsListPath,
+  modulesListPath,
+  type OcelListParams,
+  type EventsListParams,
+  type VariantsListParams,
+} from "@/lib/query-keys";
 import type {
   ActiveFilterResult,
   ActivitiesPage,
@@ -33,65 +41,12 @@ import type {
   VariantsPage,
 } from "@/lib/api-types";
 
-export interface OcelListParams {
-  offset?: number;
-  limit?: number;
-  object_type?: string;
-  activity?: string;
-  q?: string;
-}
-
-export interface EventsListParams {
-  offset?: number;
-  limit?: number;
-  sort?: string;
-  filter?: FilterEntry[];
-  q?: string;
-  missing_only?: boolean;
-  case_id?: string;
-}
-
-export interface VariantsListParams {
-  offset?: number;
-  limit?: number;
-  sort?: string;
-  activity_contains?: string;
-  min_case_count?: number;
-}
-
-export const queryKeys = {
-  folders: () => ["folders"] as const,
-  eventLogs: () => ["event-logs"] as const,
-  eventLog: (id: string) => ["event-logs", id] as const,
-  events: (logId: string, params: EventsListParams) =>
-    ["event-logs", logId, "events", params] as const,
-  variants: (logId: string, params: VariantsListParams) =>
-    ["event-logs", logId, "variants", params] as const,
-  variant: (logId: string, variantId: string) =>
-    ["event-logs", logId, "variants", variantId] as const,
-  variantCases: (logId: string, variantId: string, offset: number, limit: number) =>
-    ["event-logs", logId, "variants", variantId, "cases", offset, limit] as const,
-  dataQuality: (logId: string) => ["event-logs", logId, "data-quality"] as const,
-  activities: (logId: string) => ["event-logs", logId, "activities"] as const,
-  ocelOverview: (logId: string) => ["event-logs", logId, "ocel", "overview"] as const,
-  ocelObjectTypes: (logId: string) => ["event-logs", logId, "ocel", "object-types"] as const,
-  ocelObjects: (logId: string, params: OcelListParams) =>
-    ["event-logs", logId, "ocel", "objects", params] as const,
-  ocelEvents: (logId: string, params: OcelListParams) =>
-    ["event-logs", logId, "ocel", "events", params] as const,
-  ocelRelationships: (logId: string, params: OcelListParams) =>
-    ["event-logs", logId, "ocel", "relationships", params] as const,
-  columnValues: (logId: string, field: string, q: string) =>
-    ["event-logs", logId, "column-values", field, q] as const,
-  edits: (logId: string, offset: number, limit: number) =>
-    ["event-logs", logId, "edits", offset, limit] as const,
-  modules: (logId?: string | null) => ["modules", logId ?? null] as const,
-  moduleManifest: (id: string) => ["modules", id, "manifest"] as const,
-  moduleConfig: (id: string) => ["modules", id, "config"] as const,
-  moduleModels: (id: string) => ["modules", id, "models"] as const,
-  jobs: (params?: Record<string, string>) => ["jobs", params ?? {}] as const,
-  job: (id: string) => ["jobs", id] as const,
-};
+// `queryKeys`, the list-param types, and prefetch path builders live in the
+// pure, server-safe `lib/query-keys.ts` so `lib/prefetch.ts` (RSC) can share
+// them without importing this `"use client"` module. Re-exported here for the
+// existing `@/lib/queries` importers (jobs-provider, watched-queries, tabs).
+export { queryKeys };
+export type { OcelListParams, EventsListParams, VariantsListParams };
 
 /** Matches only event-log *list* caches (key `["event-logs", params]`), never
  *  detail or sub-resource keys – so optimistic list edits don't touch them. */
@@ -126,13 +81,12 @@ function variantsPath(logId: string, params: VariantsListParams): string {
 }
 
 export function useEventLogs(params: { q?: string; status?: string } = {}) {
-  const qs = new URLSearchParams();
-  if (params.q) qs.set("q", params.q);
-  if (params.status) qs.set("status", params.status);
-  const path = `/api/v1/event-logs${qs.toString() ? `?${qs}` : ""}`;
   return useQuery({
     queryKey: [...queryKeys.eventLogs(), params],
-    queryFn: () => api<EventLogSummary[]>(path),
+    queryFn: () => api<EventLogSummary[]>(eventLogsListPath(params)),
+    // Keep the current rows on screen while a search/status change refetches,
+    // so the table never blanks back to a skeleton mid-typing.
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -201,10 +155,9 @@ export function useOcelRelationships(logId: string, params: OcelListParams = {})
 }
 
 export function useModules(logId?: string | null) {
-  const qs = logId ? `?log_id=${encodeURIComponent(logId)}` : "";
   return useQuery({
     queryKey: queryKeys.modules(logId),
-    queryFn: () => api<ModuleSummary[]>(`/api/v1/modules${qs}`),
+    queryFn: () => api<ModuleSummary[]>(modulesListPath(logId)),
   });
 }
 

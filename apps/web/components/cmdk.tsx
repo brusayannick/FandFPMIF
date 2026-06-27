@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useProgressRouter } from "@/lib/use-progress-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, Cog, FileBox, FolderKanban, Inbox, Plus, Upload } from "lucide-react";
@@ -32,7 +32,7 @@ const STATIC_NAV = [
 ];
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
-  const router = useRouter();
+  const router = useProgressRouter();
   const setDrawerOpen = useJobsStore((s) => s.setDrawerOpen);
   const [query, setQuery] = useState("");
 

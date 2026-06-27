@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useProgressRouter } from "@/lib/use-progress-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { prefetchEventLog } from "@/lib/client-prefetch";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
@@ -734,7 +736,8 @@ function LogRow({
   const id = nodeId(node);
   const sortable = useSortable({ id });
 
-  const router = useRouter();
+  const router = useProgressRouter();
+  const qc = useQueryClient();
   const importing = row.status === "importing";
   // Parsed but held until every subscribing module finishes precomputing. Shares
   // the importing visuals (dimmed row + indeterminate bar) but with its own
@@ -829,6 +832,10 @@ function LogRow({
               busy && "opacity-60",
               sortable.isDragging && "opacity-30",
             )}
+            onMouseEnter={() => {
+              // Warm the detail cache so opening the log is instant.
+              if (ready) prefetchEventLog(qc, row.id);
+            }}
             onClick={(e) => {
               if ((e.target as HTMLElement).closest("[data-row-stop]")) return;
               if (ready) onOpen();

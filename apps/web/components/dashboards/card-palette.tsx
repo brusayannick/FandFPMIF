@@ -132,7 +132,7 @@ export function CardPalette({
                           }}
                           className={cn(
                             "group flex w-full touch-none items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-left",
-                            "cursor-grab hover:border-border hover:bg-card active:cursor-grabbing",
+                            "cursor-grab transition-all duration-150 hover:border-border hover:bg-card active:scale-[0.98] active:cursor-grabbing",
                           )}
                         >
                           <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />

@@ -89,11 +89,18 @@ class WidgetEntry(BaseModel):
     icon: str | None = None
     default_w: int = 6
     default_h: int = 8
-    # Smallest size (react-grid-layout cells) the card may be resized to on a
-    # dashboard. The Dashboards canvas enforces these as the grid item's
-    # `minW`/`minH` so a card can never be shrunk below what it can render. The
-    # defaults match the canvas's historical floor; `default_w`/`default_h` are
-    # clamped up to these below so a freshly dropped card is never sub-minimum.
+    # Whether the user may resize the card on a dashboard.
+    #   resizable: true  -> card can be resized; `min_w`/`min_h` are the floor and
+    #                       `default_w`/`default_h` the initial (>= min) drop size.
+    #   resizable: false -> card is a FIXED size: it can be moved but not resized,
+    #                       and `default_w`/`default_h` ARE that fixed size.
+    # Either way the relevant size (the minimum, or the fixed size) must be large
+    # enough to show all of the widget's information.
+    resizable: bool = True
+    # Smallest size (react-grid-layout cells) a *resizable* card may be shrunk to.
+    # The Dashboards canvas feeds these to the grid item's `minW`/`minH` and also
+    # grows an under-sized placed card up to them on load. Ignored when
+    # `resizable` is false (the card is locked to `default_w`/`default_h`).
     min_w: int = 2
     min_h: int = 3
     # Optional per-card settings, declared in the same JSON-Schema-flavoured
@@ -113,10 +120,13 @@ class WidgetEntry(BaseModel):
 
     @model_validator(mode="after")
     def _clamp_defaults_to_min(self) -> Self:
-        # A card's initial drop size must never be below its own minimum, or RGL
-        # would immediately bounce it up and the placement would look wrong.
-        self.default_w = max(self.default_w, self.min_w)
-        self.default_h = max(self.default_h, self.min_h)
+        # For a resizable card the initial drop size must never be below its own
+        # minimum, or RGL would immediately bounce it up. For a fixed card
+        # (`resizable=false`) `default_w/_h` is the authoritative size, so leave
+        # it untouched.
+        if self.resizable:
+            self.default_w = max(self.default_w, self.min_w)
+            self.default_h = max(self.default_h, self.min_h)
         return self
 
 

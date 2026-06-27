@@ -71,10 +71,10 @@ frontend:
       entry: ./widgets/FidelityScorecard.tsx
       title: Simulation fidelity
       description: NGD / AEDD / CEDD / REDD / CTDD distance of the latest simulation to the real log (lower is better).
-      default_w: 6
-      default_h: 6
-      min_w: 4
-      min_h: 4
+      default_w: 9
+      default_h: 7
+      min_w: 8
+      min_h: 6
     - id: cycle-time-comparison
       entry: ./widgets/CycleTimeComparison.tsx
       title: Cycle time – real vs simulated

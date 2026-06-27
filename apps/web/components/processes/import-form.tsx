@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useProgressRouter } from "@/lib/use-progress-router";
 import {
   CheckCircle2,
   FileText,
@@ -250,7 +250,7 @@ export function ImportForm({ onSuccess }: ImportFormProps = {}) {
 // ── File upload form ──────────────────────────────────────────────────────────
 
 function FileImportForm({ onSuccess }: ImportFormProps) {
-  const router = useRouter();
+  const router = useProgressRouter();
   const importer = useImportEventLog();
   const probeXml = useProbeXml();
   const probeJson = useProbeJson();
@@ -612,7 +612,7 @@ function isValidUrl(value: string): boolean {
 }
 
 function UrlImportForm({ onSuccess }: ImportFormProps) {
-  const router = useRouter();
+  const router = useProgressRouter();
   const importer = useImportEventLogFromUrl();
 
   const [url, setUrl] = useState("");
@@ -715,7 +715,7 @@ const WATCH_MODES: { value: WatchMode; label: string; hint: string }[] = [
 ];
 
 function WatchImportForm() {
-  const router = useRouter();
+  const router = useProgressRouter();
   const createWatch = useCreateWatchedFolder();
 
   const [name, setName] = useState("");
@@ -1538,7 +1538,7 @@ function collectFolderItems(files: FileList): SelectedFolder | null {
 }
 
 function FolderImportForm({ onSuccess }: ImportFormProps) {
-  const router = useRouter();
+  const router = useProgressRouter();
   const importer = useImportEventLog();
   const createFolder = useCreateFolder();
   const probeXml = useProbeXml();

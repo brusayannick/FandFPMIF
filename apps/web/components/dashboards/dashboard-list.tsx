@@ -1,7 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useProgressRouter } from "@/lib/use-progress-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { prefetchDashboard } from "@/lib/client-prefetch";
 import Link from "next/link";
 import {
   Boxes,
@@ -82,7 +84,8 @@ const MODEL_OPTIONS: {
 ];
 
 export function DashboardList() {
-  const router = useRouter();
+  const router = useProgressRouter();
+  const qc = useQueryClient();
   const { data: dashboards, isLoading } = useDashboards();
   const { data: sharedWithMe } = useSharedWithMe();
   const create = useCreateDashboard();
@@ -205,7 +208,11 @@ export function DashboardList() {
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {dashboards.map((d) => (
-            <Card key={d.id} className="group relative transition-colors hover:border-primary/40">
+            <Card
+              key={d.id}
+              className="group relative transition-colors hover:border-primary/40"
+              onMouseEnter={() => prefetchDashboard(qc, d.id)}
+            >
               <Link href={`/dashboards/${d.id}`} className="absolute inset-0" aria-label={d.name}>
                 <span className="sr-only">{d.name}</span>
               </Link>
@@ -268,7 +275,11 @@ export function DashboardList() {
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {sharedWithMe.map((d) => (
-              <Card key={d.id} className="group relative transition-colors hover:border-primary/40">
+              <Card
+              key={d.id}
+              className="group relative transition-colors hover:border-primary/40"
+              onMouseEnter={() => prefetchDashboard(qc, d.id)}
+            >
                 <Link
                   href={`/dashboards/${d.id}`}
                   className="absolute inset-0"

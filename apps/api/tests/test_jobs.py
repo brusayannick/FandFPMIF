@@ -75,6 +75,74 @@ async def test_runtime_run_in_process_uses_worker_pid() -> None:
         await rt.stop()
 
 
+@pytest.mark.asyncio
+async def test_job_execution_timeout_reaps_hung_job() -> None:
+    """A handler that runs past `job_execution_timeout_seconds` is force-stopped
+    by the wall-clock reaper, recorded as a failed-timeout (not a user cancel),
+    and its worker slot is freed - the slot leak behind cross-user starvation
+    (one user's wedged precompute draining the shared pool). A handler that
+    finishes within budget is never reaped.
+    """
+    from mate.api.config import get_settings
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.db.models import Job
+    from mate.api.events.bus import EventBus
+    from mate.api.jobs.runtime import JobRuntime
+
+    from .conftest import TEST_USER_ID
+
+    settings = get_settings().model_copy(
+        update={"job_execution_timeout_seconds": 1, "worker_concurrency": 1}
+    )
+    rt = JobRuntime(settings=settings, bus=EventBus())
+
+    async def hang(_handle: object) -> None:
+        await asyncio.sleep(30)  # no cancel poll - only the reaper can stop it
+
+    async def quick(_handle: object) -> None:
+        return None
+
+    rt.register("test.hang", hang)
+    rt.register("test.quick", quick)
+    sm = get_sessionmaker()
+
+    async def _status(job_id: str) -> tuple[str, str | None]:
+        async with sm() as session:
+            job = await session.get(Job, job_id)
+            assert job is not None
+            return job.status, job.error
+
+    try:
+        await rt.start()
+        # worker_concurrency=1 → quick runs (and finishes) first, then hang.
+        quick_id = await rt.submit(
+            type_="test.quick", user_id=TEST_USER_ID, title="quick", payload={}
+        )
+        hang_id = await rt.submit(type_="test.hang", user_id=TEST_USER_ID, title="hang", payload={})
+
+        quick_status = "queued"
+        for _ in range(40):  # ≤2s: well inside the 1s budget, untouched by reaper
+            quick_status, _ = await _status(quick_id)
+            if quick_status == "completed":
+                break
+            await asyncio.sleep(0.05)
+        assert quick_status == "completed"
+
+        hang_status, hang_err = "running", None
+        for _ in range(60):  # ≤6s: reaper fires at ~1s, then records the outcome
+            hang_status, hang_err = await _status(hang_id)
+            if hang_status in {"failed", "cancelled", "completed"}:
+                break
+            await asyncio.sleep(0.1)
+        assert hang_status == "failed"
+        assert hang_err is not None and "timeout" in hang_err.lower()
+
+        # Slot freed - the whole point: a wedged job can't hold a worker forever.
+        assert rt.live_stats()["running"] == 0
+    finally:
+        await rt.stop()
+
+
 async def _wait(
     client: AsyncClient, log_id: str, target: str = "ready", timeout: float = 5.0
 ) -> dict:

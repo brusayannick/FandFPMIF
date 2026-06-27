@@ -92,22 +92,32 @@ export function DashboardFilterProvider({
   // Push the committed filter onto the ambient header, and force every widget
   // to re-fetch (and skeleton) on change. Skip the work on the very first run:
   // there's nothing cached to clear and the widgets are already doing their
-  // initial fetch.
+  // initial fetch (which must still carry the board's active saved filter).
   const firstRun = useRef(true);
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    setAmbientHeaders({
-      [EVENT_FILTER_HEADER]: combined.length > 0 ? encodeFilterHeader(combined) : null,
-    });
+    const header = combined.length > 0 ? encodeFilterHeader(combined) : null;
     if (firstRun.current) {
       firstRun.current = false;
+      setAmbientHeaders({ [EVENT_FILTER_HEADER]: header });
       return;
     }
-    // resetQueries (not removeQueries): it puts every widget query back to its
-    // pending state – so each card drops to a skeleton – AND refetches the
-    // active ones with the new header. removeQueries only evicts the cache
-    // entry; a mounted widget's observer keeps showing its last result and
-    // never refetches, so the filter would appear to do nothing.
-    void widgetQueryClient.resetQueries();
+    // Debounce the commit: typing in the filter bar and dragging the time slider
+    // both churn `combined` rapidly. Without this, every keystroke/tick resets
+    // and refetches *every* widget at once - a thundering herd of backend
+    // recomputes. Coalescing into one update per ~300ms idle means a 20-card
+    // board recomputes once. resetQueries (not removeQueries): it returns each
+    // widget query to pending (so the card skeletons) AND refetches the active
+    // ones with the new header; removeQueries would leave mounted widgets
+    // showing stale results without refetching.
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+    commitTimer.current = setTimeout(() => {
+      setAmbientHeaders({ [EVENT_FILTER_HEADER]: header });
+      void widgetQueryClient.resetQueries();
+    }, 300);
+    return () => {
+      if (commitTimer.current) clearTimeout(commitTimer.current);
+    };
   }, [combined, widgetQueryClient]);
 
   // Tidy up when the dashboard unmounts so the header can't leak onto other

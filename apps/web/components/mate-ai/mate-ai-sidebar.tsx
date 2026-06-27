@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { useProgressRouter } from "@/lib/use-progress-router";
 import { useTheme } from "next-themes";
 import {
   Activity,
@@ -341,7 +342,7 @@ export function MateAiSidebar() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const track = useTrack();
-  const router = useRouter();
+  const router = useProgressRouter();
   const { setTheme } = useTheme();
   const updateOnboarding = useUpdateOnboarding();
   const { data: onboarding } = useOnboardingState();

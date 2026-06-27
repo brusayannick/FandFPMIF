@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useProgressRouter } from "@/lib/use-progress-router";
 import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ import { ModulesStep } from "./steps/modules-step";
 type StepKey = "welcome" | "privacy" | "upload" | "modules";
 
 export function OnboardingOverlay() {
-  const router = useRouter();
+  const router = useProgressRouter();
   const onboardingQuery = useOnboardingState();
   const updateOnboarding = useUpdateOnboarding();
   const experienceLevel = useOnboarding((s) => s.experienceLevel);

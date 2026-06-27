@@ -197,8 +197,13 @@ class DashboardCard(BaseModel):
     icon: str | None = None
     default_w: int = 6
     default_h: int = 8
+    # Whether the card can be resized on a dashboard. When false the card is a
+    # fixed size (locked to `default_w`/`default_h`); when true it can be resized
+    # no smaller than `min_w`/`min_h`.
+    resizable: bool = True
     # Smallest size the card may be resized to on a dashboard (RGL cells). The
-    # canvas applies these as the grid item's `minW`/`minH`.
+    # canvas applies these as the grid item's `minW`/`minH`. Ignored when the
+    # card is not resizable.
     min_w: int = 2
     min_h: int = 3
     # Per-card settings schema (same dialect as module `config_schema`). The
@@ -241,6 +246,7 @@ async def list_cards(session: SessionDep, user: CurrentUserDep) -> list[Dashboar
                     icon=w.icon,
                     default_w=w.default_w,
                     default_h=w.default_h,
+                    resizable=w.resizable,
                     min_w=w.min_w,
                     min_h=w.min_h,
                     config_schema=w.config_schema,

@@ -16,8 +16,10 @@ import {
   Sun,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { cn } from "@/lib/cn";
+import { prefetchDashboards, prefetchEventLogs, prefetchModules } from "@/lib/client-prefetch";
 import { useMounted } from "@/lib/use-mounted";
 import { useUi } from "@/lib/stores/ui";
 import { Button } from "@/components/ui/button";
@@ -36,6 +38,8 @@ interface NavItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   match: (pathname: string) => boolean;
+  /** Warm this section's list query on hover/focus so the click is instant. */
+  prefetch?: (qc: QueryClient) => void;
 }
 
 const NAV: NavItem[] = [
@@ -44,18 +48,21 @@ const NAV: NavItem[] = [
     label: "Processes",
     icon: FolderKanban,
     match: (p) => p === "/" || p.startsWith("/processes"),
+    prefetch: (qc) => prefetchEventLogs(qc),
   },
   {
     href: "/dashboards",
     label: "Dashboards",
     icon: LayoutDashboard,
     match: (p) => p.startsWith("/dashboards"),
+    prefetch: (qc) => prefetchDashboards(qc),
   },
   {
     href: "/modules",
     label: "Modules",
     icon: FileBox,
     match: (p) => p.startsWith("/modules"),
+    prefetch: (qc) => prefetchModules(qc),
   },
   {
     href: "/settings",
@@ -81,6 +88,7 @@ export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
   const toggle = useUi((s) => s.toggleSidebar);
   const pathname = usePathname();
   const track = useTrack();
+  const qc = useQueryClient();
   const onToggle = () => {
     track(EV.SIDEBAR_TOGGLED, { collapsed_after: !collapsed });
     toggle();
@@ -135,6 +143,8 @@ export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
+                onMouseEnter={() => item.prefetch?.(qc)}
+                onFocus={() => item.prefetch?.(qc)}
                 className={cn(
                   "flex h-9 items-center gap-3 rounded-md px-3 text-sm transition-colors cursor-pointer",
                   active

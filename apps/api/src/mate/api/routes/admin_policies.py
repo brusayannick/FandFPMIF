@@ -100,6 +100,13 @@ _SETTINGS: tuple[_SettingSpec, ...] = (
         "value; surfaced here.",
         has_secret=False,
     ),
+    _SettingSpec(
+        "cv4cdd.model",
+        "CV4CDD detection model",
+        "Pin one shared CV4CDD detection model for every user. Unlocked, each "
+        "user picks their own on the module's settings page.",
+        has_secret=False,
+    ),
 )
 _SETTING_KEYS = {s.key for s in _SETTINGS}
 
@@ -434,6 +441,17 @@ async def _validate_admin_value(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Invalid analytics config: {exc}",
             ) from exc
+
+    if scope == SCOPE_SETTING and key == "cv4cdd.model":
+        # The shared model is the folder name the cv4cdd model_store installed.
+        # Locking requires a concrete model - an empty lock would just make every
+        # user's autodetect fail with "no model", which defeats the point.
+        if not isinstance(value, str) or not value.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Select a CV4CDD model to lock; the shared value must be a model name.",
+            )
+        return value.strip()
 
     if scope == SCOPE_MODULE:
         # Best-effort: module config is free-form JSON shaped by config_schema.

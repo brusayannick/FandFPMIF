@@ -192,18 +192,11 @@ class Cv4cddModule(Module):
         """Auto-run detection right after a log finishes importing.
 
         The loader stacks this as a job so the user sees a progress toast
-        and can cancel it from the dock if it's not wanted.
+        and can cancel it from the dock if it's not wanted. When no model is
+        available ``_do_detect`` raises and the job fails loudly - a missing
+        model is a misconfiguration the admin/user must resolve, not a silent
+        no-op.
         """
-        # No model uploaded yet? Skip quietly rather than failing the job for
-        # every import - the user installs a model on the settings page first.
-        if _resolve_model_dir(ctx.config.value or {}) is None:
-            ctx.logger.info("cv4cdd.autodetect_skipped_no_model")
-            return {
-                "kind": "cv4cdd_detections",
-                "drifts": [],
-                "n_windows": 0,
-                "skipped": "no_model",
-            }
         return await self._do_detect(ctx)
 
     @route.post("/detect")
@@ -217,12 +210,14 @@ class Cv4cddModule(Module):
         cfg = ctx.config.value or {}
         model_dir = _resolve_model_dir(cfg)
         if model_dir is None:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "No CV4CDD model is available. Upload a pretrained model "
-                    "(.tar.zst) on the module's settings page first."
-                ),
+            # Both entry points (route /detect and the log.imported autodetect)
+            # run as jobs, so this surfaces as a failed job with this message -
+            # not an HTTP error. An admin-pinned global model also flows through
+            # cfg["model"]; reaching here means none is installed at all.
+            raise RuntimeError(
+                "No CV4CDD detection model is available. An administrator can pin a "
+                "shared model under Admin → Controls, or upload one (.tar.zst) on the "
+                "module's settings page."
             )
 
         n_windows = int(cfg.get("n_windows", 200))
@@ -426,6 +421,10 @@ class Cv4cddModule(Module):
     @route.get("/models")
     async def list_models(self, ctx: ModuleContext) -> dict[str, Any]:
         cfg = ctx.config.value or {}
+        # When an admin pins the model platform-wide the loader injects the
+        # shared choice into cfg["model"] + this sentinel; the per-user picker
+        # then renders read-only ("administrator-controlled").
+        locked = bool(cfg.get("__model_admin_locked__"))
         raw_selected = cfg.get("model")
         selected = raw_selected if isinstance(raw_selected, str) else None
         resolved = _resolve_model_dir(cfg)
@@ -442,7 +441,7 @@ class Cv4cddModule(Module):
             }
             for name in _list_models()
         ]
-        return {"models": models, "selected": selected, "active": active}
+        return {"models": models, "selected": selected, "active": active, "locked": locked}
 
     @route.post("/models")
     async def upload_model(self, ctx: ModuleContext, file: UploadFile) -> dict[str, Any]:

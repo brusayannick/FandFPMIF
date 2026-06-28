@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Ban,
+  ChevronDown,
+  ChevronRight,
   Pause,
   Play,
   RefreshCw,
@@ -59,6 +61,17 @@ interface AdminJobList {
     active_total: number;
     paused_users: string[];
   };
+}
+interface AdminJobLogLine {
+  ts: number;
+  level: string;
+  event: string;
+  fields: Record<string, unknown>;
+}
+interface AdminJobLogs {
+  job_id: string;
+  lines: AdminJobLogLine[];
+  truncated: boolean;
 }
 
 type GroupBy = "user" | "log" | "none";
@@ -489,6 +502,17 @@ function JobsTable({
   onCancel: (id: string) => void;
   onRetry: (id: string) => void;
 }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  // Full-width logs row spans every visible column: Job + Status + Created +
+  // Actions, plus Owner/Event-log when not grouped away.
+  const colCount = 4 + (hideOwner ? 0 : 1) + (hideLog ? 0 : 1);
   return (
     <div className="overflow-x-auto rounded-md border border-border">
       <table className="w-full text-sm">
@@ -506,8 +530,10 @@ function JobsTable({
           {rows.map((r) => {
             const active = ACTIVE.has(r.status);
             const p = pct(r);
+            const isOpen = expanded.has(r.id);
             return (
-              <tr key={r.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+              <Fragment key={r.id}>
+              <tr className="border-b border-border last:border-0 hover:bg-muted/30">
                 <td className="max-w-72 px-3 py-2">
                   <div className="truncate font-medium" title={r.title}>
                     {r.title}
@@ -557,6 +583,17 @@ function JobsTable({
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="text-muted-foreground"
+                      onClick={() => toggle(r.id)}
+                      aria-expanded={isOpen}
+                      aria-controls={`job-logs-${r.id}`}
+                      aria-label={isOpen ? "Hide module logs" : "Show module logs"}
+                    >
+                      {isOpen ? <ChevronDown /> : <ChevronRight />} Logs
+                    </Button>
                     {active ? (
                       <Button
                         variant="ghost"
@@ -575,6 +612,14 @@ function JobsTable({
                   </div>
                 </td>
               </tr>
+              {isOpen ? (
+                <tr className="border-b border-border bg-muted/20 last:border-0">
+                  <td id={`job-logs-${r.id}`} colSpan={colCount} className="px-3 py-2">
+                    <JobLogsPanel jobId={r.id} />
+                  </td>
+                </tr>
+              ) : null}
+              </Fragment>
             );
           })}
         </tbody>
@@ -589,4 +634,116 @@ function StatusBadge({ status }: { status: string }) {
       {status}
     </span>
   );
+}
+
+/**
+ * Live tail of a single job's module-log lines (admin-only). Polls the
+ * admin endpoint every 2s while the row is expanded - matches the page's poll
+ * cadence and never opens an SSE (the admin surface stays request/response, per
+ * the cross-user fan-out constraint). Shows the buffered backlog on open, so a
+ * job that's been wedged for minutes is inspectable, not just future lines.
+ */
+function JobLogsPanel({ jobId }: { jobId: string }) {
+  const [data, setData] = useState<AdminJobLogs | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  // Sticky-bottom tail: follow new lines only while the user is parked at the
+  // bottom. Scrolling up to read history flips this off so the 2s poll doesn't
+  // yank them back down; scrolling back down re-arms it. Starts armed so the
+  // first snapshot lands at the newest line.
+  const stick = useRef(true);
+  const onScroll = () => {
+    const el = boxRef.current;
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  };
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await rawFetch(`/api/v1/admin/jobs/${jobId}/logs?limit=500`);
+        if (!alive || !res.ok) return;
+        const json = (await res.json()) as AdminJobLogs;
+        if (!alive) return;
+        setData(json);
+        setLoaded(true);
+      } catch {
+        /* transient network blip - keep the last snapshot */
+      }
+    };
+    void load();
+    const t = setInterval(() => void load(), 2000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [jobId]);
+
+  // Pin to the newest line as logs stream in (only while armed; see `stick`).
+  useEffect(() => {
+    const el = boxRef.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [data]);
+
+  const lines = data?.lines ?? [];
+  return (
+    <div className="rounded-md border border-border bg-background">
+      <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
+        <span className="font-medium">Module logs</span>
+        <span className="tabular-nums">
+          {lines.length} {lines.length === 1 ? "line" : "lines"}
+          {data?.truncated ? " · earlier dropped" : ""}
+        </span>
+      </div>
+      <div
+        ref={boxRef}
+        onScroll={onScroll}
+        className="max-h-72 overflow-auto px-3 py-2 font-mono text-xs leading-relaxed"
+      >
+        {!loaded ? (
+          <div className="text-muted-foreground">Loading…</div>
+        ) : lines.length === 0 ? (
+          <div className="text-muted-foreground">
+            No module logs captured for this job. It may not log during compute, or it ran before
+            this build was deployed.
+          </div>
+        ) : (
+          lines.map((ln, i) => <LogLine key={`${ln.ts}-${i}`} line={ln} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LogLine({ line }: { line: AdminJobLogLine }) {
+  const time = new Date(line.ts * 1000).toLocaleTimeString();
+  const fieldStr = Object.entries(line.fields)
+    .filter(([k]) => k !== "exc_info")
+    .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+    .join(" ");
+  return (
+    <div className="flex gap-2 whitespace-pre-wrap break-words">
+      <span className="shrink-0 tabular-nums text-muted-foreground">{time}</span>
+      <span className={cn("shrink-0 font-medium uppercase", logLevelTone(line.level))}>
+        {line.level}
+      </span>
+      <span className="text-foreground">
+        {line.event}
+        {fieldStr ? <span className="text-muted-foreground"> {fieldStr}</span> : null}
+      </span>
+    </div>
+  );
+}
+
+function logLevelTone(level: string): string {
+  switch (level) {
+    case "error":
+      return "text-destructive";
+    case "warning":
+      return "text-amber-600 dark:text-amber-500";
+    case "debug":
+      return "text-muted-foreground/70";
+    default:
+      return "text-muted-foreground";
+  }
 }

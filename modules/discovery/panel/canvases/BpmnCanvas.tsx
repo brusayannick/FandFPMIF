@@ -1,8 +1,8 @@
 "use client";
 
-// bpmn-js / diagram-js-minimap CSS is loaded by the host app (apps/web)
-// rather than imported here – the module bundler (esbuild) has no loaders
-// for the .woff/.ttf/.eot/.svg font assets the BPMN font CSS references.
+// bpmn-js CSS is loaded by the host app (apps/web) rather than imported here
+// – the module bundler (esbuild) has no loaders for the .woff/.ttf/.eot/.svg
+// font assets the BPMN font CSS references.
 // See apps/web/app/layout.tsx for the actual imports.
 
 import { useEffect, useRef, useState } from "react";
@@ -12,20 +12,19 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import { formatNumber } from "@/lib/format";
 
-// bpmn-js / bpmn-auto-layout / diagram-js-minimap are bundled straight into
-// this panel – they are intentionally NOT in runtime-externals.json. The host
-// runs `next dev --turbo`, and Turbopack mis-bundles bpmn-moddle so its parser
-// stops recognising the `bpmn:Definitions` root: every importXML/layoutProcess
-// then fails with "failed to parse document as <bpmn:Definitions>" on valid
-// BPMN. esbuild (this panel's bundler) handles bpmn-moddle correctly, so we
-// bundle here and never touch the host copy. Do NOT re-externalise these to
-// "share" the host instance – that reintroduces the parse failure.
+// bpmn-js / bpmn-auto-layout are bundled straight into this panel – they are
+// intentionally NOT in runtime-externals.json. The host runs `next dev --turbo`,
+// and Turbopack mis-bundles bpmn-moddle so its parser stops recognising the
+// `bpmn:Definitions` root: every importXML/layoutProcess then fails with
+// "failed to parse document as <bpmn:Definitions>" on valid BPMN. esbuild (this
+// panel's bundler) handles bpmn-moddle correctly, so we bundle here and never
+// touch the host copy. Do NOT re-externalise these to "share" the host instance
+// – that reintroduces the parse failure.
 //
 // NavigatedViewer is the strictly view-only bpmn-js entry: pan + scroll-zoom +
 // keyboard-pan, and NO editing services (no palette / context-pad /
 // direct-editing / create / connect / move / resize / bendpoints / label-edit).
 import NavigatedViewer from "bpmn-js/lib/NavigatedViewer";
-import minimapModule from "diagram-js-minimap";
 import { layoutProcess } from "bpmn-auto-layout";
 
 import {
@@ -105,7 +104,6 @@ export function BpmnCanvas({
     (async () => {
       modeler = new NavigatedViewer({
         container,
-        additionalModules: [minimapModule],
       }) as unknown as ModelerHandle;
 
       try {
@@ -114,11 +112,6 @@ export function BpmnCanvas({
         await modeler.importXML(laidOut);
         const canvas = modeler.get<{ zoom: (mode: string) => void }>("canvas");
         canvas.zoom("fit-viewport");
-        try {
-          modeler.get<{ open: () => void }>("minimap").open();
-        } catch {
-          // minimap module already initialised in some other state – ignore.
-        }
       } catch (err) {
         // A blank canvas with no signal hid genuine import failures. Surface
         // them in an empty state instead of only logging to the console.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Lock, ShieldAlert, Unlock } from "lucide-react";
+import { ChevronDown, Loader2, Lock, ShieldAlert, Unlock } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ import {
   useUpdateAdminAiConfig,
 } from "@/lib/ai-queries";
 import { useControlItems, useSetControl } from "@/lib/control-queries";
+import { useModuleModels } from "@/lib/queries";
 import { toastError } from "@/lib/toast";
 
 export default function AdminControlsPage() {
@@ -249,6 +250,8 @@ function SettingRow({ item }: { item: ControlItem }) {
         <WorkerConcurrencyEditor item={item} />
       ) : item.key === "analytics.config" ? (
         <AnalyticsEditor item={item} />
+      ) : item.key === "cv4cdd.model" ? (
+        <Cv4cddModelEditor item={item} />
       ) : (
         <p className="text-xs text-muted-foreground">No editor for this setting.</p>
       )}
@@ -315,7 +318,8 @@ function WorkerConcurrencyEditor({ item }: { item: ControlItem }) {
           className="w-24"
         />
       </div>
-      <Button size="sm" onClick={onSave} disabled={set.isPending} className="cursor-pointer">
+      <Button size="sm" onClick={onSave} disabled={set.isPending} className="cursor-pointer gap-2">
+        {set.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
         Apply
       </Button>
     </div>
@@ -359,7 +363,77 @@ function AnalyticsEditor({ item }: { item: ControlItem }) {
           </SelectContent>
         </Select>
       </div>
-      <Button size="sm" onClick={onSave} disabled={set.isPending} className="cursor-pointer">
+      <Button size="sm" onClick={onSave} disabled={set.isPending} className="cursor-pointer gap-2">
+        {set.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        Apply
+      </Button>
+    </div>
+  );
+}
+
+function Cv4cddModelEditor({ item }: { item: ControlItem }) {
+  const set = useSetControl("setting");
+  // /models is the module's own route (gated on cv4cdd being installed). Lists
+  // the platform-shared models so the admin can pick which one to pin.
+  const modelsQ = useModuleModels("cv4cdd");
+  const initial = typeof item.admin_value === "string" ? item.admin_value : "";
+  const [value, setValue] = useState(initial);
+  useEffect(() => setValue(initial), [initial]);
+
+  const onSave = async () => {
+    try {
+      await set.mutateAsync({ key: "cv4cdd.model", control_mode: "admin", admin_value: value });
+      toast.success("Shared detection model pinned");
+    } catch (e) {
+      toastError(`Save failed: ${(e as Error).message}`);
+    }
+  };
+
+  if (modelsQ.isLoading) return <Skeleton className="h-20 w-full" />;
+  if (modelsQ.isError) {
+    const notInstalled = modelsQ.error instanceof ApiError && modelsQ.error.status === 404;
+    return (
+      <p className="text-xs text-muted-foreground">
+        {notInstalled
+          ? "Install the CV4CDD module to manage its shared model."
+          : "Failed to load CV4CDD models."}
+      </p>
+    );
+  }
+
+  const models = modelsQ.data?.models ?? [];
+  if (models.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        No CV4CDD models installed yet. Upload one on the module&apos;s settings page first.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-end gap-3">
+      <div className="w-72 max-w-full space-y-1.5">
+        <Label htmlFor="cv4cdd-model">Model</Label>
+        <Select value={value || undefined} onValueChange={setValue}>
+          <SelectTrigger id="cv4cdd-model" className="w-full font-mono text-xs">
+            <SelectValue placeholder="Select a model" />
+          </SelectTrigger>
+          <SelectContent>
+            {models.map((m) => (
+              <SelectItem key={m.name} value={m.name} className="font-mono text-xs">
+                {m.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <Button
+        size="sm"
+        onClick={onSave}
+        disabled={set.isPending || !value}
+        className="cursor-pointer gap-2"
+      >
+        {set.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
         Apply
       </Button>
     </div>
@@ -432,8 +506,9 @@ function ModuleRow({ item }: { item: ControlItem }) {
             size="sm"
             onClick={onSave}
             disabled={set.isPending}
-            className="cursor-pointer"
+            className="cursor-pointer gap-2"
           >
+            {set.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             Save shared configuration
           </Button>
         </div>

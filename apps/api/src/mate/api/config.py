@@ -83,6 +83,21 @@ class Settings(BaseSettings):
         description="MODULE_PROCESS_POOL_SIZE - worker processes for ctx.run_in_process.",
     )
 
+    # Per-user fairness cap on concurrent CPU offloads (§8.3). The offload pool is
+    # shared across tenants; without a per-user bound one user's burst of heavy
+    # mining can hold every `module_process_pool_size` slot and starve others
+    # (the cross-user starvation the job timeout was meant to bound but couldn't,
+    # because an offloaded process ignored cooperative cancel). `0` resolves to
+    # `module_process_pool_size` (no bite on a single-tenant box); set a smaller
+    # value on a multi-tenant deployment so no one user holds more than this many
+    # offload processes at once.
+    max_offloads_per_user: int = Field(
+        default=0,
+        ge=0,
+        le=64,
+        description="MAX_OFFLOADS_PER_USER - per-user concurrent ctx.run_in_process cap (0=pool size).",
+    )
+
     # DuckDB tuning (§9). `duckdb_threads=0` leaves DuckDB's default (all cores -
     # right for single-query ingest); set a positive cap to stop a many-card
     # dashboard's concurrent widget queries from oversubscribing the box.

@@ -23,6 +23,7 @@ module metadata from the loader registry.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import os
 import sys
@@ -72,3 +73,50 @@ def invoke(
     for part in qualname.split("."):
         obj = getattr(obj, part)
     return obj(*args, **(kwargs or {}))
+
+
+def offload_child_main(conn: Any, spec: dict[str, Any]) -> None:
+    """Entry point for one killable per-call offload process (§8.3).
+
+    Runs in a *fresh* spawned/forkserver child - one process per
+    ``ctx.run_in_process`` call, not a shared pool worker. The isolation is
+    deliberate: the job runtime must be able to ``SIGKILL`` a runaway offload
+    when the wall-clock reaper fires (a ``ProcessPoolExecutor`` future can't be
+    cancelled once running, and a shared pool would make killing one tenant's
+    job collateral-kill others'). The price is a cold module import per call -
+    fine for the once-per-job mining offloads are built for.
+
+    First call ``setsid()`` so the child leads its own process group: the host
+    kills via ``killpg(pid)`` (group id == pid), reaping any grandchildren the
+    payload spawned. The ``(ok, value)`` result - or ``(False, exception)`` -
+    is shipped back over ``conn``; if the host kills us we simply never send and
+    the host detects the dead process.
+    """
+    with contextlib.suppress(OSError):
+        os.setsid()  # already a group leader (or unsupported) → host falls back to pid kill
+    try:
+        if spec["kind"] == "module":
+            result = invoke(
+                spec["folder"],
+                spec["site_packages"],
+                spec["module_file"],
+                spec["qualname"],
+                spec["args"],
+                spec["kwargs"],
+            )
+        else:
+            fn = spec["fn"]
+            result = fn(*spec["args"], **(spec["kwargs"] or {}))
+        payload: tuple[bool, Any] = (True, result)
+    except BaseException as exc:
+        payload = (False, exc)
+    try:
+        conn.send(payload)
+    except Exception:
+        # Result (or exception) wasn't picklable - send a degraded error so the host
+        # raises something meaningful instead of hanging on a silent child.
+        _ok, value = payload
+        with contextlib.suppress(Exception):
+            conn.send((False, RuntimeError(f"offload result was not picklable: {value!r}")))
+    finally:
+        conn.close()

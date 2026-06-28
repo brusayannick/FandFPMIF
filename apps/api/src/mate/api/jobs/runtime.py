@@ -23,10 +23,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import signal
 import sys
 import time
-from collections.abc import Awaitable, Callable
-from concurrent.futures import ProcessPoolExecutor
+from collections import Counter
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -47,6 +50,52 @@ log = structlog.get_logger(__name__)
 
 def _utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+# Set in `_run_one` before the handler task is created, so the handler's context -
+# and any `ctx.run_in_process` it awaits, which runs in the same task - carries the
+# owning job/user. `run_offloaded` reads them to register the spawned child for
+# hard-kill and to enforce the per-user offload cap. None for offloads triggered
+# outside a job (direct platform callers).
+_CURRENT_JOB: ContextVar[str | None] = ContextVar("ff_current_job", default=None)
+_CURRENT_USER: ContextVar[str | None] = ContextVar("ff_current_user", default=None)
+
+
+class _OffloadKilledError(RuntimeError):
+    """Raised host-side when an offload child exits without returning a result -
+    a SIGKILL from the reaper/cancel path, or a native crash."""
+
+
+def _recv_offload(conn: Any) -> tuple[bool, Any]:
+    """Block (in a worker thread) until the offload child returns or its pipe
+    closes. A clean run yields the child's ``(ok, value)``; a SIGKILL (from the
+    reaper/cancel path) or a native crash closes the child's write end →
+    ``EOFError`` here → `_OffloadKilledError`. No ``waitpid``/``is_alive`` polling, so
+    this never races the host-side ``proc.join()`` on the same process object."""
+    try:
+        return conn.recv()
+    except EOFError as exc:
+        raise _OffloadKilledError("offload process exited without returning a result") from exc
+
+
+def _sigkill_proc(proc: Any) -> None:
+    """SIGKILL an offload child *and its process group*, so grandchildren the
+    payload spawned (e.g. joblib/loky workers) die with it.
+
+    The child ``setsid()``s, so its group id == its pid: ``killpg(pid)`` hits
+    exactly that group. If ``setsid`` failed the child isn't a group leader and
+    no group has id == pid → ``ProcessLookupError``, and we fall back to a
+    single-process kill. The host's own group id can never equal a child pid, so
+    this can never signal the API process.
+    """
+    pid = proc.pid
+    if pid is None:
+        return
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, AttributeError, OSError):
+        with contextlib.suppress(Exception):
+            proc.kill()
 
 
 # Worker-pool sizing bounds - mirror ``Settings.worker_concurrency`` (ge=1, le=8).
@@ -274,7 +323,16 @@ class JobRuntime:
         # `_running_tasks` (set in `_run_one`, popped in its finally); lets the
         # admin resource sampler attribute load to module/user without a DB hit.
         self._running_handles: dict[str, JobHandle] = {}
-        self._process_pool: ProcessPoolExecutor | None = None
+        # Killable CPU-offload (§8.3). One short-lived process per
+        # `ctx.run_in_process` call (not a shared pool), so the reaper/cancel path
+        # can SIGKILL a runaway offload without collateral-killing other tenants'
+        # offloads. `_offload_procs[job_id]` holds a job's live children for
+        # hard-kill; the two semaphores bound total and per-user concurrency (built
+        # lazily on the running loop). `_running_by_user` mirrors live jobs/tenant.
+        self._offload_procs: dict[str, set[Any]] = {}
+        self._global_offload_sem: asyncio.Semaphore | None = None
+        self._user_offload_sems: dict[str, asyncio.Semaphore] = {}
+        self._running_by_user: Counter[str] = Counter()
         # Two-phase cancel hooks for subprocess-isolated module jobs (wired by
         # the module loader). The cooperative token + asyncio task-cancel only
         # unwind the host-side proxy await; the worker process keeps running the
@@ -323,16 +381,46 @@ class JobRuntime:
     def _ensure_bus(self) -> EventBus:
         return self._bus if self._bus is not None else get_event_bus()
 
-    def _ensure_process_pool(self) -> ProcessPoolExecutor:
-        """Lazily build the CPU-offload `ProcessPoolExecutor` (§8.3), sized by
-        `module_process_pool_size` (independent of `worker_concurrency`, which
-        only gates asyncio slots) and using a fork-safe start method. Built
-        lazily so deployments that never offload don't pay the startup cost.
-        """
-        if self._process_pool is None:
-            size = max(1, int(self.settings.module_process_pool_size))
-            self._process_pool = ProcessPoolExecutor(max_workers=size, mp_context=_mp_context())
-        return self._process_pool
+    def _offload_limits(self) -> tuple[int, int]:
+        """``(global, per_user)`` concurrent-offload caps. Per-user defaults to the
+        global cap (no bite on a single-tenant box); `max_offloads_per_user`
+        lowers it so one tenant can't hold every slot. Both clamped ``>= 1``."""
+        glob = max(1, int(self.settings.module_process_pool_size))
+        per_user = int(self.settings.max_offloads_per_user) or glob
+        return glob, max(1, min(per_user, glob))
+
+    def _ensure_global_offload_sem(self) -> asyncio.Semaphore:
+        if self._global_offload_sem is None:
+            self._global_offload_sem = asyncio.Semaphore(self._offload_limits()[0])
+        return self._global_offload_sem
+
+    def _ensure_user_offload_sem(self, user_id: str) -> asyncio.Semaphore:
+        sem = self._user_offload_sems.get(user_id)
+        if sem is None:
+            sem = asyncio.Semaphore(self._offload_limits()[1])
+            self._user_offload_sems[user_id] = sem
+        return sem
+
+    @contextlib.asynccontextmanager
+    async def _offload_slot(self, user_id: str | None) -> AsyncGenerator[None, None]:
+        """Admit one offload: take the per-user permit first (fairness gate), then
+        a global permit (hard pool cap). Released in reverse on exit."""
+        user_sem = self._ensure_user_offload_sem(user_id) if user_id else None
+        if user_sem is not None:
+            await user_sem.acquire()
+        glob = self._ensure_global_offload_sem()
+        try:
+            await glob.acquire()
+        except BaseException:
+            if user_sem is not None:
+                user_sem.release()
+            raise
+        try:
+            yield
+        finally:
+            glob.release()
+            if user_sem is not None:
+                user_sem.release()
 
     async def run_offloaded(
         self,
@@ -342,30 +430,101 @@ class JobRuntime:
         *args: Any,
         **kwargs: Any,
     ) -> Any:
-        """Run `fn` in the offload pool.
+        """Run `fn` in a dedicated, killable offload process (§8.3).
 
         When `offload` is the calling module's `(folder, site_packages,
-        module_file)` - bound per-module by the loader - the worker imports that
-        module by path and calls `fn` by name, so a spawned/forkserver worker can
-        reach a *dynamically-loaded* module's function (which isn't importable by
-        its synthetic `sys.modules` name). `offload=None` is the direct path for
+        module_file)` - bound per-module by the loader - the child imports that
+        module by path and calls `fn` by name, so a spawned/forkserver child can
+        reach a *dynamically-loaded* module's function (not importable by its
+        synthetic `sys.modules` name). `offload=None` is the direct path for
         platform callers, where `fn` must be importable by qualified name. Args +
         return must be picklable either way.
+
+        One short-lived process per call - **not** a warm pool. The wall-clock
+        reaper (and any cancel) must be able to SIGKILL a runaway offload, which a
+        `ProcessPoolExecutor` future can't do once it's running; per-call processes
+        also keep killing one tenant's offload from collateral-killing another's.
+        Concurrency is bounded by a global + per-user semaphore. The cost is a cold
+        module import per call - acceptable for the once-per-job mining offloads
+        this is built for.
         """
-        pool = self._ensure_process_pool()
-        loop = asyncio.get_running_loop()
+        job_id = _CURRENT_JOB.get()
+        user_id = _CURRENT_USER.get()
+        async with self._offload_slot(user_id):
+            return await self._spawn_offload(job_id, offload, fn, args, kwargs)
+
+    async def _spawn_offload(
+        self,
+        job_id: str | None,
+        offload: tuple[str, str, str] | None,
+        fn: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> Any:
+        from mate.api.modules.process_offload import offload_child_main
+
         if offload is None:
-            if kwargs:
-                from functools import partial
+            spec: dict[str, Any] = {"kind": "direct", "fn": fn, "args": args, "kwargs": kwargs}
+        else:
+            folder, site_packages, module_file = offload
+            spec = {
+                "kind": "module",
+                "folder": folder,
+                "site_packages": site_packages,
+                "module_file": module_file,
+                "qualname": fn.__qualname__,
+                "args": args,
+                "kwargs": kwargs,
+            }
 
-                return await loop.run_in_executor(pool, partial(fn, *args, **kwargs))
-            return await loop.run_in_executor(pool, fn, *args)
-        from mate.api.modules.process_offload import invoke
+        mp_ctx = _mp_context()
+        recv_conn, send_conn = mp_ctx.Pipe(duplex=False)
+        # daemon=False: a payload may itself spawn (joblib/loky); daemonic procs
+        # can't have children. We own teardown via `_sigkill_proc` + join instead.
+        proc = mp_ctx.Process(target=offload_child_main, args=(send_conn, spec), daemon=False)
+        proc.start()
+        send_conn.close()  # host keeps only the read end; the child owns the write end
+        if job_id is not None:
+            self._offload_procs.setdefault(job_id, set()).add(proc)
+        # The blocking recv runs in a thread we keep a handle to; cancelling the
+        # job cancels the `shield` (we react by killing the child) but never the
+        # recv task, so the pipe is always drained before we close it.
+        recv_task = asyncio.create_task(asyncio.to_thread(_recv_offload, recv_conn))
+        try:
+            ok, value = await asyncio.shield(recv_task)
+        except asyncio.CancelledError:
+            # Reaper/cancel: SIGKILL the child so its blocked recv() EOFs and the
+            # recv task settles, then wait it out before tearing down the pipe.
+            if proc.is_alive():
+                _sigkill_proc(proc)
+            with contextlib.suppress(Exception):
+                await recv_task
+            raise
+        finally:
+            if job_id is not None:
+                procs = self._offload_procs.get(job_id)
+                if procs is not None:
+                    procs.discard(proc)
+                    if not procs:
+                        self._offload_procs.pop(job_id, None)
+            if proc.is_alive():
+                _sigkill_proc(proc)
+            # Reap the child (shielded so a re-cancel can't skip it → zombie), then
+            # close our pipe end now that the recv task has settled.
+            with contextlib.suppress(Exception):
+                await asyncio.shield(asyncio.to_thread(proc.join))
+            recv_conn.close()
+        if ok:
+            return value
+        raise value  # exception raised inside the child, re-raised on the host
 
-        folder, site_packages, module_file = offload
-        return await loop.run_in_executor(
-            pool, invoke, folder, site_packages, module_file, fn.__qualname__, args, kwargs
-        )
+    def _kill_offload(self, job_id: str) -> None:
+        """Hard-kill every live offload child of `job_id`. Called from `cancel()`
+        (and thus the wall-clock reaper) so a runaway offloaded computation - which
+        ignores the cooperative token and the asyncio task-cancel - actually stops
+        burning CPU instead of running to natural completion past its timeout."""
+        for proc in list(self._offload_procs.get(job_id, ())):
+            _sigkill_proc(proc)
 
     async def run_in_process(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
         """Direct CPU offload for platform callers (`fn` importable by qualified
@@ -443,9 +602,15 @@ class JobRuntime:
         for tok in self._cancel_tokens.values():
             tok.cancel()
         self._cancel_tokens.clear()
-        if self._process_pool is not None:
-            self._process_pool.shutdown(cancel_futures=True)
-            self._process_pool = None
+        # Hard-kill any offload children still alive - their owning jobs were
+        # cancelled just above, so none should outlive the runtime.
+        for procs in list(self._offload_procs.values()):
+            for proc in list(procs):
+                _sigkill_proc(proc)
+        self._offload_procs.clear()
+        self._global_offload_sem = None
+        self._user_offload_sems.clear()
+        self._running_by_user.clear()
         log.info("job_runtime.stopped")
 
     @contextlib.asynccontextmanager
@@ -634,6 +799,14 @@ class JobRuntime:
         task = self._running_tasks.get(job_id)
         if task is not None:
             task.cancel()
+
+        # An offloaded computation (`ctx.run_in_process`) is pure CPU in a separate
+        # process: it ignores both the cooperative token and the asyncio
+        # task-cancel above. Hard-kill its children so a reaper-fired timeout (or a
+        # user cancel) actually stops the burn instead of orphaning the process to
+        # run to natural completion long past its deadline.
+        if running:
+            self._kill_offload(job_id)
 
         # The token/task-cancel above only unwinds the host-side await for a
         # subprocess module - the worker keeps running. Two-phase stop: ask it to
@@ -900,6 +1073,13 @@ class JobRuntime:
             started_at=time.monotonic(),
         )
 
+        # Stamp the owning job/user onto the context *before* the handler task is
+        # created so the task (and any `ctx.run_in_process` it awaits) inherits
+        # them - that's how `run_offloaded` knows which job to register the killable
+        # child under and which user's offload cap to charge.
+        _CURRENT_JOB.set(job_id)
+        _CURRENT_USER.set(handle_user_id)
+        self._running_by_user[handle_user_id] += 1
         handler_task = asyncio.create_task(self._handlers[handle_type](handle))
         self._running_tasks[job_id] = handler_task
         self._running_handles[job_id] = handle
@@ -986,6 +1166,17 @@ class JobRuntime:
             self._running_handles.pop(job_id, None)
             self._cancel_tokens.pop(job_id, None)
             self._timed_out.discard(job_id)
+            remaining = self._running_by_user.get(handle_user_id, 0) - 1
+            if remaining > 0:
+                self._running_by_user[handle_user_id] = remaining
+            else:
+                self._running_by_user.pop(handle_user_id, None)
+            # Any offload child still registered here leaked past its handler
+            # (handler raised/was cancelled mid-offload before `_spawn_offload`'s
+            # own finally ran). Kill + forget so a stuck process can't outlive its
+            # job and keep burning a core / holding a slot.
+            for proc in list(self._offload_procs.pop(job_id, ())):
+                _sigkill_proc(proc)
             # The job ended (any outcome) - stop its wall-clock reaper so a job that
             # finished within budget is never reaped after the fact.
             reaper = self._timeout_tasks.pop(job_id, None)

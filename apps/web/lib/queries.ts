@@ -650,6 +650,9 @@ export interface ModuleModelsResponse {
   models: ModuleModel[];
   selected: string | null;
   active: string | null;
+  /** Admin pinned one shared model platform-wide; the per-user picker is
+   *  then read-only (Admin → Controls → CV4CDD detection model). */
+  locked?: boolean;
 }
 
 /** List the platform-wide models installed for a module (e.g. cv4cdd). */

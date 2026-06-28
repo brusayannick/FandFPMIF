@@ -63,8 +63,9 @@ async def test_runtime_run_in_process_uses_worker_pid() -> None:
     try:
         worker_pid = await rt.run_in_process(os.getpid)
         assert worker_pid != os.getpid()
-        # Second call should reuse the same warm worker (or another from the
-        # pool - both fine; we only assert it's not the main process).
+        # Each call is its own short-lived, killable process now (no warm pool), so
+        # the second call runs in a *different* child - we only assert it's off the
+        # main process; a distinct pid is expected, not required.
         again = await rt.run_in_process(os.getpid)
         assert again != os.getpid()
         # kwargs path: max(a, b, key=...) is awkward to pickle; use a simple
@@ -141,6 +142,150 @@ async def test_job_execution_timeout_reaps_hung_job() -> None:
         assert rt.live_stats()["running"] == 0
     finally:
         await rt.stop()
+
+
+@pytest.mark.asyncio
+async def test_reaper_sigkills_offloaded_process() -> None:
+    """The wall-clock reaper must actually *kill* a runaway `ctx.run_in_process`
+    offload, not just flip the DB row. An offloaded computation runs in a separate
+    process that never sees the cooperative token or the asyncio task-cancel, so
+    before the kill wiring it ran to natural completion long past its deadline (the
+    53-min-on-a-30-min-timeout symptom). Assert the child is SIGKILLed and gone.
+    """
+    import time
+
+    from mate.api.config import get_settings
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.db.models import Job
+    from mate.api.events.bus import EventBus
+    from mate.api.jobs.runtime import JobRuntime
+
+    from .conftest import TEST_USER_ID
+
+    settings = get_settings().model_copy(
+        update={"job_execution_timeout_seconds": 1, "worker_concurrency": 1}
+    )
+    rt = JobRuntime(settings=settings, bus=EventBus())
+
+    async def offloaded_hang(_handle: object) -> None:
+        # `time.sleep` is a stdlib (picklable, child-importable) stand-in for a long
+        # pm4py mining call: it runs in a child the cooperative token can't reach,
+        # so only a kill stops it. 300s >> the 1s timeout.
+        await rt.run_in_process(time.sleep, 300)
+
+    rt.register("test.offload_hang", offloaded_hang)
+    sm = get_sessionmaker()
+
+    async def _status(job_id: str) -> tuple[str, str | None]:
+        async with sm() as session:
+            job = await session.get(Job, job_id)
+            assert job is not None
+            return job.status, job.error
+
+    try:
+        await rt.start()
+        job_id = await rt.submit(
+            type_="test.offload_hang", user_id=TEST_USER_ID, title="offload", payload={}
+        )
+
+        # Grab the child the runtime registered for this job, while it's running.
+        proc = None
+        for _ in range(100):  # ≤5s (covers spawn/forkserver child startup)
+            procs = rt._offload_procs.get(job_id)
+            if procs:
+                proc = next(iter(procs))
+                break
+            await asyncio.sleep(0.05)
+        assert proc is not None, "offload child was never registered"
+        assert proc.is_alive()
+
+        # Reaper fires at ~1s → job recorded as a failed-timeout (not a user cancel).
+        status, err = "running", None
+        for _ in range(60):  # ≤6s
+            status, err = await _status(job_id)
+            if status in {"failed", "cancelled", "completed"}:
+                break
+            await asyncio.sleep(0.1)
+        assert status == "failed"
+        assert err is not None and "timeout" in err.lower()
+
+        # The fix: the offloaded OS process is actually dead - terminated by signal
+        # (negative exitcode == -SIGKILL), not left burning a core to completion.
+        for _ in range(40):  # ≤2s for the host-side join/reap to settle
+            if not proc.is_alive():
+                break
+            await asyncio.sleep(0.05)
+        assert not proc.is_alive()
+        assert proc.exitcode is not None and proc.exitcode < 0
+        assert rt.live_stats()["running"] == 0
+    finally:
+        await rt.stop()
+
+
+@pytest.mark.asyncio
+async def test_per_user_offload_cap_bounds_concurrency() -> None:
+    """`max_offloads_per_user` caps how many offloads one tenant runs at once,
+    below the global pool size - so a single user's burst of heavy mining can't
+    hold every offload slot and starve other tenants (the multi-tenant fix). With
+    the knob at 0 the per-user cap defaults to the pool size (no bite).
+    """
+    from mate.api.config import get_settings
+    from mate.api.events.bus import EventBus
+    from mate.api.jobs.runtime import _CURRENT_JOB, _CURRENT_USER, JobRuntime
+
+    settings = get_settings().model_copy(
+        update={"module_process_pool_size": 4, "max_offloads_per_user": 2}
+    )
+    rt = JobRuntime(settings=settings, bus=EventBus())
+    assert rt._offload_limits() == (4, 2)  # (global, per-user)
+
+    live = 0
+    peak = 0
+    release = asyncio.Event()
+
+    async def fake_spawn(
+        _job_id: object, _offload: object, _fn: object, _args: object, _kwargs: object
+    ) -> None:
+        # Stand in for the real per-call process so the test is deterministic and
+        # spawns nothing; it just holds the admitted slot until released.
+        nonlocal live, peak
+        live += 1
+        peak = max(peak, live)
+        try:
+            await release.wait()
+        finally:
+            live -= 1
+
+    rt._spawn_offload = fake_spawn  # type: ignore[method-assign]
+
+    async def one_offload() -> None:
+        jtok = _CURRENT_JOB.set("job-A")
+        utok = _CURRENT_USER.set("user-A")  # all five charge the same tenant
+        try:
+            await rt.run_offloaded(None, os.getpid)
+        finally:
+            _CURRENT_JOB.reset(jtok)
+            _CURRENT_USER.reset(utok)
+
+    tasks = [asyncio.create_task(one_offload()) for _ in range(5)]
+    try:
+        for _ in range(50):  # let admission settle
+            await asyncio.sleep(0.01)
+            if live >= 2:
+                break
+        await asyncio.sleep(0.1)  # give any wrongly-admitted extra a chance to show
+        assert peak == 2  # never more than the per-user cap, though global=4, tasks=5
+        assert live == 2
+    finally:
+        release.set()
+        await asyncio.gather(*tasks)
+
+    # Knob at 0 (default) → per-user cap equals the global pool: no bite single-tenant.
+    open_rt = JobRuntime(
+        settings=get_settings().model_copy(update={"module_process_pool_size": 3}),
+        bus=EventBus(),
+    )
+    assert open_rt._offload_limits() == (3, 3)
 
 
 async def _wait(

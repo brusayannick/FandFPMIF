@@ -231,6 +231,37 @@ The URL-derived, non-secret settings (issuer, JWKS, CORS, `NEXT_PUBLIC_API_URL`,
 `AUTH_URL`, Keycloak hostname/relative-path) are all set in
 `docker-compose.prod.yml`, so they don't belong in `.env`.
 
+## 4a. Resource limits & multi-tenant fairness (optional)
+
+One VM is shared across all tenants. These knobs bound how much CPU/RAM one user's
+heavy module mining can take and stop a runaway offload from starving others. All
+optional with safe defaults – add to `.env` only to tune. Env names are the
+uppercased field names (case-insensitive).
+
+```dotenv
+# CPU offload (ctx.run_in_process – pm4py/networkx mining runs in its own process,
+# one short-lived process per call, hard-killable by the job timeout).
+MODULE_PROCESS_POOL_SIZE=4    # max concurrent offload processes (default min(cores, 8))
+MAX_OFFLOADS_PER_USER=2       # per-tenant offload cap (default 0 = pool size, i.e. no per-user limit)
+
+# A job (and its offloads) past this many seconds is force-stopped – now a real
+# SIGKILL of the offload process, not just a flipped DB row.
+JOB_EXECUTION_TIMEOUT_SECONDS=1800   # default 1800 (30 min); lower if every job is known-fast
+
+# Parallel asyncio job slots (admin can also change this live at Settings → Jobs).
+WORKER_CONCURRENCY=2          # default 2
+
+# DuckDB, per query – stop one big-log query or a many-card dashboard from grabbing
+# every core / all RAM.
+DUCKDB_THREADS=4              # default 0 = all cores
+DUCKDB_MEMORY_LIMIT=4GB       # default empty = DuckDB's own default
+```
+
+On a shared box set `MAX_OFFLOADS_PER_USER` **below** `MODULE_PROCESS_POOL_SIZE` so no
+single user can hold every offload slot, and cap `DUCKDB_THREADS` / `DUCKDB_MEMORY_LIMIT`
+so one query can't monopolise cores or RAM. Leaving them unset keeps single-tenant
+behaviour (no per-user throttling).
+
 ## 5. Bring it up
 
 ```bash

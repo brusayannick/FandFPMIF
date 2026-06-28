@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { HardDriveUpload, Loader2, Trash2 } from "lucide-react";
+import { HardDriveUpload, Loader2, Lock, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { toastError } from "@/lib/toast";
@@ -67,6 +67,9 @@ export function ModelStoreCard({
   const title = store.title ?? "Model files";
   const accept = store.accept ?? ".tar.zst";
   const models = modelsQ.data?.models ?? [];
+  // Admin pinned one shared model for everyone (Admin → Controls). Selection +
+  // deletion go read-only; uploads stay allowed (still platform-additive).
+  const locked = modelsQ.data?.locked ?? false;
 
   const onFilePicked = async (file: File | undefined) => {
     if (!file) return;
@@ -113,6 +116,16 @@ export function ModelStoreCard({
           <p className="text-sm text-muted-foreground">{store.description}</p>
         )}
 
+        {locked && (
+          <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+            <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+            <span>
+              The detection model is set by your administrator and applies to
+              everyone. You can't change the selection here.
+            </span>
+          </div>
+        )}
+
         <div className="flex items-center gap-3">
           <input
             ref={fileRef}
@@ -149,12 +162,13 @@ export function ModelStoreCard({
           </p>
         ) : (
           <RadioGroup
-            value={selected ?? undefined}
+            value={(locked ? modelsQ.data?.active : selected) ?? undefined}
             onValueChange={onChangeSelection}
+            disabled={locked}
             className="gap-2"
           >
             {models.map((m) => {
-              const busy = (saving || pendingName === m.name) && pendingName === m.name;
+              const busy = pendingName === m.name;
               return (
                 <div
                   key={m.name}
@@ -164,7 +178,7 @@ export function ModelStoreCard({
                     <RadioGroupItem
                       id={`model-${m.name}`}
                       value={m.name}
-                      disabled={saving || remove.isPending}
+                      disabled={saving || remove.isPending || locked}
                     />
                     <Label
                       htmlFor={`model-${m.name}`}
@@ -173,7 +187,7 @@ export function ModelStoreCard({
                       {m.name}
                     </Label>
                     {m.active && (
-                      <Badge variant="secondary" className="h-5 px-1.5 py-0 text-[9px]">
+                      <Badge variant="secondary" className="h-5 px-1.5 py-0 text-[10px]">
                         in use
                       </Badge>
                     )}
@@ -189,7 +203,7 @@ export function ModelStoreCard({
                           size="icon"
                           variant="ghost"
                           className="h-7 w-7 cursor-pointer text-muted-foreground hover:text-destructive"
-                          disabled={remove.isPending}
+                          disabled={remove.isPending || locked}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>

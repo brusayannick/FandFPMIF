@@ -18,7 +18,7 @@ See ``apps/web/app/(platform)/admin/jobs`` for the UI.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 import structlog
 from fastapi import APIRouter, HTTPException, Query, status
@@ -29,6 +29,7 @@ from mate.api.auth import AdminUserDep
 from mate.api.db.models import EventLog, Job, User
 from mate.api.db.session import SessionDep
 from mate.api.jobs.runtime import get_job_runtime
+from mate.api.modules.job_logs import get_job_log_buffer
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/admin/jobs", tags=["admin"])
@@ -84,6 +85,46 @@ class AdminJobList(BaseModel):
     total: int
     items: list[AdminJobRow]
     summary: AdminJobSummary
+
+
+class AdminJobLogLine(BaseModel):
+    ts: float
+    level: str
+    event: str
+    fields: dict[str, Any]
+
+
+class AdminJobLogs(BaseModel):
+    job_id: str
+    lines: list[AdminJobLogLine]
+    truncated: bool
+
+
+@router.get("/{job_id}/logs", response_model=AdminJobLogs)
+async def job_logs(
+    job_id: str,
+    user: AdminUserDep,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+) -> AdminJobLogs:
+    """Recent module-log lines captured for one job (admin operator view).
+
+    Lines are the job's ``ctx.logger`` output - both in-process and subprocess
+    modules funnel through the loader's bus-forwarding logger, which mirrors each
+    line into a bounded per-job ring (``mate.api.modules.job_logs``). In-memory
+    and cross-user by design, like the rest of this admin surface. Empty for a job
+    that logged nothing, ran before this build, or whose lines aged out of the
+    ring; ``truncated`` flags that older lines were evicted (per-job cap).
+    """
+    buf = get_job_log_buffer()
+    lines = buf.get(job_id, limit=limit)
+    return AdminJobLogs(
+        job_id=job_id,
+        lines=[
+            AdminJobLogLine(ts=ln.ts, level=ln.level, event=ln.event, fields=ln.fields)
+            for ln in lines
+        ],
+        truncated=buf.truncated(job_id),
+    )
 
 
 def _payload_log_id(payload: object) -> str | None:

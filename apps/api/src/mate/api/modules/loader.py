@@ -49,6 +49,7 @@ from mate.api.modules.event_log_access import EventLogAccess
 from mate.api.modules.finder import get_finder, module_namespace, reset_finder
 from mate.api.modules.installer import install_module, venv_site_packages
 from mate.api.modules.installs import user_module_ids, user_owns_module
+from mate.api.modules.job_logs import get_job_log_buffer
 from mate.api.modules.object_centric_log_access import ObjectCentricLogAccess
 from mate.api.modules.registry import CapabilityRegistry
 from mate.api.modules.subprocess_host import SubprocessBridge
@@ -258,19 +259,32 @@ class _BusForwardingLogger:
     untouched.
     """
 
-    def __init__(self, base, bus: EventBus, module_id: str, user_id: str) -> None:
+    def __init__(
+        self, base, bus: EventBus, module_id: str, user_id: str, job_id: str | None = None
+    ) -> None:
         self._base = base
         self._bus = bus
         self._module_id = module_id
         self._user_id = user_id
+        # Set when this logger belongs to a job invocation (precompute / @job /
+        # route-job); None for direct route handlers. Drives the per-job ring.
+        self._job_id = job_id
 
     def bind(self, **kwargs: Any) -> _BusForwardingLogger:
         return _BusForwardingLogger(
-            self._base.bind(**kwargs), self._bus, self._module_id, self._user_id
+            self._base.bind(**kwargs), self._bus, self._module_id, self._user_id, self._job_id
         )
 
     def _emit(self, level: str, event: str, **kwargs: Any) -> None:
         getattr(self._base, level)(event, **kwargs)
+        # Mirror into the per-job ring (admin Jobs tab). Synchronous + lock-guarded,
+        # so unlike the bus publish below it also captures lines logged from inside
+        # `asyncio.to_thread` module compute (no running loop there). Best-effort.
+        if self._job_id:
+            try:
+                get_job_log_buffer().append(self._job_id, level, event, kwargs)
+            except Exception:
+                pass
         # Best-effort: never let a logging side-effect break the handler.
         # `user_id` scopes the line to the owning tenant - the Settings logs
         # tail subscribes to `module.log.*` over the per-user WS, so without it
@@ -282,6 +296,7 @@ class _BusForwardingLogger:
                     {
                         "module_id": self._module_id,
                         "user_id": self._user_id,
+                        "job_id": self._job_id,
                         "event": event,
                         "fields": kwargs,
                     },
@@ -1068,6 +1083,7 @@ class ModuleLoader:
                         progress=_JobProgressAdapter(handle),
                         cancellation=_JobCancellation(handle),
                         filter_override=handle.payload.get("_filter_override"),
+                        job_id=handle.id,
                     )
                     # Tag the ctx with its job id so a subprocess bridge can map
                     # the per-call RPC token → job id and target the soft cancel.
@@ -1198,6 +1214,7 @@ class ModuleLoader:
                 handle.user_id,
                 progress=_JobProgressAdapter(handle),
                 cancellation=_JobCancellation(handle),
+                job_id=handle.id,
             )
             ctx._ff_job_id = handle.id  # type: ignore[attr-defined]
             await self._invoke_handler(bound_method, ctx, event_payload)
@@ -1323,6 +1340,7 @@ class ModuleLoader:
         progress: Any | None = None,
         cancellation: Any | None = None,
         filter_override: list[dict[str, Any]] | None = None,
+        job_id: str | None = None,
     ) -> ModuleContext:
         # workdir is per-invocation; for v1 we use a temp dir scoped to the
         # process. A future enhancement: clean up after the call returns
@@ -1345,7 +1363,7 @@ class ModuleLoader:
             async with sm() as session:
                 # Admin-controlled module config (mate.api.policy) overrides the
                 # per-user ModuleConfig with one shared value for every user.
-                from mate.api.policy import SCOPE_MODULE, resolve
+                from mate.api.policy import SCOPE_MODULE, SCOPE_SETTING, resolve
 
                 admin_cfg, controlled = await resolve(session, SCOPE_MODULE, module_id, user_id)
                 if controlled:
@@ -1355,6 +1373,18 @@ class ModuleLoader:
                     row = await session.get(ModuleConfig, (user_id, module_id))
                     if row is not None and row.config_json:
                         cfg_json = dict(row.config_json)
+                # A module exposing a model_store (e.g. cv4cdd) can have its model
+                # *selection* pinned platform-wide via the `<module_id>.model`
+                # setting: when admin-controlled it overrides the per-user `model`
+                # config key for everyone, while the rest of the config (windows,
+                # thresholds) stays per-user. The sentinel lets the module's
+                # /models route render a read-only "administrator-controlled" state.
+                model_admin, model_locked = await resolve(
+                    session, SCOPE_SETTING, f"{module_id}.model", user_id
+                )
+                if model_locked and isinstance(model_admin, str) and model_admin:
+                    cfg_json["model"] = model_admin
+                    cfg_json["__model_admin_locked__"] = True
                 # Modules this user has installed - scopes ctx.registry so
                 # cross-module RPC can only reach the user's own modules.
                 owned_ids = await user_module_ids(session, user_id)
@@ -1445,6 +1475,7 @@ class ModuleLoader:
                 self.bus,
                 module_id,
                 user_id,
+                job_id,
             ),
             workdir=workdir,
             run_in_process=self._bind_run_in_process(module_id),  # type: ignore[arg-type]

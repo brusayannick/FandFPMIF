@@ -42,4 +42,10 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic -c apps/api/alembic.ini upgrade head && uvicorn mate.api.main:app --host 0.0.0.0 --port 8000"]
+# `exec` so uvicorn replaces the shell as the container's main process: without
+# it a non-interactive `sh` sits in front as the signal target, ignores the
+# SIGTERM `docker stop` / `compose down` sends (PID 1 has no default handler),
+# and the lifespan shutdown never runs - the container is SIGKILLed at the grace
+# deadline instead. With `exec`, uvicorn gets the signal and drains gracefully.
+# `init: true` in compose adds a PID-1 reaper for any escaped grandchild.
+CMD ["sh", "-c", "alembic -c apps/api/alembic.ini upgrade head && exec uvicorn mate.api.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 10"]

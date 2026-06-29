@@ -113,7 +113,7 @@ export function ModuleGrid({ logId }: { logId: string }) {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" data-tour="module-grid">
       {CATEGORIES.map((c) => {
         const bucket = grouped.get(c.id)!;
         if (bucket.length === 0) return null;

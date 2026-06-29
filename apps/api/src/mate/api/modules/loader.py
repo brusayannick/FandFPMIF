@@ -52,6 +52,7 @@ from mate.api.modules.installs import user_module_ids, user_owns_module
 from mate.api.modules.job_logs import get_job_log_buffer
 from mate.api.modules.object_centric_log_access import ObjectCentricLogAccess
 from mate.api.modules.registry import CapabilityRegistry
+from mate.api.modules.job_worker import JobWorker
 from mate.api.modules.subprocess_host import SubprocessBridge
 from mate.api.sharing import user_can_read_log
 from mate.sdk.context import ModuleContext
@@ -1282,11 +1283,38 @@ class ModuleLoader:
         # once the handler is done so per-call scratch space doesn't pile up
         # (§5.5 "workdir: scratch space, auto-cleaned on completion").
         try:
+            # A cancellable job (`ctx._ff_job_id` set) on a module that opted into
+            # `execution: worker` runs in a throwaway killable child process, so a
+            # native CPU loop is hard-cancellable - the `to_thread` path below
+            # cannot be (a Python thread can't be killed). @route / non-job
+            # handlers and `thread` modules keep the in-process path.
+            job_id = getattr(ctx, "_ff_job_id", None)
+            if job_id is not None and self._uses_worker_execution(ctx.module_id):
+                meta = self._offload_meta(ctx.module_id)
+                if meta is not None:
+                    folder, site_packages, _module_file = meta
+                    worker = JobWorker(
+                        module_id=ctx.module_id,
+                        folder=folder,
+                        site_packages=site_packages,
+                        job_id=job_id,
+                    )
+                    return await worker.run(bound_method.__name__, ctx, args, kwargs)
             if inspect.iscoroutinefunction(bound_method):
                 return await bound_method(ctx, *args, **kwargs)
             return await asyncio.to_thread(bound_method, ctx, *args, **kwargs)
         finally:
             shutil.rmtree(ctx.workdir, ignore_errors=True)
+
+    def _uses_worker_execution(self, module_id: str) -> bool:
+        """Whether *module_id* is an in-process module that opted into per-job
+        worker execution (`dependencies.python.execution: worker`) - so its jobs
+        run in a killable child rather than the uncancellable thread pool."""
+        lm = self.loaded.get(module_id)
+        if lm is None:
+            return False
+        py = lm.manifest.dependencies.python
+        return py.isolation == "in_process" and getattr(py, "execution", "thread") == "worker"
 
     async def _user_owns(self, user_id: str, module_id: str) -> bool:
         """Whether *user_id* has *module_id* installed.
@@ -1341,6 +1369,7 @@ class ModuleLoader:
         cancellation: Any | None = None,
         filter_override: list[dict[str, Any]] | None = None,
         job_id: str | None = None,
+        restrict_event_log: bool = False,
     ) -> ModuleContext:
         # workdir is per-invocation; for v1 we use a temp dir scoped to the
         # process. A future enhancement: clean up after the call returns
@@ -1448,18 +1477,29 @@ class ModuleLoader:
         # against the model it declares (availability gating), so it reaches for
         # exactly one of the two.
         object_centric = bool(log_id) and log_model == "object_centric"
+        # AI/assistant callers pass restrict_event_log=True: the module keeps its
+        # cache (its own precomputed outputs) but every raw event-log accessor
+        # raises, so a guidance_payload() cannot exfiltrate XES/parquet rows into
+        # an LLM prompt - no matter what it tries to read. object_log is denied the
+        # same way for object-centric logs.
+        if restrict_event_log:
+            event_log_access: Any = _RestrictedEventLog()
+            object_log_access: Any = None
+        elif object_centric:
+            event_log_access = _UnboundEventLog()
+            object_log_access = ObjectCentricLogAccess(log_id, storage_user_id)
+        elif log_id:
+            event_log_access = EventLogAccess(log_id, storage_user_id, active_filter)
+            object_log_access = None
+        else:
+            event_log_access = _UnboundEventLog()
+            object_log_access = None
         return ModuleContext(
             log_id=log_id,
             module_id=module_id,
             user_id=user_id,
-            event_log=(
-                EventLogAccess(log_id, storage_user_id, active_filter)
-                if log_id and not object_centric
-                else _UnboundEventLog()
-            ),  # type: ignore[arg-type]
-            object_log=(
-                ObjectCentricLogAccess(log_id, storage_user_id) if object_centric else None
-            ),  # type: ignore[arg-type]
+            event_log=event_log_access,  # type: ignore[arg-type]
+            object_log=object_log_access,  # type: ignore[arg-type]
             bus=_SdkBusAdapter(self.bus, user_id, log_id),  # type: ignore[arg-type]
             registry=_UserScopedRegistry(self.registry, frozenset(owned_ids)),  # type: ignore[arg-type]
             cache=(  # type: ignore[arg-type]
@@ -1503,6 +1543,59 @@ class _UnboundEventLog:
 
     async def duckdb_fetch(self, *_, **__):
         raise RuntimeError("This handler isn't scoped to a log_id.")
+
+
+class _RestrictedEventLog:
+    """Event-log stand-in for AI/assistant contexts: every raw-data accessor
+    raises. MATE AI may only see module *outputs* (``ctx.cache``) and curated
+    aggregate metadata - never the underlying XES/parquet rows. Wired by
+    ``_make_context(..., restrict_event_log=True)`` so a module's
+    ``guidance_payload`` cannot leak raw events into an LLM prompt.
+    """
+
+    _MSG = (
+        "Event-log data is not accessible here: MATE AI only receives module "
+        "outputs and aggregate metadata, never raw event rows."
+    )
+
+    async def __aenter__(self):  # type: ignore[no-untyped-def]
+        raise PermissionError(self._MSG)
+
+    async def __aexit__(self, *exc):  # type: ignore[no-untyped-def]
+        return None
+
+    async def pandas(self):  # type: ignore[no-untyped-def]
+        raise PermissionError(self._MSG)
+
+    async def polars(self):  # type: ignore[no-untyped-def]
+        raise PermissionError(self._MSG)
+
+    async def pm4py(self):  # type: ignore[no-untyped-def]
+        raise PermissionError(self._MSG)
+
+    async def duckdb_fetch(self, *_, **__):  # type: ignore[no-untyped-def]
+        raise PermissionError(self._MSG)
+
+    async def materialize_parquet(self):  # type: ignore[no-untyped-def]
+        raise PermissionError(self._MSG)
+
+    @property
+    def events_path(self):  # type: ignore[no-untyped-def]
+        raise PermissionError(self._MSG)
+
+    @property
+    def cases_path(self):  # type: ignore[no-untyped-def]
+        raise PermissionError(self._MSG)
+
+    @property
+    def active_filter(self):  # type: ignore[no-untyped-def]
+        raise PermissionError(self._MSG)
+
+    def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
+        # Catch-all so any other / future reader a module reaches for is denied
+        # too (dunders skip __getattr__, so context-manager use still hits the
+        # explicit __aenter__ above).
+        raise PermissionError(self._MSG)
 
 
 class _UnboundCache:

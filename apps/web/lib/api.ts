@@ -138,6 +138,55 @@ export async function api<T = unknown>(
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
+/**
+ * Multipart upload with progress reporting. `fetch` can't surface upload-byte
+ * progress, so large files (e.g. a ~0.5 GB CV4CDD model archive) look frozen.
+ * This uses `XMLHttpRequest` purely for its `upload.onprogress` events; auth +
+ * error handling mirror `api()`. `onProgress` receives 0–100 for the bytes sent
+ * to the server. Note the request stays pending after 100% while the server
+ * processes the body (the model upload extracts the archive) – callers should
+ * show an indeterminate "installing" state once progress reaches 100.
+ */
+export async function apiUpload<T = unknown>(
+  path: string,
+  file: File,
+  opts: { fieldName?: string; onProgress?: (pct: number) => void } = {},
+): Promise<T> {
+  const token = await browserToken();
+  if (!token) {
+    // No usable bearer token: sign out + redirect rather than a guaranteed 401.
+    await logoutToLogin();
+    throw new ApiError(401, "Not authenticated");
+  }
+  const body = new FormData();
+  body.append(opts.fieldName ?? "file", file);
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${apiBase()}${path}`);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && opts.onProgress) {
+        opts.onProgress((e.loaded / e.total) * 100);
+      }
+    };
+    xhr.onload = () => {
+      let detail: unknown = xhr.responseText;
+      try {
+        detail = JSON.parse(xhr.responseText);
+      } catch {
+        /* keep as text */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve((xhr.status === 204 ? undefined : detail) as T);
+      } else {
+        reject(new ApiError(xhr.status, detail));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, "Network error during upload"));
+    xhr.send(body);
+  });
+}
+
 /** Raw fetch that returns the Response without JSON-parsing – use for SSE / streaming endpoints. */
 export async function rawFetch(
   path: string,

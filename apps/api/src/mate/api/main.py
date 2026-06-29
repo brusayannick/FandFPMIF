@@ -35,6 +35,7 @@ from mate.api.events import EventBus, set_event_bus
 from mate.api.ingest.dispatch import register_import_handler
 from mate.api.ingest.watch import scan_watch
 from mate.api.jobs.runtime import JobRuntime, load_persisted_concurrency, set_job_runtime
+from mate.api.jobs.supervisor import get_child_supervisor
 from mate.api.middleware import UsageTrackingMiddleware
 from mate.api.modules import CapabilityRegistry, ModuleLoader, set_module_loader
 from mate.api.modules.hot_reload import HotReload, sweep_stale_workdirs
@@ -235,6 +236,13 @@ def _purge_legacy_storage_once(settings) -> None:
     sentinel.write_text("multi-user storage layout active\n")
 
 
+# Per-phase grace for the lifespan teardown. Both wrapped phases are already
+# internally time-boxed; this is insurance so a *future* unbounded await in
+# shutdown can't wedge the `finally` - uvicorn waits on it, and a wedged finally
+# is what stalled `--reload` restarts and `docker stop` (see `JobRuntime.stop`).
+_SHUTDOWN_PHASE_TIMEOUT_S = 6.0
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -324,6 +332,15 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        # Authoritative stop, first and unconditional: SIGKILL every child the
+        # platform owns (offload children, subprocess + per-job workers) through
+        # the one controller, so nothing survives shutdown regardless of how the
+        # graceful per-subsystem teardown below fares. Idempotent with it. The
+        # parent-death guard covers the SIGKILL case where this never runs.
+        try:
+            get_child_supervisor().kill_all()
+        except Exception:
+            structlog.get_logger("api.shutdown").exception("shutdown.kill_all_failed")
         for task in (retention_task, job_event_task, watch_poll_task, processing_task):
             task.cancel()
             try:
@@ -335,9 +352,21 @@ async def lifespan(app: FastAPI):
         await sampler.stop()
         set_resource_sampler(None)
         set_coordinator(None)
-        await loader.unload_all()
+        # Both teardowns are internally time-boxed (subprocess hosts fall back to
+        # SIGKILL; runtime.stop drains are graced), but wrap them anyway: uvicorn
+        # waits on this `finally`, so any future unbounded await here would wedge
+        # restart/stop. On overrun, log and press on so the pool/engine still close.
+        for label, coro in (
+            ("unload_all", loader.unload_all()),
+            ("runtime_stop", runtime.stop()),
+        ):
+            try:
+                await asyncio.wait_for(coro, timeout=_SHUTDOWN_PHASE_TIMEOUT_S)
+            except TimeoutError:
+                structlog.get_logger("api.shutdown").warning("shutdown.phase_timeout", phase=label)
+            except Exception:
+                structlog.get_logger("api.shutdown").exception("shutdown.phase_failed", phase=label)
         set_module_loader(None)
-        await runtime.stop()
         set_job_runtime(None)
         set_event_bus(None)
         get_duckdb_pool().close_all()

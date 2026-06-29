@@ -298,6 +298,20 @@ async def cancel_job(job_id: str, user: AdminUserDep) -> None:
     log.info("admin_job_cancel", admin_id=user.id, job_id=job_id)
 
 
+@router.post("/{job_id}/kill", status_code=status.HTTP_204_NO_CONTENT)
+async def kill_job(job_id: str, user: AdminUserDep) -> None:
+    """Hard-kill any user's job *now* - SIGKILL its whole process tree, skipping
+    the cooperative grace window. For a job that won't respond to a normal
+    cancel (a native compute loop with no poll point)."""
+    ok = await get_job_runtime().kill(job_id)
+    if not ok:
+        raise HTTPException(
+            status_code=409,
+            detail="Job cannot be killed - already finished or unknown.",
+        )
+    log.info("admin_job_kill", admin_id=user.id, job_id=job_id)
+
+
 @router.post("/{job_id}/retry")
 async def retry_job(job_id: str, user: AdminUserDep) -> dict[str, str]:
     """Re-enqueue any user's failed job; returns the new job id."""

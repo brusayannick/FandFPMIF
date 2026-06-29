@@ -142,6 +142,7 @@ export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
             const link = (
               <Link
                 href={item.href}
+                data-tour={item.href === "/processes" ? "nav-processes" : undefined}
                 aria-current={active ? "page" : undefined}
                 onMouseEnter={() => item.prefetch?.(qc)}
                 onFocus={() => item.prefetch?.(qc)}

@@ -55,6 +55,10 @@ dependencies:
       - numpy
       - duckdb
     isolation: in_process
+    # Run each precompute job in a throwaway killable child process so a Cancel
+    # (or platform shutdown) actually stops it - this module's native TF / Java /
+    # multiprocessing.Pool work runs in that child's process group, not the API's.
+    execution: worker
 
 frontend:
   panel: ./panel/index.tsx

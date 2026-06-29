@@ -40,6 +40,8 @@ dependencies:
     inherit:
       - pandas
     isolation: in_process
+    # Precompute runs in a killable child process so Cancel/shutdown stop it.
+    execution: worker
 
 frontend:
   panel: ./panel/index.tsx

@@ -188,16 +188,30 @@ async def test_reaper_sigkills_offloaded_process() -> None:
             type_="test.offload_hang", user_id=TEST_USER_ID, title="offload", payload={}
         )
 
-        # Grab the child the runtime registered for this job, while it's running.
-        proc = None
+        import os
+
+        from mate.api.jobs.supervisor import get_child_supervisor
+
+        def _pid_alive(pid: int) -> bool:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return False
+            return True
+
+        # Grab the offload child's pid the supervisor registered for this job,
+        # while it's running.
+        pid: int | None = None
         for _ in range(100):  # ≤5s (covers spawn/forkserver child startup)
-            procs = rt._offload_procs.get(job_id)
-            if procs:
-                proc = next(iter(procs))
+            for h in get_child_supervisor().snapshot():
+                if h.job_id == job_id and h.kind == "offload":
+                    pid = h.pid
+                    break
+            if pid is not None:
                 break
             await asyncio.sleep(0.05)
-        assert proc is not None, "offload child was never registered"
-        assert proc.is_alive()
+        assert pid is not None, "offload child was never registered with the supervisor"
+        assert _pid_alive(pid)
 
         # Reaper fires at ~1s → job recorded as a failed-timeout (not a user cancel).
         status, err = "running", None
@@ -209,14 +223,14 @@ async def test_reaper_sigkills_offloaded_process() -> None:
         assert status == "failed"
         assert err is not None and "timeout" in err.lower()
 
-        # The fix: the offloaded OS process is actually dead - terminated by signal
-        # (negative exitcode == -SIGKILL), not left burning a core to completion.
+        # The fix: the offloaded OS process is actually dead - SIGKILLed by the
+        # reaper through the supervisor and reaped, not left burning a core to
+        # completion (it was a 300s sleep; it cannot have finished in this window).
         for _ in range(40):  # ≤2s for the host-side join/reap to settle
-            if not proc.is_alive():
+            if not _pid_alive(pid):
                 break
             await asyncio.sleep(0.05)
-        assert not proc.is_alive()
-        assert proc.exitcode is not None and proc.exitcode < 0
+        assert not _pid_alive(pid)
         assert rt.live_stats()["running"] == 0
     finally:
         await rt.stop()

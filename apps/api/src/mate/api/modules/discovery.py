@@ -7,9 +7,9 @@ Two sources, both pointing at a folder with a `manifest.yaml`:
 2. **Python entry points.** Any installed Python package may declare an
    entry point under the `mate.modules` group whose value is the
    importable package name. The folder containing that package's
-   `__init__.py` is treated as the module folder. This is how
-   `pip install ff-mod-<x>` (and the `POST /api/v1/modules/install/registry`
-   path in `install_jobs.py`) get picked up without copying files.
+   `__init__.py` is treated as the module folder. This is how a
+   `pip install`-ed package that declares the entry point gets picked up
+   without copying files.
 
 Two manifests declaring the same id is a hard error regardless of source.
 """

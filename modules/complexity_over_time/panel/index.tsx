@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Popover } from "radix-ui";
+import { Check, ChevronsUpDown } from "lucide-react";
 import {
   CartesianGrid,
+  Legend,
   Line,
   LineChart,
   ReferenceArea,
@@ -12,6 +15,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,10 +26,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/cn";
 
 import {
   useComplexityTimeseries,
   useDriftPeriods,
+  type ComplexityMetrics,
   type DriftPeriod,
   type SliceMode,
   type SlicePoint,
@@ -70,6 +77,24 @@ const GRANULARITIES: { value: string; label: string }[] = [
 ];
 
 const DEFAULT_KPI = "variant_entropy";
+
+// Per-line colours. The first five reuse the app's shadcn chart tokens so the
+// palette matches the rest of the UI; the rest extend it for the rare case a
+// user plots more than five metrics at once. We cycle if even that runs out.
+const LINE_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+  "var(--primary)",
+  "oklch(0.65 0.2 330)",
+  "oklch(0.7 0.17 140)",
+];
+
+function lineColor(i: number): string {
+  return LINE_COLORS[i % LINE_COLORS.length];
+}
 
 function kpiLabel(key: string): string {
   return KPI_LABELS[key] ?? key;
@@ -173,7 +198,11 @@ export function ComplexityOverTimePanel({ logId }: { logId: string; moduleId: st
   const [granularity, setGranularity] = useState("auto");
   const [windowDays, setWindowDays] = useState(30);
   const [stepDays, setStepDays] = useState(7);
-  const [kpi, setKpi] = useState(DEFAULT_KPI);
+  // Multiple KPIs may be plotted at once – one line each.
+  const [selectedKpis, setSelectedKpis] = useState<string[]>([DEFAULT_KPI]);
+  // Min-max each series to [0,1] so metrics on different scales (e.g. magnitude
+  // vs. normalised entropy) stay comparable on one shared axis.
+  const [normalize, setNormalize] = useState(true);
 
   const params = useMemo<TimeseriesParams>(() => {
     if (mode === "absolute") return { slices };
@@ -184,27 +213,59 @@ export function ComplexityOverTimePanel({ logId }: { logId: string; moduleId: st
   const q = useComplexityTimeseries(logId, mode, params);
   const driftQuery = useDriftPeriods(logId);
 
-  // Keep the KPI selection valid as the available metric keys change.
+  // Keep the KPI selection valid as the available metric keys change. Functional
+  // update + identity short-circuit avoids a render loop on the fresh `[]` ref.
   const metricKeys = q.data?.metric_keys ?? [];
   useEffect(() => {
     if (metricKeys.length === 0) return;
-    if (!metricKeys.includes(kpi)) {
-      setKpi(metricKeys.includes(DEFAULT_KPI) ? DEFAULT_KPI : metricKeys[0]);
-    }
-  }, [metricKeys, kpi]);
+    setSelectedKpis((prev) => {
+      const valid = prev.filter((k) => metricKeys.includes(k));
+      if (valid.length === prev.length) return prev;
+      if (valid.length > 0) return valid;
+      return [metricKeys.includes(DEFAULT_KPI) ? DEFAULT_KPI : metricKeys[0]];
+    });
+  }, [metricKeys]);
 
-  const chartData = useMemo(
-    () =>
-      (q.data?.slices ?? []).map((s) => ({
-        label: s.label,
-        value:
-          s.metrics && typeof s.metrics[kpi as keyof typeof s.metrics] === "number"
-            ? (s.metrics[kpi as keyof typeof s.metrics] as number)
-            : null,
-        n_cases: s.n_cases,
-        n_events: s.n_events,
-      })),
-    [q.data, kpi],
+  // One row per slice carrying, per selected metric, both the raw value (for the
+  // tooltip) and the display value (raw, or normalised when `normalize` is on).
+  const chartData = useMemo<ChartDatum[]>(() => {
+    const pts = q.data?.slices ?? [];
+    const ranges: Record<string, { min: number; max: number }> = {};
+    for (const key of selectedKpis) {
+      let min = Infinity;
+      let max = -Infinity;
+      for (const s of pts) {
+        const v = s.metrics?.[key as keyof ComplexityMetrics];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      }
+      ranges[key] = { min, max };
+    }
+    return pts.map((s) => {
+      const raw: Record<string, number | null> = {};
+      const disp: Record<string, number | null> = {};
+      for (const key of selectedKpis) {
+        const v = s.metrics?.[key as keyof ComplexityMetrics];
+        const num = typeof v === "number" && Number.isFinite(v) ? v : null;
+        raw[key] = num;
+        if (num === null) {
+          disp[key] = null;
+        } else if (normalize) {
+          const { min, max } = ranges[key];
+          disp[key] = max > min ? (num - min) / (max - min) : 0.5;
+        } else {
+          disp[key] = num;
+        }
+      }
+      return { label: s.label, n_cases: s.n_cases, n_events: s.n_events, raw, disp };
+    });
+  }, [q.data, selectedKpis, normalize]);
+
+  const hasPoints = useMemo(
+    () => chartData.some((d) => selectedKpis.some((k) => d.raw[k] !== null)),
+    [chartData, selectedKpis],
   );
 
   const driftBands = useMemo(
@@ -233,17 +294,20 @@ export function ComplexityOverTimePanel({ logId }: { logId: string; moduleId: st
         setWindowDays={setWindowDays}
         stepDays={stepDays}
         setStepDays={setStepDays}
-        kpi={kpi}
-        setKpi={setKpi}
+        selectedKpis={selectedKpis}
+        setSelectedKpis={setSelectedKpis}
+        normalize={normalize}
+        setNormalize={setNormalize}
         metricKeys={metricKeys}
       />
 
       <ChartBody
         isLoading={q.isLoading}
         isError={q.isError || (!q.isLoading && !q.data)}
-        hasPoints={chartData.some((d) => d.value !== null)}
+        hasPoints={hasPoints}
         data={chartData}
-        kpi={kpi}
+        selectedKpis={selectedKpis}
+        normalize={normalize}
         driftBands={driftBands}
         driftRan={driftQuery.data?.ran === true}
       />
@@ -264,8 +328,10 @@ interface ControlBarProps {
   setWindowDays: (n: number) => void;
   stepDays: number;
   setStepDays: (n: number) => void;
-  kpi: string;
-  setKpi: (k: string) => void;
+  selectedKpis: string[];
+  setSelectedKpis: (k: string[]) => void;
+  normalize: boolean;
+  setNormalize: (v: boolean) => void;
   metricKeys: string[];
 }
 
@@ -281,14 +347,16 @@ function ControlBar(props: ControlBarProps) {
     setWindowDays,
     stepDays,
     setStepDays,
-    kpi,
-    setKpi,
+    selectedKpis,
+    setSelectedKpis,
+    normalize,
+    setNormalize,
     metricKeys,
   } = props;
 
   return (
     <Card>
-      <CardContent className="flex flex-wrap items-end gap-4">
+      <CardContent className="flex flex-wrap items-start gap-4">
         <Field label="Mode">
           <Select value={mode} onValueChange={(v) => setMode(v as SliceMode)}>
             <SelectTrigger className="w-44">
@@ -339,24 +407,101 @@ function ControlBar(props: ControlBarProps) {
           </>
         )}
 
-        <div className="ml-auto">
-          <Field label="Y-axis KPI">
-            <Select value={kpi} onValueChange={setKpi}>
-              <SelectTrigger className="w-64">
-                <SelectValue placeholder="Select a KPI" />
-              </SelectTrigger>
-              <SelectContent>
-                {metricKeys.map((k) => (
-                  <SelectItem key={k} value={k}>
-                    {kpiLabel(k)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <div className="ml-auto flex flex-wrap items-start gap-4">
+          {selectedKpis.length > 1 && (
+            <Field
+              label="Normalise 0–1"
+              hint="Min-max each metric so different scales line up. Tooltip keeps raw values."
+            >
+              <div className="flex h-9 items-center">
+                <Switch checked={normalize} onCheckedChange={setNormalize} />
+              </div>
+            </Field>
+          )}
+          <Field label="Y-axis metrics">
+            <KpiMultiSelect
+              metricKeys={metricKeys}
+              selected={selectedKpis}
+              onChange={setSelectedKpis}
+            />
           </Field>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// Multi-select dropdown: a popover holding a scrollable, checkable metric list.
+// Built on the raw radix `Popover` primitive (the shadcn wrapper isn't a bundler
+// runtime-external), styled to match `components/ui/popover.tsx`.
+function KpiMultiSelect({
+  metricKeys,
+  selected,
+  onChange,
+}: {
+  metricKeys: string[];
+  selected: string[];
+  onChange: (k: string[]) => void;
+}) {
+  const toggle = (key: string) => {
+    if (selected.includes(key)) {
+      // Keep at least one metric selected so the chart never goes blank.
+      if (selected.length === 1) return;
+      onChange(selected.filter((k) => k !== key));
+    } else {
+      onChange([...selected, key]);
+    }
+  };
+
+  const triggerLabel =
+    selected.length === 0
+      ? "Select metrics"
+      : selected.length === 1
+        ? kpiLabel(selected[0])
+        : `${selected.length} metrics`;
+
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          className="w-64 justify-between font-normal"
+        >
+          <span className="truncate">{triggerLabel}</span>
+          <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+        </Button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={4}
+          className="z-50 w-64 origin-(--radix-popover-content-transform-origin) rounded-md border bg-popover p-1 text-popover-foreground shadow-md outline-hidden data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+        >
+          <div className="max-h-72 overflow-y-auto">
+            {metricKeys.map((key) => {
+              const on = selected.includes(key);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => toggle(key)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground",
+                    on && "font-medium",
+                  )}
+                >
+                  <Check
+                    className={cn("size-4 shrink-0", on ? "opacity-100" : "opacity-0")}
+                  />
+                  <span className="truncate">{kpiLabel(key)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
@@ -434,9 +579,11 @@ function NumberInput({
 
 interface ChartDatum {
   label: string;
-  value: number | null;
   n_cases: number;
   n_events: number;
+  // Per selected metric: the real value (tooltip) and the plotted value (line).
+  raw: Record<string, number | null>;
+  disp: Record<string, number | null>;
 }
 
 function ChartBody({
@@ -444,7 +591,8 @@ function ChartBody({
   isError,
   hasPoints,
   data,
-  kpi,
+  selectedKpis,
+  normalize,
   driftBands,
   driftRan,
 }: {
@@ -452,7 +600,8 @@ function ChartBody({
   isError: boolean;
   hasPoints: boolean;
   data: ChartDatum[];
-  kpi: string;
+  selectedKpis: string[];
+  normalize: boolean;
   driftBands: DriftBand[];
   driftRan: boolean;
 }) {
@@ -480,19 +629,25 @@ function ChartBody({
     return (
       <Card>
         <CardContent className="text-sm text-muted-foreground">
-          No slice has enough cases to compute{" "}
-          <span className="font-medium">{kpiLabel(kpi)}</span>. Try a coarser
+          No slice has enough cases to compute the selected{" "}
+          {selectedKpis.length > 1 ? "metrics" : "metric"}. Try a coarser
           granularity, fewer slices, or a wider window.
         </CardContent>
       </Card>
     );
   }
 
+  const multiScale = selectedKpis.length > 1 && normalize;
+  const heading =
+    selectedKpis.length === 1
+      ? `${kpiLabel(selectedKpis[0])} over time`
+      : "Complexity metrics over time";
+
   return (
     <Card>
       <CardContent>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <h3 className="text-sm font-semibold">{kpiLabel(kpi)} over time</h3>
+          <h3 className="text-sm font-semibold">{heading}</h3>
           <DriftLegend driftBands={driftBands} driftRan={driftRan} />
         </div>
         <ResponsiveContainer width="100%" height={400}>
@@ -522,25 +677,45 @@ function ChartBody({
               tick={{ fill: "var(--muted-foreground)", fontSize: 10 }}
               stroke="var(--border)"
               width={56}
+              domain={multiScale ? [0, 1] : undefined}
+              allowDecimals
             />
-            <Tooltip content={<KpiTooltip kpi={kpi} />} />
-            <Line
-              type="monotone"
-              dataKey="value"
-              stroke="var(--primary)"
-              strokeWidth={2}
-              dot={false}
-              connectNulls
-              isAnimationActive={false}
+            <Tooltip
+              content={<KpiTooltip selectedKpis={selectedKpis} />}
             />
+            <Legend
+              wrapperStyle={{ fontSize: 11 }}
+              iconType="plainline"
+            />
+            {selectedKpis.map((key, i) => (
+              <Line
+                key={key}
+                type="monotone"
+                dataKey={(d: ChartDatum) => d.disp[key] ?? null}
+                name={kpiLabel(key)}
+                stroke={lineColor(i)}
+                strokeWidth={2}
+                dot={false}
+                connectNulls
+                isAnimationActive={false}
+              />
+            ))}
           </LineChart>
         </ResponsiveContainer>
-        {driftBands.length > 0 && (
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            Shaded bands mark concept-drift periods detected by CV4CDD, coloured
-            by drift type.
-          </p>
-        )}
+        <div className="mt-2 space-y-1">
+          {multiScale && (
+            <p className="text-[11px] text-muted-foreground">
+              Y-axis normalised 0–1 per metric so different scales are
+              comparable; the tooltip shows each metric&apos;s raw value.
+            </p>
+          )}
+          {driftBands.length > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              Shaded bands mark concept-drift periods detected by CV4CDD,
+              coloured by drift type.
+            </p>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -602,22 +777,31 @@ function KpiTooltip({
   active,
   payload,
   label,
-  kpi,
+  selectedKpis,
 }: {
   active?: boolean;
   payload?: TooltipPayloadItem[];
   label?: string;
-  kpi: string;
+  selectedKpis: string[];
 }) {
   if (!active || !payload || payload.length === 0) return null;
   const datum = payload[0].payload;
   return (
     <div className="rounded-md border border-border bg-card px-3 py-2 text-xs shadow-sm">
       <div className="mb-1 font-medium text-card-foreground">{label}</div>
-      <div className="tabular-nums">
-        {kpiLabel(kpi)}: {fmt(datum.value)}
+      <div className="space-y-0.5">
+        {selectedKpis.map((key, i) => (
+          <div key={key} className="flex items-center gap-2 tabular-nums">
+            <span
+              className="inline-block h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: lineColor(i) }}
+            />
+            <span className="text-muted-foreground">{kpiLabel(key)}:</span>
+            <span className="ml-auto pl-3">{fmt(datum.raw[key] ?? null)}</span>
+          </div>
+        ))}
       </div>
-      <div className="text-muted-foreground tabular-nums">
+      <div className="mt-1 text-muted-foreground tabular-nums">
         {datum.n_cases} cases · {datum.n_events} events
       </div>
     </div>

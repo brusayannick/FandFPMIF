@@ -46,6 +46,7 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
 
   const card = (
     <Card
+      data-tour={`module-${module.id}`}
       className={cn(
         // Tile-style card: drop the default outer py/gap so CardContent's
         // p-4 fully owns the card's padding.

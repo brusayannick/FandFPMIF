@@ -50,10 +50,11 @@ frontend:
       title: Complexity suite (v2)
       description: Headline metrics across size, variation, distance and entropy.
       icon: Sigma
-      # Fixed-size metric scorecard (8 tiles): locked to a size that shows them all.
+      # Metric scorecard (8 tiles): min sized to show them all.
       default_w: 7
       default_h: 15
-      resizable: false
+      min_w: 7
+      min_h: 15
     - id: complexity-v2-categories
       entry: ./widgets/ComplexityCategories.tsx
       title: Complexity metrics by category

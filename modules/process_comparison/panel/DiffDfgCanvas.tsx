@@ -8,13 +8,41 @@ import { formatNumber } from "@/lib/format";
 
 import type { DfgDiffData, DiffStatus } from "./types";
 
-// Baseline-only is blue, comparison-only is amber, shared is neutral. These are
-// the single source of truth for the canvas + the legend in index.tsx.
+export type DfgColorMode = "presence" | "delta";
+
+// Presence palette: baseline-only blue, comparison-only amber, shared neutral.
+// Single source of truth for the canvas + the legend in index.tsx.
 export const STATUS_COLOR: Record<DiffStatus, string> = {
   shared: "var(--muted-foreground)",
   only_a: "rgb(37, 99, 235)", // blue-600 – baseline
   only_b: "rgb(217, 119, 6)", // amber-600 – comparison
 };
+
+// Delta palette: green = more / only in B, red = less / only in A, neutral = flat.
+export const DELTA_COLOR = {
+  up: "rgb(22, 163, 74)", // green-600
+  down: "rgb(220, 38, 38)", // red-600
+  same: "var(--muted-foreground)",
+};
+
+/** Edge/node colour for the chosen mode. In delta mode a *shared* element is
+ *  green when it grew (freq_b > freq_a), red when it shrank, neutral when flat. */
+function colorFor(mode: DfgColorMode, status: DiffStatus, fa: number, fb: number): string {
+  if (mode === "presence") return STATUS_COLOR[status];
+  if (status === "only_b") return DELTA_COLOR.up;
+  if (status === "only_a") return DELTA_COLOR.down;
+  if (fb > fa) return DELTA_COLOR.up;
+  if (fb < fa) return DELTA_COLOR.down;
+  return DELTA_COLOR.same;
+}
+
+/** ` (Δ+3)` / ` (Δ-3)` suffix for shared elements in delta mode; empty otherwise. */
+function deltaSuffix(mode: DfgColorMode, status: DiffStatus, fa: number, fb: number): string {
+  if (mode !== "delta" || status !== "shared") return "";
+  const d = fb - fa;
+  if (d === 0) return "";
+  return ` (Δ${d > 0 ? "+" : ""}${formatNumber(d)})`;
+}
 
 const NODE_W = 200;
 const NODE_H = 56;
@@ -23,8 +51,8 @@ const Y_GAP = 80;
 
 /** Longest-path layering, top-to-bottom. Cycles are tolerated: rank relaxation
  *  is capped at |nodes| passes so a loop can't spin forever – it just settles
- *  at a stable layering. */
-function layeredPositions(
+ *  at a stable layering. Exported so the side-by-side canvas reuses it. */
+export function layeredPositions(
   nodeIds: string[],
   edges: { source: string; target: string }[],
 ): Map<string, { x: number; y: number }> {
@@ -61,7 +89,13 @@ function layeredPositions(
   return pos;
 }
 
-export function DiffDfgCanvas({ data }: { data: DfgDiffData }) {
+export function DiffDfgCanvas({
+  data,
+  mode = "delta",
+}: {
+  data: DfgDiffData;
+  mode?: DfgColorMode;
+}) {
   const { nodes, edges } = useMemo(() => {
     const positions = layeredPositions(
       data.activities.map((a) => a.id),
@@ -69,10 +103,10 @@ export function DiffDfgCanvas({ data }: { data: DfgDiffData }) {
     );
 
     const nodes: Node[] = data.activities.map((a) => {
-      const color = STATUS_COLOR[a.status];
+      const color = colorFor(mode, a.status, a.freq_a, a.freq_b);
       const freqLabel =
         a.status === "shared"
-          ? `${formatNumber(a.freq_a)} → ${formatNumber(a.freq_b)}`
+          ? `${formatNumber(a.freq_a)} → ${formatNumber(a.freq_b)}${deltaSuffix(mode, a.status, a.freq_a, a.freq_b)}`
           : a.status === "only_a"
             ? `${formatNumber(a.freq_a)} · baseline only`
             : `${formatNumber(a.freq_b)} · comparison only`;
@@ -107,11 +141,11 @@ export function DiffDfgCanvas({ data }: { data: DfgDiffData }) {
 
     const maxFreq = data.edges.reduce((m, e) => Math.max(m, e.freq_a, e.freq_b), 1);
     const edges: Edge[] = data.edges.map((e) => {
-      const color = STATUS_COLOR[e.status];
+      const color = colorFor(mode, e.status, e.freq_a, e.freq_b);
       const weight = Math.max(e.freq_a, e.freq_b);
       const label =
         e.status === "shared"
-          ? `${formatNumber(e.freq_a)} → ${formatNumber(e.freq_b)}`
+          ? `${formatNumber(e.freq_a)} → ${formatNumber(e.freq_b)}${deltaSuffix(mode, e.status, e.freq_a, e.freq_b)}`
           : formatNumber(weight);
       return {
         id: e.id,
@@ -133,13 +167,13 @@ export function DiffDfgCanvas({ data }: { data: DfgDiffData }) {
     });
 
     return { nodes, edges };
-  }, [data]);
+  }, [data, mode]);
 
   return (
     <CanvasShell
       nodes={nodes}
       edges={edges}
-      fitViewKey={`${data.baseline_log_id}-${data.other_log_id}-${data.activities.length}`}
+      fitViewKey={`${data.baseline_log_id}-${data.other_log_id}-${mode}-${data.activities.length}`}
     />
   );
 }

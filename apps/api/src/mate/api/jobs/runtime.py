@@ -28,7 +28,7 @@ import signal
 import sys
 import time
 from collections import Counter
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -42,6 +42,7 @@ from mate.api.config import Settings, get_settings
 from mate.api.db.engine import get_sessionmaker
 from mate.api.db.models import Job, SystemSetting
 from mate.api.events import EventBus, get_event_bus
+from mate.api.jobs.supervisor import ChildHandle, get_child_supervisor
 from mate.api.uuid7 import uuid7_str
 from mate.sdk import Cancelled as SdkCancelled
 
@@ -110,6 +111,12 @@ WORKER_CONCURRENCY_KEY = "worker_concurrency"
 # Queue sentinel that asks one worker to retire (graceful scale-down). It can
 # never collide with a real job id (those are UUIDv7 strings).
 _RETIRE = object()
+
+# Per-batch grace for `stop()`'s task drains. Pure-asyncio tasks settle far
+# inside this; it only bites when a handler is wedged in an uncancellable C call
+# (offload children are already SIGKILLed before the drain). Kept short so an
+# uvicorn `--reload` restart - and a container `docker stop` - never stalls.
+_SHUTDOWN_DRAIN_GRACE_S = 3.0
 
 
 def _clamp_workers(n: int) -> int:
@@ -326,10 +333,11 @@ class JobRuntime:
         # Killable CPU-offload (§8.3). One short-lived process per
         # `ctx.run_in_process` call (not a shared pool), so the reaper/cancel path
         # can SIGKILL a runaway offload without collateral-killing other tenants'
-        # offloads. `_offload_procs[job_id]` holds a job's live children for
-        # hard-kill; the two semaphores bound total and per-user concurrency (built
-        # lazily on the running loop). `_running_by_user` mirrors live jobs/tenant.
-        self._offload_procs: dict[str, set[Any]] = {}
+        # offloads. Live children are owned by the process-global
+        # `ChildProcessSupervisor` (keyed by job_id) so cancel/shutdown hard-kill
+        # them through one controller; the two semaphores bound total and per-user
+        # concurrency (built lazily on the running loop). `_running_by_user`
+        # mirrors live jobs/tenant.
         self._global_offload_sem: asyncio.Semaphore | None = None
         self._user_offload_sems: dict[str, asyncio.Semaphore] = {}
         self._running_by_user: Counter[str] = Counter()
@@ -479,13 +487,28 @@ class JobRuntime:
 
         mp_ctx = _mp_context()
         recv_conn, send_conn = mp_ctx.Pipe(duplex=False)
+        # Parent-death channel: the child holds `death_r` and self-terminates (with
+        # its whole process group) the instant this write end closes - i.e. when the
+        # API dies without a graceful teardown (SIGKILL, `--reload` hard restart,
+        # crash). Only the API ever holds `death_w`, so it tracks the API *directly*
+        # and works under forkserver too, where the child's parent is the
+        # fork-server (which survives the API) rather than us.
+        death_r, death_w = mp_ctx.Pipe(duplex=False)
         # daemon=False: a payload may itself spawn (joblib/loky); daemonic procs
         # can't have children. We own teardown via `_sigkill_proc` + join instead.
-        proc = mp_ctx.Process(target=offload_child_main, args=(send_conn, spec), daemon=False)
+        proc = mp_ctx.Process(
+            target=offload_child_main, args=(send_conn, spec, death_r), daemon=False
+        )
         proc.start()
         send_conn.close()  # host keeps only the read end; the child owns the write end
-        if job_id is not None:
-            self._offload_procs.setdefault(job_id, set()).add(proc)
+        death_r.close()  # child owns the read end; host keeps only the write end
+        # Hand the child to the supervisor so cancel/shutdown can hard-kill its
+        # whole group through one controller. Reaping (`proc.join`) stays here.
+        handle: ChildHandle | None = None
+        if proc.pid is not None:
+            handle = get_child_supervisor().register(
+                ChildHandle(pid=proc.pid, kind="offload", job_id=job_id)
+            )
         # The blocking recv runs in a thread we keep a handle to; cancelling the
         # job cancels the `shield` (we react by killing the child) but never the
         # recv task, so the pipe is always drained before we close it.
@@ -501,19 +524,18 @@ class JobRuntime:
                 await recv_task
             raise
         finally:
-            if job_id is not None:
-                procs = self._offload_procs.get(job_id)
-                if procs is not None:
-                    procs.discard(proc)
-                    if not procs:
-                        self._offload_procs.pop(job_id, None)
+            get_child_supervisor().unregister(handle)
             if proc.is_alive():
                 _sigkill_proc(proc)
             # Reap the child (shielded so a re-cancel can't skip it → zombie), then
-            # close our pipe end now that the recv task has settled.
+            # close our pipe ends now that the recv task has settled. The child is
+            # already dead here, so closing `death_w` can't trigger a spurious
+            # group-kill on a live computation.
             with contextlib.suppress(Exception):
                 await asyncio.shield(asyncio.to_thread(proc.join))
             recv_conn.close()
+            with contextlib.suppress(Exception):
+                death_w.close()
         if ok:
             return value
         raise value  # exception raised inside the child, re-raised on the host
@@ -523,8 +545,7 @@ class JobRuntime:
         (and thus the wall-clock reaper) so a runaway offloaded computation - which
         ignores the cooperative token and the asyncio task-cancel - actually stops
         burning CPU instead of running to natural completion past its timeout."""
-        for proc in list(self._offload_procs.get(job_id, ())):
-            _sigkill_proc(proc)
+        get_child_supervisor().kill_job(job_id)
 
     async def run_in_process(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
         """Direct CPU offload for platform callers (`fn` importable by qualified
@@ -579,39 +600,58 @@ class JobRuntime:
         self._running = False
         for w in self._workers:
             w.cancel()
-        await asyncio.gather(*self._workers, return_exceptions=True)
+        await self._drain_tasks("workers", self._workers)
         self._workers.clear()
+        # Cancel every in-flight handler, then *immediately* SIGKILL its offload
+        # children. A handler blocked in `_recv_offload` (a worker thread parked on
+        # `conn.recv()`) only unblocks once its child dies and the pipe EOFs - so the
+        # kill must precede the drain, not trail it. The old order (drain, then kill
+        # at the very end) deadlocked shutdown: the gather awaited a task that was
+        # itself waiting on a child we hadn't killed yet, and - with no uvicorn
+        # graceful-shutdown timeout - the server waited on the lifespan forever.
         for task in self._running_tasks.values():
             task.cancel()
-        if self._running_tasks:
-            await asyncio.gather(*self._running_tasks.values(), return_exceptions=True)
+        get_child_supervisor().kill_all()
+        await self._drain_tasks("jobs", self._running_tasks.values())
         self._running_tasks.clear()
         # Tear down any in-flight grace watchdogs so they don't fire (and try to
         # hard-kill a worker) after the runtime has stopped.
         for esc in self._escalation_tasks.values():
             esc.cancel()
-        if self._escalation_tasks:
-            await asyncio.gather(*self._escalation_tasks.values(), return_exceptions=True)
+        await self._drain_tasks("escalations", self._escalation_tasks.values())
         self._escalation_tasks.clear()
         for reaper in self._timeout_tasks.values():
             reaper.cancel()
-        if self._timeout_tasks:
-            await asyncio.gather(*self._timeout_tasks.values(), return_exceptions=True)
+        await self._drain_tasks("reapers", self._timeout_tasks.values())
         self._timeout_tasks.clear()
         self._timed_out.clear()
         for tok in self._cancel_tokens.values():
             tok.cancel()
         self._cancel_tokens.clear()
-        # Hard-kill any offload children still alive - their owning jobs were
-        # cancelled just above, so none should outlive the runtime.
-        for procs in list(self._offload_procs.values()):
-            for proc in list(procs):
-                _sigkill_proc(proc)
-        self._offload_procs.clear()
         self._global_offload_sem = None
         self._user_offload_sems.clear()
         self._running_by_user.clear()
         log.info("job_runtime.stopped")
+
+    async def _drain_tasks(self, group: str, tasks: Iterable[asyncio.Task[Any]]) -> None:
+        """Await a batch of just-cancelled tasks, time-boxed so teardown can never
+        hang. Pure-asyncio tasks (workers, reapers, watchdogs) settle in
+        microseconds; the one batch that can stall is ``jobs``, when a handler is
+        wedged in an uncancellable C call (pm4py/DuckDB on a worker thread). Each
+        job's offload children are SIGKILLed *before* this runs, so the only
+        straggler left is a leaked thread we could never join anyway - drop it and
+        let the process exit rather than pin shutdown on it."""
+        pending = [t for t in tasks if t is not None]
+        if not pending:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*pending, return_exceptions=True),
+                timeout=_SHUTDOWN_DRAIN_GRACE_S,
+            )
+        except TimeoutError:
+            still = sum(1 for t in pending if not t.done())
+            log.warning("job_runtime.stop_drain_timeout", group=group, pending=still)
 
     @contextlib.asynccontextmanager
     async def lifespan(self):
@@ -820,6 +860,34 @@ class JobRuntime:
                 "job.cancelled",
                 {"id": job_id, "user_id": owner_id, "reason": "queued"},
             )
+        return True
+
+    async def kill(self, job_id: str) -> bool:
+        """Hard-stop a job *now*, skipping the cooperative grace window.
+
+        The nuclear option behind the admin Jobs "Kill" button for a job that
+        won't respond to a normal cancel: run the usual `cancel()` (mark the row,
+        flip the token, cancel the task, SIGKILL offload children, soft-signal a
+        subprocess worker), then immediately escalate - SIGKILL the job's whole
+        process tree via the supervisor and, for a subprocess-module job, fire the
+        hard kill+respawn at once instead of waiting out the grace.
+        """
+        sm = get_sessionmaker()
+        async with sm() as session:
+            job = await session.get(Job, job_id)
+            if job is None or job.status not in {"queued", "running"}:
+                return False
+            module_id = job.module_id
+            running = job.status == "running"
+
+        await self.cancel(job_id)
+        # Escalate immediately rather than via the grace watchdog.
+        get_child_supervisor().kill_job(job_id)
+        if running and module_id and self._subprocess_hard_canceller is not None:
+            try:
+                await self._subprocess_hard_canceller(job_id, module_id)
+            except Exception:
+                logging.exception("hard-kill hook failed for job %s", job_id)
         return True
 
     async def _begin_subprocess_cancel(self, job_id: str, module_id: str) -> None:
@@ -1175,8 +1243,7 @@ class JobRuntime:
             # (handler raised/was cancelled mid-offload before `_spawn_offload`'s
             # own finally ran). Kill + forget so a stuck process can't outlive its
             # job and keep burning a core / holding a slot.
-            for proc in list(self._offload_procs.pop(job_id, ())):
-                _sigkill_proc(proc)
+            get_child_supervisor().kill_job(job_id)
             # The job ended (any outcome) - stop its wall-clock reaper so a job that
             # finished within budget is never reaped after the fact.
             reaper = self._timeout_tasks.pop(job_id, None)

@@ -42,6 +42,8 @@ dependencies:
       - pandas
       - duckdb
     isolation: in_process
+    # Precompute runs in a killable child process so Cancel/shutdown stop it.
+    execution: worker
 
 frontend:
   panel: ./panel/index.tsx
@@ -51,10 +53,11 @@ frontend:
       title: Complexity metrics
       description: Headline EPA-based measures - magnitude, variety, entropy, Lempel–Ziv.
       icon: Layers
-      # Fixed-size metric scorecard (8 tiles): locked to a size that shows them all.
+      # Metric scorecard (8 tiles): min sized to show them all.
       default_w: 7
       default_h: 15
-      resizable: false
+      min_w: 7
+      min_h: 15
     - id: entropy-comparison
       entry: ./widgets/EntropyComparison.tsx
       title: Entropy comparison

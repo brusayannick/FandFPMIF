@@ -21,8 +21,11 @@ from mate.sdk import Module, ModuleContext, route
 
 from . import compute as comp
 from .serializers import (
+    build_activity_diff,
     serialize_activity_deltas,
+    serialize_bpmn,
     serialize_dfg_diff,
+    serialize_summary_delta,
     serialize_variant_diff,
 )
 
@@ -108,6 +111,39 @@ class ProcessComparisonModule(Module):
         await ctx.cache.set(key, result)
         return result
 
+    async def _compute_pairwise(
+        self, ctx: ModuleContext, prefix: str, other: str, run: Any
+    ) -> dict[str, Any]:
+        """Resolve [baseline, one other], cache on (ids + mtimes), run ``run(frames)``.
+
+        ``run(frames)`` is a pure, thread-offloaded function returning the payload
+        dict; this helper attaches ``baseline_log_id``/``other_log_id``. Every
+        pairwise view (dfg overlay, summary, bpmn) goes through here - a delta is
+        inherently one-vs-one, so unlike ``_compute_over_set`` it takes a single
+        ``other`` and refuses an empty / self selection.
+        """
+        other_id = other.strip()
+        if not other_id or other_id == ctx.log_id:
+            raise HTTPException(status_code=422, detail="Pick one other log to compare against.")
+        accessors = await self._resolve(ctx, [other_id])
+        ordered_ids = [ctx.log_id, other_id]
+        key = _cache_key(prefix, ordered_ids, [_events_mtime(a) for a in accessors])
+        cached = await ctx.cache.get(key)
+        if cached is not None:
+            return cached
+
+        frames = await self._frames(accessors)
+
+        def _wrapped() -> dict[str, Any]:
+            payload = run(frames)
+            payload["baseline_log_id"] = ctx.log_id
+            payload["other_log_id"] = other_id
+            return payload
+
+        result = await asyncio.to_thread(_wrapped)
+        await ctx.cache.set(key, result)
+        return result
+
     # -- routes --------------------------------------------------------------
 
     @route.get("/similarity")
@@ -127,29 +163,41 @@ class ProcessComparisonModule(Module):
 
     @route.get("/dfg-overlay")
     async def dfg_overlay(self, ctx: ModuleContext, other: str = "") -> dict[str, Any]:
-        other_id = other.strip()
-        if not other_id or other_id == ctx.log_id:
-            raise HTTPException(status_code=422, detail="Pick one other log to overlay.")
-        accessors = await self._resolve(ctx, [other_id])
-        ordered_ids = [ctx.log_id, other_id]
-        key = _cache_key("dfg_overlay", ordered_ids, [_events_mtime(a) for a in accessors])
-        cached = await ctx.cache.get(key)
-        if cached is not None:
-            return cached
-
-        frames = await self._frames(accessors)
-
-        def _run() -> dict[str, Any]:
+        def _run(frames: list[Any]) -> dict[str, Any]:
             dfg_a, sa, ea = comp.discover_dfg(frames[0])
             dfg_b, sb, eb = comp.discover_dfg(frames[1])
-            payload = serialize_dfg_diff(dfg_a, sa, ea, dfg_b, sb, eb)
-            payload["baseline_log_id"] = ctx.log_id
-            payload["other_log_id"] = other_id
-            return payload
+            return serialize_dfg_diff(dfg_a, sa, ea, dfg_b, sb, eb)
 
-        result = await asyncio.to_thread(_run)
-        await ctx.cache.set(key, result)
-        return result
+        return await self._compute_pairwise(ctx, "dfg_overlay", other, _run)
+
+    @route.get("/summary")
+    async def summary(self, ctx: ModuleContext, other: str = "") -> dict[str, Any]:
+        """Headline KPI deltas (cases / events / activities / variants / throughput)."""
+
+        def _run(frames: list[Any]) -> dict[str, Any]:
+            return serialize_summary_delta(
+                comp.summary_kpis(frames[0]), comp.summary_kpis(frames[1])
+            )
+
+        return await self._compute_pairwise(ctx, "summary", other, _run)
+
+    @route.get("/bpmn")
+    async def bpmn(self, ctx: ModuleContext, other: str = "") -> dict[str, Any]:
+        """Inductive-miner BPMN for each log + the per-activity diff the overlay
+        colours by. BPMN mining is the heaviest route - thread-offloaded and cached.
+        """
+
+        def _run(frames: list[Any]) -> dict[str, Any]:
+            dfg_a, sa, ea = comp.discover_dfg(frames[0])
+            dfg_b, sb, eb = comp.discover_dfg(frames[1])
+            return {
+                "kind": "bpmn_diff",
+                "xml_a": serialize_bpmn(comp.discover_bpmn(frames[0]))["xml"],
+                "xml_b": serialize_bpmn(comp.discover_bpmn(frames[1]))["xml"],
+                "activities": build_activity_diff(dfg_a, sa, ea, dfg_b, sb, eb),
+            }
+
+        return await self._compute_pairwise(ctx, "bpmn", other, _run)
 
     @route.get("/variants")
     async def variants(self, ctx: ModuleContext, others: str = "") -> dict[str, Any]:

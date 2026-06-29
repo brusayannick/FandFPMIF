@@ -1,20 +1,14 @@
-"""Module install pipelines (§7.6.2).
+"""Module install pipeline (§7.6.2).
 
-Three sources, each implemented as a `@job`-style handler on the platform's
-`JobRuntime` so progress flows to the bottom-left dock and the jobs drawer
-just like an event-log import:
+Modules are installed from an uploaded archive only, implemented as a
+`@job`-style handler on the platform's `JobRuntime` so progress flows to the
+bottom-left dock and the jobs drawer just like an event-log import:
 
 - ``module.install.upload`` - operator uploaded a zip / tar.gz from the UI
-  (or `POST /api/v1/modules/install`). The route writes the bytes to a
-  staging tmpdir and submits a job carrying the file path.
-- ``module.install.git`` - clone a git URL (optionally pinned to a ref).
-- ``module.install.registry`` - install from PyPI by name. After
-  ``uv pip install`` it resolves the new module via its `mate.modules`
-  entry point. The ``source: "npm"`` variant raises ``NotImplementedError``
-  by design: an npm-only package ships no Python entry point for the loader
-  to bind to, so there is nothing to mount in-process.
+  (`POST /api/v1/modules/install`). The route writes the bytes to a staging
+  tmpdir and submits a job carrying the file path.
 
-Every handler ends with `loader.load_one(folder, manifest)` so the module
+The handler ends with `loader.load_one(folder, manifest)` so the module
 becomes available without a restart.
 """
 
@@ -43,8 +37,6 @@ log = structlog.get_logger(__name__)
 
 
 JOB_TYPE_UPLOAD = "module.install.upload"
-JOB_TYPE_GIT = "module.install.git"
-JOB_TYPE_REGISTRY = "module.install.registry"
 
 
 async def _record_owner(user_id: str, module_id: str, source: str) -> None:
@@ -58,20 +50,15 @@ async def _record_owner(user_id: str, module_id: str, source: str) -> None:
 
 
 def register_module_install_handlers(runtime: JobRuntime, loader: ModuleLoader) -> None:
-    """Wire the three install job types onto the runtime.
+    """Wire the module-install job type onto the runtime.
 
     Called from `main.py` lifespan after the loader and runtime are built.
     Idempotent - re-registration of the same type would raise, so we skip
-    silently if a type is already registered (helpful for hot-reload tests).
+    silently if it is already registered (helpful for hot-reload tests).
     """
-    for type_, handler in (
-        (JOB_TYPE_UPLOAD, _install_from_upload(loader)),
-        (JOB_TYPE_GIT, _install_from_git(loader)),
-        (JOB_TYPE_REGISTRY, _install_from_registry(loader)),
-    ):
-        if type_ in runtime._handlers:  # type: ignore[attr-defined]
-            continue
-        runtime.register(type_, handler)
+    if JOB_TYPE_UPLOAD in runtime._handlers:  # type: ignore[attr-defined]
+        return
+    runtime.register(JOB_TYPE_UPLOAD, _install_from_upload(loader))
 
 
 # ---------------------------------------------------------------------------
@@ -106,147 +93,6 @@ def _install_from_upload(loader: ModuleLoader):
             archive_path.unlink(missing_ok=True)
 
     return handler
-
-
-def _install_from_git(loader: ModuleLoader):
-    async def handler(handle: JobHandle) -> None:
-        url: str = handle.payload["url"]
-        ref: str | None = handle.payload.get("ref")
-        await handle.progress(5, 100, stage="cloning", message=f"Cloning {url}")
-        staging = Path(tempfile.mkdtemp(prefix="ff-install-git-"))
-        try:
-            cmd = ["git", "clone", "--depth", "1"]
-            if ref:
-                cmd += ["--branch", ref]
-            cmd += [url, str(staging)]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            out, _ = await proc.communicate()
-            if proc.returncode != 0:
-                raise RuntimeError(
-                    f"git clone failed (exit {proc.returncode}): "
-                    f"{out.decode('utf-8', errors='replace')[:500]}"
-                )
-            # The clone leaves a .git directory we don't want - strip it.
-            shutil.rmtree(staging / ".git", ignore_errors=True)
-            await handle.progress(35, 100, stage="validating", message="Validating manifest")
-            folder, manifest = await _stage_validated_upload(loader, handle.user_id, staging)
-            await handle.progress(60, 100, stage="installing", message="Resolving dependencies")
-            await loader.load_one(folder, manifest)
-            await _record_owner(handle.user_id, manifest.id, "git")
-            await handle.progress(100, 100, stage="ready", message="Module installed")
-            handle.payload["module_id"] = manifest.id
-            await handle.bus.publish(
-                "module.installed",
-                {
-                    "id": manifest.id,
-                    "source": "git",
-                    "url": url,
-                    "ref": ref,
-                    "user_id": handle.user_id,
-                },
-            )
-        finally:
-            shutil.rmtree(staging, ignore_errors=True)
-
-    return handler
-
-
-def _install_from_registry(loader: ModuleLoader):
-    async def handler(handle: JobHandle) -> None:
-        source: str = handle.payload["source"]
-        pkg: str = handle.payload["id"]
-        version: str | None = handle.payload.get("version")
-
-        if source != "pypi":
-            # The npm path would mean a JS-only module without a Python
-            # entry point - the loader has no place to bind it today, so
-            # surface that clearly rather than silently no-op.
-            raise NotImplementedError(
-                f"Installing from {source!r} is not supported yet. Use PyPI or the Upload / Git tabs."
-            )
-
-        spec = f"{pkg}=={version}" if version else pkg
-        await handle.progress(5, 100, stage="installing", message=f"pip install {spec}")
-        rc, out = await _run(["uv", "pip", "install", "--no-cache", spec])
-        if rc != 0:
-            raise RuntimeError(f"uv pip install failed (exit {rc}): {out[:800]}")
-
-        await handle.progress(60, 100, stage="discovering", message="Scanning entry points")
-        # Re-scan for the new entry point. We can't ask `discover_entry_points()`
-        # naively because importlib.metadata caches its view of the installed
-        # set per-process; clear the cache so the new package shows up.
-        from importlib import metadata as importlib_metadata
-
-        from mate.api.modules.discovery import (
-            ENTRY_POINT_GROUP,
-            discover_entry_points,
-        )
-
-        # In Python 3.12+ entry_points() builds from a freshly-read cache on
-        # every call, but the underlying Distribution objects are memoised.
-        # Force a fresh read by clearing the modulewide _ep_cache attribute
-        # if present (best-effort; the public API is stable across calls).
-        cache = getattr(importlib_metadata, "_ep_cache", None)
-        if cache is not None:
-            cache.clear()
-
-        candidates = discover_entry_points()
-        # Pick the entry whose installed Distribution name matches our spec.
-        new_modules = [d for d in candidates if _matches_pkg(d, pkg)]
-        if not new_modules:
-            raise RuntimeError(
-                f"Installed {spec!r} but it does not declare a {ENTRY_POINT_GROUP!r} "
-                "entry point pointing to a package with a manifest.yaml."
-            )
-
-        await handle.progress(80, 100, stage="loading", message="Mounting module")
-        loaded_ids: list[str] = []
-        for d in new_modules:
-            await loader.load_one(d.folder, d.manifest)
-            await _record_owner(handle.user_id, d.id, "registry")
-            loaded_ids.append(d.id)
-
-        await handle.progress(100, 100, stage="ready", message="Module installed")
-        handle.payload["module_id"] = loaded_ids[0] if len(loaded_ids) == 1 else None
-        handle.payload["module_ids"] = loaded_ids
-        await handle.bus.publish(
-            "module.installed",
-            {
-                "id": loaded_ids[0] if loaded_ids else None,
-                "ids": loaded_ids,
-                "source": "pypi",
-                "package": pkg,
-                "user_id": handle.user_id,
-            },
-        )
-
-    return handler
-
-
-def _matches_pkg(d, pkg: str) -> bool:
-    """Cheap heuristic: an entry point installed by `pip install foo-bar`
-    typically lives under a package named `foo_bar` or `foo-bar`. Normalise
-    both sides to match either form.
-    """
-    norm = pkg.replace("-", "_").lower()
-    # We don't have the distribution name on DiscoveredModule, so compare the
-    # folder name and the manifest id against the requested pkg.
-    candidates = {d.id.lower(), d.folder.name.lower()}
-    return any(c.replace("-", "_") == norm for c in candidates)
-
-
-async def _run(cmd: list[str]) -> tuple[int, str]:
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    out, _ = await proc.communicate()
-    return proc.returncode or 0, out.decode("utf-8", errors="replace")
 
 
 # ---------------------------------------------------------------------------

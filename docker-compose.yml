@@ -60,6 +60,9 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     container_name: mate-api
+    # PID-1 init (tini) so SIGTERM is forwarded to uvicorn and orphaned
+    # grandchildren (offload/forkserver workers) are reaped instead of zombied.
+    init: true
     volumes:
       # Persistent state. Back up by copying ./data.
       - ./data:/app/data

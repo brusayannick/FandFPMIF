@@ -59,7 +59,7 @@ function Header({ onNewFolder }: { onNewFolder: () => void }) {
         </Button>
 
         <Button asChild className="gap-2 cursor-pointer">
-          <Link href="/processes/import">
+          <Link href="/processes/import" data-tour="import-log">
             <Upload className="h-4 w-4" />
             Import event log
           </Link>

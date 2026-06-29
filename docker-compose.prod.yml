@@ -74,6 +74,13 @@ services:
 
   api:
     environment:
+      # Force production mode on the VM. The deployed `.env` (secrets) may still
+      # carry `env=dev`, and pydantic-settings would read it from the in-image
+      # `/app/.env` – an OS env var outranks the dotenv file, so this pins prod
+      # regardless. `env=dev` starts the modules/ hot-reload watchdog, which on a
+      # prod box reloads modules mid-job and can self-loop on build-artifact
+      # writes (`.installed-hash`, `__pycache__`). Never run the VM in dev.
+      ENV: prod
       CORS_ORIGINS: '["https://pm-mate.uni-muenster.de"]'
       KEYCLOAK_ISSUER: https://pm-mate.uni-muenster.de/auth/realms/flows-funds
       # Internal (container -> container) fetch of the signing keys. Note the

@@ -1,13 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Loader2, Lock, ShieldAlert, Unlock } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChevronDown,
+  HardDriveUpload,
+  Loader2,
+  Lock,
+  ShieldAlert,
+  Trash2,
+  Unlock,
+} from "lucide-react";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -18,10 +28,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   ModuleConfigForm,
   type ConfigSchema,
 } from "@/components/modules/module-config-form";
 import { AiSettingsEditor } from "@/components/ai/ai-settings-editor";
+import { UploadProgress } from "@/components/settings/upload-progress";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import type { ControlItem } from "@/lib/api-types";
@@ -32,8 +54,19 @@ import {
   useUpdateAdminAiConfig,
 } from "@/lib/ai-queries";
 import { useControlItems, useSetControl } from "@/lib/control-queries";
-import { useModuleModels } from "@/lib/queries";
+import {
+  useDeleteModuleModel,
+  useModuleModels,
+  useUploadModuleModel,
+} from "@/lib/queries";
 import { toastError } from "@/lib/toast";
+
+function formatBytes(bytes: number): string {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
 
 export default function AdminControlsPage() {
   const settings = useControlItems("setting");
@@ -55,6 +88,17 @@ export default function AdminControlsPage() {
     );
   }
 
+  // The CV4CDD detection model is a `setting`-scope control, but it belongs with
+  // the module (upload + pin + lock) rather than buried in the generic server
+  // settings list. Pull it out here and render it inside the Modules section,
+  // attached to the cv4cdd card.
+  const settingItems = settings.data?.items ?? [];
+  const modelSetting = settingItems.find((i) => i.key === "cv4cdd.model");
+  const serverSettings = settingItems.filter((i) => i.key !== "cv4cdd.model");
+
+  const moduleItems = modules.data?.items ?? [];
+  const hasCv4cdd = moduleItems.some((i) => i.key === "cv4cdd");
+
   return (
     <div className="space-y-6">
       <section className="space-y-3">
@@ -70,9 +114,7 @@ export default function AdminControlsPage() {
         ) : settings.isError ? (
           <p className="text-xs text-destructive">Failed to load settings.</p>
         ) : (
-          (settings.data?.items ?? []).map((item) => (
-            <SettingRow key={item.key} item={item} />
-          ))
+          serverSettings.map((item) => <SettingRow key={item.key} item={item} />)
         )}
       </section>
 
@@ -88,12 +130,25 @@ export default function AdminControlsPage() {
           <Skeleton className="h-40 w-full" />
         ) : modules.isError ? (
           <p className="text-xs text-destructive">Failed to load modules.</p>
-        ) : (modules.data?.items ?? []).length === 0 ? (
-          <p className="text-xs text-muted-foreground">No modules installed.</p>
         ) : (
-          (modules.data?.items ?? []).map((item) => (
-            <ModuleRow key={item.key} item={item} />
-          ))
+          <>
+            {moduleItems.map((item) =>
+              item.key === "cv4cdd" ? (
+                <div key={item.key} className="space-y-3">
+                  {modelSetting && <Cv4cddModelManager item={modelSetting} />}
+                  <ModuleRow item={item} />
+                </div>
+              ) : (
+                <ModuleRow key={item.key} item={item} />
+              ),
+            )}
+            {/* cv4cdd installed by nobody yet, but the shared-model pin still
+                lives here so an admin can manage it once it's installed. */}
+            {!hasCv4cdd && modelSetting && <Cv4cddModelManager item={modelSetting} />}
+            {moduleItems.length === 0 && !modelSetting && (
+              <p className="text-xs text-muted-foreground">No modules installed.</p>
+            )}
+          </>
         )}
       </section>
     </div>
@@ -250,8 +305,6 @@ function SettingRow({ item }: { item: ControlItem }) {
         <WorkerConcurrencyEditor item={item} />
       ) : item.key === "analytics.config" ? (
         <AnalyticsEditor item={item} />
-      ) : item.key === "cv4cdd.model" ? (
-        <Cv4cddModelEditor item={item} />
       ) : (
         <p className="text-xs text-muted-foreground">No editor for this setting.</p>
       )}
@@ -371,16 +424,43 @@ function AnalyticsEditor({ item }: { item: ControlItem }) {
   );
 }
 
-function Cv4cddModelEditor({ item }: { item: ControlItem }) {
+/** Full CV4CDD detection-model manager: upload (with progress), pick the shared
+ *  model, lock it platform-wide. Lives in the Modules section attached to the
+ *  cv4cdd card rather than in the generic server-settings list. The lock toggle
+ *  + pin write the `cv4cdd.model` setting control; uploads/deletes hit the
+ *  module's own `/models` route (platform-shared storage). */
+function Cv4cddModelManager({ item }: { item: ControlItem }) {
   const set = useSetControl("setting");
-  // /models is the module's own route (gated on cv4cdd being installed). Lists
-  // the platform-shared models so the admin can pick which one to pin.
   const modelsQ = useModuleModels("cv4cdd");
-  const initial = typeof item.admin_value === "string" ? item.admin_value : "";
-  const [value, setValue] = useState(initial);
-  useEffect(() => setValue(initial), [initial]);
+  const upload = useUploadModuleModel("cv4cdd");
+  const remove = useDeleteModuleModel("cv4cdd");
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const onSave = async () => {
+  const locked = item.control_mode === "admin";
+  const pinned = typeof item.admin_value === "string" ? item.admin_value : "";
+  const [value, setValue] = useState(pinned);
+  useEffect(() => setValue(pinned), [pinned]);
+
+  const onToggleLock = async (next: boolean) => {
+    try {
+      await set.mutateAsync({
+        key: "cv4cdd.model",
+        control_mode: next ? "admin" : "user",
+        // Locking keeps the current pin (or the in-progress selection); the
+        // picker + Apply below is how the admin changes it.
+        admin_value: next ? value || pinned || undefined : undefined,
+      });
+      toast.success(
+        next
+          ? "Detection model locked for all users"
+          : "Detection model unlocked – each user picks their own",
+      );
+    } catch (e) {
+      toastError(`Failed: ${(e as Error).message}`);
+    }
+  };
+
+  const onApply = async () => {
     try {
       await set.mutateAsync({ key: "cv4cdd.model", control_mode: "admin", admin_value: value });
       toast.success("Shared detection model pinned");
@@ -389,54 +469,193 @@ function Cv4cddModelEditor({ item }: { item: ControlItem }) {
     }
   };
 
-  if (modelsQ.isLoading) return <Skeleton className="h-20 w-full" />;
-  if (modelsQ.isError) {
-    const notInstalled = modelsQ.error instanceof ApiError && modelsQ.error.status === 404;
-    return (
-      <p className="text-xs text-muted-foreground">
-        {notInstalled
-          ? "Install the CV4CDD module to manage its shared model."
-          : "Failed to load CV4CDD models."}
-      </p>
-    );
-  }
+  const onFilePicked = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const res = await upload.mutateAsync(file);
+      toast.success(`Installed model "${res.name}"`);
+      // Nothing pinned yet? Preselect the first upload so Apply is one click.
+      if (!value) setValue(res.name);
+    } catch (e) {
+      toastError(`Upload failed: ${(e as Error).message}`);
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
 
+  const onDelete = async (name: string) => {
+    try {
+      await remove.mutateAsync(name);
+      toast.success(`Deleted model "${name}"`);
+    } catch (e) {
+      toastError(`Delete failed: ${(e as Error).message}`);
+    }
+  };
+
+  const notInstalled =
+    modelsQ.isError && modelsQ.error instanceof ApiError && modelsQ.error.status === 404;
   const models = modelsQ.data?.models ?? [];
-  if (models.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        No CV4CDD models installed yet. Upload one on the module&apos;s settings page first.
-      </p>
-    );
-  }
 
   return (
-    <div className="flex flex-wrap items-end gap-3">
-      <div className="w-72 max-w-full space-y-1.5">
-        <Label htmlFor="cv4cdd-model">Model</Label>
-        <Select value={value || undefined} onValueChange={setValue}>
-          <SelectTrigger id="cv4cdd-model" className="w-full font-mono text-xs">
-            <SelectValue placeholder="Select a model" />
-          </SelectTrigger>
-          <SelectContent>
-            {models.map((m) => (
-              <SelectItem key={m.name} value={m.name} className="font-mono text-xs">
-                {m.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <Button
-        size="sm"
-        onClick={onSave}
-        disabled={set.isPending || !value}
-        className="cursor-pointer gap-2"
-      >
-        {set.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-        Apply
-      </Button>
-    </div>
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              {locked ? (
+                <Lock className="h-3.5 w-3.5 text-primary" />
+              ) : (
+                <Unlock className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+              CV4CDD detection model
+            </CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Upload and pin one shared detection model for every user. Unlocked,
+              each user picks their own on the module&apos;s settings page.
+            </p>
+          </div>
+          <div
+            className="flex shrink-0 items-center gap-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="text-xs text-muted-foreground">
+              {locked ? "Admin-controlled" : "Per-user"}
+            </span>
+            <Switch checked={locked} onCheckedChange={onToggleLock} disabled={set.isPending} />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {notInstalled ? (
+          <p className="text-xs text-muted-foreground">
+            Install the CV4CDD module to manage its shared model.
+          </p>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".tar.zst"
+                  className="hidden"
+                  onChange={(e) => onFilePicked(e.target.files?.[0])}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="cursor-pointer gap-2"
+                  disabled={upload.isPending}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  {upload.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <HardDriveUpload className="h-3.5 w-3.5" />
+                  )}
+                  {upload.isPending ? "Uploading…" : "Upload model"}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  Accepts <code className="rounded bg-muted px-1 py-0.5">.tar.zst</code> ·
+                  shared platform-wide
+                </span>
+              </div>
+              <UploadProgress isPending={upload.isPending} progress={upload.progress} />
+            </div>
+
+            {modelsQ.isLoading ? (
+              <Skeleton className="h-20 w-full" />
+            ) : models.length === 0 ? (
+              <p className="rounded-md border border-dashed py-6 text-center text-xs text-muted-foreground">
+                No models installed yet. Upload a .tar.zst archive to get started.
+              </p>
+            ) : (
+              <RadioGroup
+                value={value || undefined}
+                onValueChange={setValue}
+                disabled={!locked}
+                className="gap-2"
+              >
+                {models.map((m) => (
+                  <div
+                    key={m.name}
+                    className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+                  >
+                    <div className="flex items-center gap-3">
+                      <RadioGroupItem id={`pin-${m.name}`} value={m.name} disabled={!locked} />
+                      <Label
+                        htmlFor={`pin-${m.name}`}
+                        className="cursor-pointer font-mono text-xs"
+                      >
+                        {m.name}
+                      </Label>
+                      {m.active && (
+                        <Badge variant="secondary" className="h-5 px-1.5 py-0 text-[10px]">
+                          in use
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="tabular-nums text-[11px] text-muted-foreground">
+                        {formatBytes(m.size_bytes)}
+                      </span>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 cursor-pointer text-muted-foreground hover:text-destructive"
+                            disabled={remove.isPending}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete model “{m.name}”?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This removes the model from disk for{" "}
+                              <strong>every account on the platform</strong>. Anyone
+                              currently using it will need to pick another model.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => onDelete(m.name)}
+                              className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </div>
+                ))}
+              </RadioGroup>
+            )}
+
+            {locked && models.length > 0 && (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">
+                  Selected model applies to every user.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={onApply}
+                  disabled={set.isPending || !value || value === pinned}
+                  className="cursor-pointer gap-2"
+                >
+                  {set.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Apply
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

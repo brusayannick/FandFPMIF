@@ -69,11 +69,14 @@ export function useDiscoveryPetriAlphaPlus(logId: string) {
   });
 }
 
-export function useDiscoveryPetriIlp(logId: string) {
+// ILP is opt-in: it never runs on mount alongside the other miners. The LP
+// solve per causal relation is heavy (and has OOM-crashed when run eagerly),
+// so the caller passes `enabled` only once the user explicitly selects it.
+export function useDiscoveryPetriIlp(logId: string, enabled: boolean) {
   return useQuery<PetriNetData>({
     queryKey: ["modules", "discovery", "petri-ilp", logId],
     queryFn: () => api<PetriNetData>(discoveryUrl("/petri-net/ilp", logId)),
-    enabled: Boolean(logId),
+    enabled: Boolean(logId) && enabled,
     staleTime: STALE_TIME,
   });
 }

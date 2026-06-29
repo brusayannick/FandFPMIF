@@ -826,6 +826,7 @@ function LogRow({
             style={style}
             {...sortable.attributes}
             {...sortable.listeners}
+            data-log-id={row.id}
             className={cn(
               "grid grid-cols-[1fr_70px_90px_80px_180px_120px_60px_40px] gap-2 items-center px-4 py-2 text-sm hover:bg-accent/50",
               ready && "cursor-pointer",

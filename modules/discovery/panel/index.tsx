@@ -101,6 +101,7 @@ function DiscoveryPanelContent({ logId }: { logId: string }) {
         <div
           role="tablist"
           aria-label="Discovery visualisations"
+          data-tour="discovery-views"
           className="inline-flex flex-1 max-w-3xl items-center gap-1 rounded-lg bg-muted p-[3px]"
         >
           {VIEWS.map((v) => {
@@ -186,7 +187,10 @@ function DiscoveryPanelContent({ logId }: { logId: string }) {
 
 function CanvasFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative h-[640px] w-full overflow-hidden rounded-xl border bg-card">
+    <div
+      data-tour="discovery-canvas"
+      className="relative h-[640px] w-full overflow-hidden rounded-xl border bg-card"
+    >
       {children}
     </div>
   );
@@ -258,7 +262,10 @@ function DfgTab({ logId }: { logId: string }) {
 
   return (
     <>
-      <div className="space-y-3 rounded-lg border bg-muted/40 px-4 py-3 text-xs">
+      <div
+        data-tour="discovery-filters"
+        className="space-y-3 rounded-lg border bg-muted/40 px-4 py-3 text-xs"
+      >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-3">
           <RankSlider
             label="Activities"
@@ -439,7 +446,8 @@ function PetriTab({ logId }: { logId: string }) {
   const alphaPlus = useDiscoveryPetriAlphaPlus(logId);
   const inductive = useDiscoveryPetriInductive(logId);
   const imf = useDiscoveryPetriImf(logId, noiseThreshold);
-  const ilp = useDiscoveryPetriIlp(logId);
+  // Opt-in: only fetch (and thus compute) ILP once the user selects it.
+  const ilp = useDiscoveryPetriIlp(logId, algo === "ilp");
 
   const q = algo === "alpha" ? alpha
     : algo === "alpha-plus" ? alphaPlus
@@ -490,7 +498,7 @@ function PetriFilterBar({
           <SelectContent>
             <SelectItem value="inductive">Inductive Miner</SelectItem>
             <SelectItem value="imf">IM Infrequent</SelectItem>
-            <SelectItem value="ilp">ILP Miner</SelectItem>
+            <SelectItem value="ilp">ILP Miner (heavy, on-demand)</SelectItem>
             <SelectItem value="alpha">Alpha Miner</SelectItem>
             <SelectItem value="alpha-plus">Alpha+ Miner</SelectItem>
           </SelectContent>

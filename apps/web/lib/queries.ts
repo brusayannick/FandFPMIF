@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, apiUpload } from "@/lib/api";
 import {
   queryKeys,
   eventLogsListPath,
@@ -664,21 +665,26 @@ export function useModuleModels(moduleId: string, enabled = true) {
   });
 }
 
-/** Upload a model archive (multipart). Shared across the whole platform. */
+/** Upload a model archive (multipart). Shared across the whole platform.
+ *
+ * Exposes `progress` (0–100) for the upload-bytes phase via XHR. It holds at
+ * 100 while the server extracts the ~0.5 GB archive, then resets to `null` when
+ * the request settles – callers render an indeterminate "installing" state for
+ * that tail (`isPending && (progress === null || progress >= 100)`). */
 export function useUploadModuleModel(moduleId: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (file: File) => {
-      const body = new FormData();
-      body.append("file", file);
-      return api<ModuleModel>(`/api/v1/modules/${moduleId}/models`, {
-        method: "POST",
-        body,
-      });
-    },
+  const [progress, setProgress] = useState<number | null>(null);
+  const mutation = useMutation({
+    mutationFn: (file: File) =>
+      apiUpload<ModuleModel>(`/api/v1/modules/${moduleId}/models`, file, {
+        onProgress: (pct) => setProgress(Math.round(pct)),
+      }),
+    onMutate: () => setProgress(0),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: queryKeys.moduleModels(moduleId) }),
+    onSettled: () => setProgress(null),
   });
+  return Object.assign(mutation, { progress });
 }
 
 /** Delete an installed model – removes it for every account on the platform. */

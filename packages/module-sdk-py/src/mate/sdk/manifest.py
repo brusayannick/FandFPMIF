@@ -20,6 +20,12 @@ ModuleCategory = Literal[
     "foundation", "attribute", "external_input", "advanced", "comparison", "other"
 ]
 IsolationMode = Literal["in_process", "subprocess"]
+# How an `in_process` module's @job / @on_event handlers execute. `thread` (the
+# default) runs them in the API's thread pool - fast, but a sync handler deep in
+# a native CPU call can't be cancelled (a thread can't be killed). `worker` runs
+# each job in a throwaway killable child process so cancel/shutdown SIGKILL it
+# and its whole tree. Ignored for `subprocess` isolation (already a worker).
+ExecutionMode = Literal["thread", "worker"]
 
 
 class EventLogRequirements(BaseModel):
@@ -50,13 +56,17 @@ class DependenciesPython(BaseModel):
     packages: list[str] = Field(default_factory=list)
     inherit: list[str] = Field(default_factory=list)
     isolation: IsolationMode = "in_process"
+    execution: ExecutionMode = "thread"
 
     model_config = ConfigDict(populate_by_name=True)
 
     @model_validator(mode="after")
     def _no_inherit_conflict(self) -> Self:
         # `pandas` cannot appear in both `packages` and `inherit`.
-        pkg_names = {p.split(">=", 1)[0].split("==", 1)[0].split("<", 1)[0].split("~", 1)[0].strip().lower() for p in self.packages}
+        pkg_names = {
+            p.split(">=", 1)[0].split("==", 1)[0].split("<", 1)[0].split("~", 1)[0].strip().lower()
+            for p in self.packages
+        }
         for name in self.inherit:
             if name.lower() in pkg_names:
                 raise ModuleManifestError(

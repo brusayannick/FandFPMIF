@@ -8,6 +8,7 @@ import { JobsProvider } from "@/components/jobs/jobs-provider";
 import { JobsDock } from "@/components/jobs/jobs-dock";
 import { JobsDrawer } from "@/components/jobs/jobs-drawer";
 import { OnboardingOverlay } from "@/components/onboarding";
+import { TourOverlay } from "@/components/tour/tour-overlay";
 import { MateAiSidebar } from "@/components/mate-ai/mate-ai-sidebar";
 import { RouteProgress } from "@/components/route-progress";
 import { SessionGuard } from "@/components/session-guard";
@@ -44,6 +45,7 @@ export default async function PlatformLayout({
       <JobsDock />
       <JobsDrawer />
       <OnboardingOverlay />
+      <TourOverlay />
     </div>
   );
 }

@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UploadProgress } from "@/components/settings/upload-progress";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import {
@@ -126,32 +127,35 @@ export function ModelStoreCard({
           </div>
         )}
 
-        <div className="flex items-center gap-3">
-          <input
-            ref={fileRef}
-            type="file"
-            accept={accept}
-            className="hidden"
-            onChange={(e) => onFilePicked(e.target.files?.[0])}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            className="cursor-pointer gap-2"
-            disabled={upload.isPending}
-            onClick={() => fileRef.current?.click()}
-          >
-            {upload.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <HardDriveUpload className="h-3.5 w-3.5" />
-            )}
-            {upload.isPending ? "Uploading…" : "Upload model"}
-          </Button>
-          <span className="text-xs text-muted-foreground">
-            Accepts <code className="rounded bg-muted px-1 py-0.5">{accept}</code> · shared
-            platform-wide
-          </span>
+        <div className="space-y-2">
+          <div className="flex items-center gap-3">
+            <input
+              ref={fileRef}
+              type="file"
+              accept={accept}
+              className="hidden"
+              onChange={(e) => onFilePicked(e.target.files?.[0])}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="cursor-pointer gap-2"
+              disabled={upload.isPending}
+              onClick={() => fileRef.current?.click()}
+            >
+              {upload.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <HardDriveUpload className="h-3.5 w-3.5" />
+              )}
+              {upload.isPending ? "Uploading…" : "Upload model"}
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Accepts <code className="rounded bg-muted px-1 py-0.5">{accept}</code> · shared
+              platform-wide
+            </span>
+          </div>
+          <UploadProgress isPending={upload.isPending} progress={upload.progress} />
         </div>
 
         {modelsQ.isLoading ? (

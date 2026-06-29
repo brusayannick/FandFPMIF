@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { useOnboarding } from "@/lib/stores/onboarding";
 import { useOnboardingState, useUpdateOnboarding } from "@/lib/onboarding-queries";
+import { useTour } from "@/lib/stores/tour";
 import { useAnalytics } from "@/lib/stores/analytics";
 import { useUpdateAnalyticsConfig, useAnalyticsConfig } from "@/lib/analytics-queries";
 
@@ -27,6 +28,7 @@ export function OnboardingOverlay() {
   const resolvePrompt = useAnalytics((s) => s.resolvePrompt);
   const cfgQuery = useAnalyticsConfig();
   const updateMut = useUpdateAnalyticsConfig();
+  const startTour = useTour((s) => s.start);
 
   const [step, setStep] = useState(0);
   const [uploadedLogId, setUploadedLogId] = useState<string | null>(null);
@@ -76,6 +78,9 @@ export function OnboardingOverlay() {
     if (uploadedLogId) {
       router.push(`/processes?focus=${uploadedLogId}`);
     }
+    // Chain straight into the interactive product tour the first time the wizard
+    // is finished (skippable, and replayable later from Settings / the topbar).
+    if (!onboardingQuery.data?.tour_completed) startTour({ auto: true });
   };
 
   const onNext = () => {

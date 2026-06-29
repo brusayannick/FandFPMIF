@@ -3,7 +3,9 @@
 import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Search, Sparkles } from "lucide-react";
+import { Compass, Search, Sparkles } from "lucide-react";
+
+import { useTour } from "@/lib/stores/tour";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
@@ -76,6 +78,7 @@ export function Topbar() {
   const { data: logs } = useEventLogs();
   const { data: dashboards } = useDashboards();
   const [open, setOpen] = useState(false);
+  const startTour = useTour((s) => s.start);
 
   const logNames = new Map(logs?.map((log) => [log.id, log.name]) ?? []);
   const dashboardNames = new Map(dashboards?.map((d) => [d.id, d.name]) ?? []);
@@ -116,6 +119,18 @@ export function Topbar() {
       </Breadcrumb>
 
       <MateTopbarButton />
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="cursor-pointer gap-1.5 text-muted-foreground"
+        onClick={() => startTour()}
+        aria-label="Start product tour"
+      >
+        <Compass className="h-3.5 w-3.5" />
+        <span className="hidden lg:inline">Tour</span>
+      </Button>
 
       <Button
         type="button"

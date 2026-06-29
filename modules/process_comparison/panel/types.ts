@@ -87,3 +87,38 @@ export interface LogSummary {
   cases_count: number | null;
   events_count: number | null;
 }
+
+// -- /summary -------------------------------------------------------------
+
+export interface SummaryKpi {
+  key: string;
+  label: string;
+  unit: "count" | "seconds";
+  value_a: number;
+  value_b: number;
+  delta: number;
+  /** null when the baseline value is 0 (no meaningful percentage). */
+  pct_delta: number | null;
+  /** true for throughput: a negative delta is an improvement. */
+  lower_is_better: boolean;
+}
+
+export interface SummaryDeltaData {
+  kind: "summary_delta";
+  kpis: SummaryKpi[];
+  baseline_log_id: string;
+  other_log_id: string;
+}
+
+// -- /bpmn ----------------------------------------------------------------
+
+export interface BpmnDiffData {
+  kind: "bpmn_diff";
+  xml_a: string;
+  xml_b: string;
+  /** Per-activity diff (same shape as the DFG nodes) so the BPMN overlay can
+   *  colour each task by status / delta. */
+  activities: DfgDiffNode[];
+  baseline_log_id: string;
+  other_log_id: string;
+}

@@ -17,6 +17,9 @@ import { StorageGauge } from "@/components/settings/storage-gauge";
 import { WorkerConcurrency } from "@/components/settings/worker-concurrency";
 import { useOnboardingState, useUpdateOnboarding } from "@/lib/onboarding-queries";
 import type { ExperienceLevel } from "@/lib/stores/onboarding";
+import { Button } from "@/components/ui/button";
+import { Compass } from "lucide-react";
+import { useTour } from "@/lib/stores/tour";
 
 export default function GeneralSettingsPage() {
   const { theme = "system", setTheme } = useTheme();
@@ -38,6 +41,7 @@ export default function GeneralSettingsPage() {
 
   const onboardingQuery = useOnboardingState();
   const updateOnboarding = useUpdateOnboarding();
+  const startTour = useTour((s) => s.start);
   const experienceLevel = onboardingQuery.data?.experience_level ?? null;
   const setExperienceLevel = (level: ExperienceLevel) => {
     if (!onboardingQuery.data) return;
@@ -74,6 +78,27 @@ export default function GeneralSettingsPage() {
               ))}
             </RadioGroup>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Product tour</CardTitle>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between gap-4">
+          <p className="text-xs text-muted-foreground">
+            Replay the interactive walkthrough of process discovery — the
+            platform&apos;s core feature. It guides you from importing a log to
+            reading your mined process map.
+          </p>
+          <Button
+            variant="outline"
+            className="shrink-0 cursor-pointer gap-2"
+            onClick={() => startTour()}
+          >
+            <Compass className="h-4 w-4" />
+            Start tour
+          </Button>
         </CardContent>
       </Card>
 

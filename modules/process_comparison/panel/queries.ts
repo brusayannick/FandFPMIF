@@ -5,9 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type {
   ActivityDeltasData,
+  BpmnDiffData,
   DfgDiffData,
   LogSummary,
   SimilarityData,
+  SummaryDeltaData,
   VariantDiffData,
 } from "./types";
 
@@ -42,6 +44,24 @@ export function useDfgOverlay(logId: string, other: string | null) {
   return useQuery<DfgDiffData>({
     queryKey: ["modules", "process_comparison", "dfg-overlay", logId, other],
     queryFn: () => api<DfgDiffData>(url("/dfg-overlay", { log_id: logId, other: other ?? "" })),
+    enabled: Boolean(logId) && Boolean(other),
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useSummaryDelta(logId: string, other: string | null) {
+  return useQuery<SummaryDeltaData>({
+    queryKey: ["modules", "process_comparison", "summary", logId, other],
+    queryFn: () => api<SummaryDeltaData>(url("/summary", { log_id: logId, other: other ?? "" })),
+    enabled: Boolean(logId) && Boolean(other),
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useBpmnDiff(logId: string, other: string | null) {
+  return useQuery<BpmnDiffData>({
+    queryKey: ["modules", "process_comparison", "bpmn", logId, other],
+    queryFn: () => api<BpmnDiffData>(url("/bpmn", { log_id: logId, other: other ?? "" })),
     enabled: Boolean(logId) && Boolean(other),
     staleTime: STALE_TIME,
   });

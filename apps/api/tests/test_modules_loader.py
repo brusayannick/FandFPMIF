@@ -305,29 +305,6 @@ async def test_module_install_upload_rejects_bad_suffix(
 
 
 @pytest.mark.asyncio
-async def test_module_install_registry_npm_rejected(
-    client_with_sample_mod: AsyncClient,
-) -> None:
-    """npm source has no Python entry point to bind to - the job must surface
-    a clear error rather than silently no-op."""
-    resp = await client_with_sample_mod.post(
-        "/api/v1/modules/install/registry",
-        json={"source": "npm", "id": "@scope/pkg"},
-    )
-    assert resp.status_code == 202
-    job_id = resp.json()["job_id"]
-    for _ in range(30):
-        d = await client_with_sample_mod.get(f"/api/v1/jobs/{job_id}")
-        if d.status_code == 200 and d.json()["status"] in {"completed", "failed"}:
-            break
-        await asyncio.sleep(0.1)
-    body = d.json()
-    assert body["status"] == "failed"
-    msg = (body.get("message") or "") + (body.get("error") or "")
-    assert "npm" in msg.lower()
-
-
-@pytest.mark.asyncio
 async def test_entry_point_discovery(client_with_sample_mod: AsyncClient) -> None:
     """Register an in-process entry point pointing at a fake package; verify
     the discovery layer picks it up. We don't `pip install` anything here -

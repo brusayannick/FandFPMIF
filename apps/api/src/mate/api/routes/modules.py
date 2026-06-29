@@ -24,11 +24,7 @@ from mate.api.db.session import SessionDep
 from mate.api.jobs.runtime import get_job_runtime
 from mate.api.modules import get_module_loader
 from mate.api.modules.availability import Availability
-from mate.api.modules.install_jobs import (
-    JOB_TYPE_GIT,
-    JOB_TYPE_REGISTRY,
-    JOB_TYPE_UPLOAD,
-)
+from mate.api.modules.install_jobs import JOB_TYPE_UPLOAD
 from mate.api.modules.installer import remove_module_artifacts
 from mate.api.modules.installs import (
     owner_count,
@@ -345,17 +341,6 @@ async def put_config(
     return payload
 
 
-class GitInstallPayload(BaseModel):
-    url: str = Field(..., min_length=1)
-    ref: str | None = None
-
-
-class RegistryInstallPayload(BaseModel):
-    source: str = Field(..., pattern="^(pypi|npm)$")
-    id: str = Field(..., min_length=1)
-    version: str | None = None
-
-
 class InstallJobResponse(BaseModel):
     job_id: str
 
@@ -370,7 +355,7 @@ def _has_allowed_upload_suffix(name: str) -> bool:
 
 @router.post("/install", response_model=InstallJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def install_from_upload(
-    user: CurrentUserDep, file: UploadFile = File(...)
+    user: CurrentUserDep, file: Annotated[UploadFile, File()]
 ) -> InstallJobResponse:
     """Accept a zip / tar.gz, persist it to a staging dir, and submit a job
     that unpacks and registers the module. Returns the job id so the dock can
@@ -402,46 +387,6 @@ async def install_from_upload(
         title=f"Install module - {filename}",
         subtitle="Unpacking and registering",
         payload={"archive_path": str(archive_path), "original_name": filename},
-    )
-    return InstallJobResponse(job_id=job_id)
-
-
-@router.post(
-    "/install/git", response_model=InstallJobResponse, status_code=status.HTTP_202_ACCEPTED
-)
-async def install_from_git(payload: GitInstallPayload, user: CurrentUserDep) -> InstallJobResponse:
-    runtime = get_job_runtime()
-    title = f"Install module - {payload.url.rsplit('/', 1)[-1]}"
-    if payload.ref:
-        title += f" ({payload.ref})"
-    job_id = await runtime.submit(
-        type_=JOB_TYPE_GIT,
-        user_id=user.id,
-        title=title,
-        subtitle="Cloning and registering",
-        payload={"url": payload.url, "ref": payload.ref},
-    )
-    return InstallJobResponse(job_id=job_id)
-
-
-@router.post(
-    "/install/registry",
-    response_model=InstallJobResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def install_from_registry(
-    payload: RegistryInstallPayload, user: CurrentUserDep
-) -> InstallJobResponse:
-    runtime = get_job_runtime()
-    title = f"Install module - {payload.source}:{payload.id}"
-    if payload.version:
-        title += f"@{payload.version}"
-    job_id = await runtime.submit(
-        type_=JOB_TYPE_REGISTRY,
-        user_id=user.id,
-        title=title,
-        subtitle="Fetching from registry",
-        payload={"source": payload.source, "id": payload.id, "version": payload.version},
     )
     return InstallJobResponse(job_id=job_id)
 

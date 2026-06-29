@@ -1,0 +1,150 @@
+id: conformance
+name: Conformance Checking
+version: 0.1.0
+category: advanced
+description: >-
+  Upload a reference BPMN model and check your event log against it. Computes
+  fitness, precision and per-activity deviations with pm4py (token-based replay
+  by default, alignments optional) and paints the deviations onto the diagram.
+keywords: ["conformance", "conformance checking", "fitness", "precision", "deviation", "token replay", "alignments", "reference model", "bpmn", "compliance"]
+author: Mate
+license: MIT
+default_enabled: true
+# Runs entirely locally – safe to use against confidential event logs.
+isConfidentialSafe: true
+
+requirements:
+  event_log:
+    # Case-centric: replays one trace per case against the model. Never appears
+    # for object-centric (OCEL) logs.
+    log_model: case_centric
+    required_columns:
+      - case_id
+      - activity
+      - timestamp
+    min_events: 50
+    min_cases: 2
+  optional_modules:
+    - id: discovery
+      reason: Provides a discovered BPMN you can download and re-upload as a reference model.
+
+provides:
+  # Bus topic emitted when a run finishes (carries user_id for tenant fan-out).
+  - conformance.computed
+  # Capabilities other modules may depend on. NOTE: the loader does not yet bind
+  # capability names to handlers, so `registry.has("conformance")` is True but
+  # `registry.call(...)` raises today – consumers read the cached results or
+  # GET /modules/conformance/fitness instead (see module.py).
+  - conformance.compute_fitness
+  - conformance.results
+
+dependencies:
+  python:
+    requires-python: ">=3.12"
+    packages: []
+    inherit:
+      - pm4py
+      - pandas
+      - numpy
+      - duckdb
+    isolation: in_process
+
+# bpmn-js / bpmn-auto-layout are already in apps/web/package.json (the discovery
+# module bundles them too) and resolve through the modules node_modules symlink,
+# so no npm block is needed here.
+frontend:
+  panel: ./panel/index.tsx
+  widgets:
+    - id: conformance-score
+      entry: ./widgets/ConformanceScore.tsx
+      title: Conformance score
+      description: Fitness, precision and conforming-trace share of the latest run.
+      icon: ShieldCheck
+      default_w: 5
+      default_h: 6
+      min_w: 4
+      min_h: 5
+    - id: top-deviations
+      entry: ./widgets/TopDeviations.tsx
+      title: Top deviations
+      description: Activities with the most conformance deviations.
+      icon: TriangleAlert
+      default_w: 6
+      default_h: 9
+      min_w: 5
+      min_h: 6
+      config_schema:
+        properties:
+          top_n:
+            type: integer
+            title: Activities shown
+            description: How many most-deviating activities to plot.
+            minimum: 3
+            maximum: 25
+            step: 1
+            default: 10
+            ui:
+              widget: slider
+
+permissions:
+  - read:event_log
+  - write:module_results
+
+config_schema:
+  properties:
+    technique:
+      type: string
+      title: Conformance technique
+      description: >-
+        Token-based replay is fast and near-linear. Alignments give optimal,
+        more precise diagnostics but are exponential in the worst case and are
+        capped by the limits below.
+      enum:
+        - token_replay
+        - alignments
+      default: token_replay
+      ui:
+        widget: select
+        affects: compute
+    conforming_fitness_threshold:
+      type: number
+      title: Conforming-trace threshold
+      description: A trace counts as "conforming" when its fitness is at or above this value.
+      minimum: 0
+      maximum: 1
+      step: 0.05
+      default: 1.0
+      ui:
+        widget: slider
+        affects: compute
+    precision_max_events:
+      type: integer
+      title: Precision – max events
+      description: >-
+        Precision (token-based ETConformance) re-walks every trace prefix and is
+        memory-heavy. Above this many events it is skipped – fitness and deviations
+        are still computed. Set 0 to always compute it.
+      minimum: 0
+      maximum: 5000000
+      default: 150000
+      ui:
+        widget: number
+        affects: compute
+    alignments_max_cases:
+      type: integer
+      title: Alignments – max cases
+      description: Refuse the alignments technique above this many cases (token replay has no cap).
+      minimum: 100
+      maximum: 100000
+      default: 2000
+      ui:
+        widget: number
+    alignments_max_variants:
+      type: integer
+      title: Alignments – max variants
+      description: Refuse the alignments technique above this many distinct trace variants.
+      minimum: 50
+      maximum: 20000
+      default: 300
+      ui:
+        widget: number

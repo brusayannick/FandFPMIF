@@ -86,6 +86,22 @@ frontend:
             ui:
               widget: slider
 
+# Data-only outputs for the platform's generic visualization layer. Both point
+# at /results; the adapter slices the relevant part by the declared shape.
+datasets:
+  - id: results
+    title: Conformance KPIs
+    description: Fitness, precision and conforming-trace share of the latest run.
+    icon: ShieldCheck
+    shape: kpi
+    route: /results
+  - id: per_activity
+    title: Per-activity deviations
+    description: Conformance deviations broken down by activity.
+    icon: TriangleAlert
+    shape: table
+    route: /results
+
 permissions:
   - read:event_log
   - write:module_results

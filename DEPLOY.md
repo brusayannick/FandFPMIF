@@ -328,6 +328,81 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 - After editing only `infra/caddy/Caddyfile`: `docker compose -f docker-compose.yml -f docker-compose.prod.yml restart proxy`.
 - The realm JSON is **not** re-imported once the Keycloak DB exists – change realm settings in the admin console, or `docker compose down -v` to wipe the Keycloak volume and re-import (this also drops all Keycloak users).
 
+## MCP server (let external tools read process data)
+
+Opt-in. When enabled, the API mounts a **read-only** [Model Context Protocol](https://modelcontextprotocol.io)
+server at `/mcp` (streamable HTTP) so external MCP clients – Claude Desktop,
+claude.ai, a customer's own agent – can read a user's process-mining outputs.
+
+- **Enable:** set `MCP_ENABLED=1` in `.env` (default off). Optionally set
+  `API_BASE_URL=https://<your-origin>` so the UI advertises the right endpoint
+  (otherwise it's derived from the request).
+- **Auth:** no anonymous access. Each user mints a personal access token (PAT)
+  at **Settings → API & MCP**; the client sends it as
+  `Authorization: Bearer mate_pat_…`. A PAT acts as its owner with no admin
+  role and reads only that user's data (same tenant isolation as the rest of
+  the platform). PATs are the only machine-to-machine credential – Keycloak
+  only issues short-lived, browser-bound tokens.
+- **Proxy:** streamable HTTP is the same SSE-style passthrough as `/events`
+  (§6 step 5) – the existing proxy chain carries it; no WebSocket upgrade.
+- **Tools (read-only, curated):** `list_processes`, `list_modules`,
+  `get_module_output`, `get_process_overview`, plus curated `get_bottlenecks` /
+  `get_conformance` / `get_process_model` / `get_drifts` and `get_server_info`.
+  Output is curated module summaries only – never raw event rows.
+
+Example Claude Desktop entry (the UI generates this with your URL filled in):
+
+```json
+{ "mcpServers": { "mate": {
+  "url": "https://<your-origin>/mcp",
+  "headers": { "Authorization": "Bearer mate_pat_…" }
+} } }
+```
+
+### Enterprise hardening
+
+- **Egress consent:** with `MCP_REQUIRE_EGRESS_CONSENT=1` (default) each user
+  must opt in (Settings → API & MCP) before any tool returns their data – a
+  local-first acknowledgement that data leaves the box. Set `0` to make minting
+  a token sufficient.
+- **Scopes:** tokens carry granted scopes (`processes:read`, `modules:read`);
+  an empty grant means all read scopes. Tools enforce them.
+- **Rate limit + concurrency + timeout** (single-instance, in-process):
+  `MCP_RATE_LIMIT_PER_MINUTE` (0 disables) + `MCP_RATE_LIMIT_BURST`,
+  `MCP_MAX_CONCURRENCY_PER_USER` / `MCP_MAX_CONCURRENCY_GLOBAL`,
+  `MCP_TOOL_TIMEOUT_SECONDS`. **Scaling out to >1 API replica needs a shared
+  store** for these and stateful sessions – not built; call it out before HA.
+- **OAuth (SSO):** the server is an OAuth resource server advertising Keycloak
+  via RFC 9728 (`/.well-known/oauth-protected-resource`, and a
+  `WWW-Authenticate: …resource_metadata=…` on 401). Pre-register a **public**
+  OAuth client in Keycloak (DCR is not assumed) and set `MCP_OAUTH_CLIENT_ID`;
+  the client id + metadata URL surface in Settings → API & MCP. Clients then
+  run auth-code + PKCE against Keycloak and call `/mcp` with the resulting JWT
+  (validated by the existing JWKS path). PATs remain the simplest fallback.
+- **Admin governance:** live enable/disable (no restart) + the token mint
+  policy (`all_users` / `admin_only` / `disabled`) at Settings → API & MCP
+  (admin only); an org-wide token list + revoke is there too. Backed by
+  `GET/PUT /api/v1/system/mcp` and `/api/v1/admin/api-tokens`.
+- **Audit:** every tool call emits a `mcp.audit` structured log line (always,
+  for SIEM) + a best-effort analytics event for the admin insights UI.
+- **Metrics:** Prometheus at `GET /api/v1/system/mcp-metrics` (admin) –
+  `mate_mcp_tool_calls_total`, `mate_mcp_tool_latency_seconds`,
+  `mate_mcp_rate_limited_total`, `mate_mcp_active_calls`.
+
+> **OAuth needs `API_BASE_URL`.** The OAuth discovery document and the
+> `WWW-Authenticate` challenge are built **only** from `API_BASE_URL` (never the
+> request `Host` header, to avoid pointing a client's login at a forged host).
+> Without it, OAuth discovery is simply not advertised (PATs still work).
+>
+> **Hardening backlog (not yet built):** (1) per-scope mapping for Keycloak JWTs
+> — today any JWT with the API audience gets all read scopes; add a dedicated
+> MCP audience/client-scope to downscope. (2) A pre-auth IP/global throttle —
+> the per-user limiter only applies after a principal resolves (a bogus PAT
+> still costs one indexed lookup). (3) Shared rate-limit/session store for
+> multi-replica scale-out. (4) Idle eviction of the in-process limiter maps.
+> Never run `DEMO_MODE=1` with MCP in production — the demo bypass is refused on
+> `/mcp`, but the combination is logged loudly as a misconfiguration.
+
 ## Backup
 
 `./data/` (SQLite metadata + Parquet logs + module results + cached runtimes)
@@ -348,3 +423,5 @@ docker run --rm -v kc-data:/v -v "$PWD":/b alpine tar czf /b/kc-data.tgz -C /v .
 | Login page styled wrong / 404 on `/auth/...` assets | `KC_HTTP_RELATIVE_PATH` and the Caddy `/auth/*` route out of sync. |
 | Live jobs/AI never update, page otherwise fine | WebSocket/SSE not passed through by the uni proxy (§6 step 5). |
 | `tls` cert errors on proxy start | Mounted only `live/` instead of all of `/etc/letsencrypt` – the symlinks into `archive/` break. |
+| MCP client gets 401 at `/mcp` | Token missing, revoked, expired, or not a `mate_pat_…` PAT (mint one at Settings → API & MCP). |
+| MCP endpoint 404s | `MCP_ENABLED` not set on the API service. |

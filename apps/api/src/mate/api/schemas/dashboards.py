@@ -9,9 +9,9 @@ export payload is a straight passthrough.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mate.api.schemas.event_logs import LogModel
 
@@ -52,22 +52,66 @@ class CanvasSettings(BaseModel):
     active_preset_id: str | None = None
 
 
+class DatasetRef(BaseModel):
+    """Points a ``kind="viz"`` card at a module dataset (manifest ``datasets:``).
+    The card fetches the data from the module's own route and renders it with a
+    generic visualization."""
+
+    module_id: str
+    dataset_id: str
+
+
 class DashboardItem(BaseModel):
     """One placed card and its grid geometry. The column count is set by the
     board's granularity (web ``GRANULARITY``), so ``x``/``w`` are bounded by the
-    finest level's column count (60) rather than a fixed 12."""
+    finest level's column count (60) rather than a fixed 12.
+
+    Two card kinds share this shape (discriminated by ``kind``):
+      * ``widget`` (default) - a module-authored React component, addressed by
+        ``module_id`` + ``widget_id`` (the original, pre-existing shape).
+      * ``viz`` - a generic visualization bound to a module **dataset**,
+        addressed by ``dataset_ref`` + ``viz_id`` + ``mapping``.
+    Items stored before ``kind`` existed deserialize as ``widget`` (the default)
+    and keep working, so no migration is needed."""
 
     i: str  # stable client id for this placement
-    module_id: str
-    widget_id: str
+    kind: Literal["widget", "viz", "flow"] = "widget"
+    # widget cards: both required when kind == "widget".
+    module_id: str | None = None
+    widget_id: str | None = None
+    # viz cards: dataset_ref is required at drop; viz_id/mapping are filled in
+    # when the user configures the card (a freshly dropped viz card renders an
+    # "unconfigured" state until then).
+    dataset_ref: DatasetRef | None = None
+    viz_id: str | None = None
+    # Field-mapping: viz field key -> column id (or list). Opaque to the backend.
+    mapping: dict[str, Any] = Field(default_factory=dict)
+    # flow cards: render a flow's terminal viz node. The viz config (viz_id,
+    # mapping, options) lives on the flow node itself, so only the reference is
+    # stored here.
+    flow_id: str | None = None
+    node_id: str | None = None
     title: str | None = None
     x: int = Field(default=0, ge=0, le=59)
     y: int = 0
     w: int = Field(default=6, ge=1, le=60)
     h: int = Field(default=8, ge=1, le=48)
-    # Per-placement card options (e.g. which metric a chart shows). Opaque to
-    # the backend; the widget interprets it.
+    # Per-placement card options (e.g. which metric a chart shows, or a viz's
+    # non-field options). Opaque to the backend; the widget/viz interprets it.
     config: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_kind(self) -> Self:
+        if self.kind == "widget":
+            if not self.module_id or not self.widget_id:
+                raise ValueError("A widget card requires module_id and widget_id.")
+        elif self.kind == "viz":
+            if self.dataset_ref is None:
+                raise ValueError("A viz card requires dataset_ref.")
+        elif self.kind == "flow":
+            if not self.flow_id or not self.node_id:
+                raise ValueError("A flow card requires flow_id and node_id.")
+        return self
 
 
 class DashboardSummary(BaseModel):

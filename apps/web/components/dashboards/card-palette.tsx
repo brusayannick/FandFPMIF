@@ -7,12 +7,34 @@ import { cn } from "@/lib/cn";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cardIcon } from "@/components/dashboards/card-icon";
-import { useCardCatalog, type DashboardCard, type LogModel } from "@/lib/dashboard-queries";
+import type { AddRequest } from "@/components/dashboards/dashboard-canvas";
+import {
+  useCardCatalog,
+  useDatasetCatalog,
+  type DashboardCard,
+  type DatasetCatalogEntry,
+  type LogModel,
+} from "@/lib/dashboard-queries";
+
+/** A palette row: a module-authored widget card, or a module dataset rendered
+ * through the generic-viz layer. */
+type Entry =
+  | { type: "widget"; key: string; title: string; description: string | null; icon: string | null; card: DashboardCard }
+  | {
+      type: "viz";
+      key: string;
+      title: string;
+      description: string | null;
+      icon: string | null;
+      shape: DatasetCatalogEntry["shape"];
+      dataset: DatasetCatalogEntry;
+    };
 
 /**
- * Left-rail palette of every card exposed by the user's installed modules,
- * grouped into a clearly delineated, collapsible section per module. Pressing a
- * card starts a pointer-drag onto the canvas (`onStartAdd`); the canvas tracks
+ * Left-rail palette of everything the user's installed modules expose - both
+ * widget *cards* and data *datasets* (rendered via the platform's generic
+ * visualizations) - grouped per module into collapsible sections. Pressing a
+ * row starts a pointer-drag onto the canvas (`onStartAdd`); the canvas tracks
  * the cursor and drops it. A press without dragging adds it at the bottom.
  */
 export function CardPalette({
@@ -20,11 +42,13 @@ export function CardPalette({
   logModel,
 }: {
   /** Begin a palette→canvas add at the pointer's position. */
-  onStartAdd: (card: DashboardCard, e: React.PointerEvent) => void;
-  /** Only cards whose `log_models` include the board's model are shown. */
+  onStartAdd: (req: AddRequest, e: React.PointerEvent) => void;
+  /** Only entries whose `log_models` include the board's model are shown. */
   logModel: LogModel;
 }) {
-  const { data: cards, isLoading } = useCardCatalog();
+  const { data: cards, isLoading: cardsLoading } = useCardCatalog();
+  const { data: datasets, isLoading: datasetsLoading } = useDatasetCatalog();
+  const isLoading = cardsLoading || datasetsLoading;
   const [query, setQuery] = useState("");
   // Module ids the user has explicitly collapsed. A search overrides this so
   // matches are never hidden behind a collapsed header.
@@ -32,22 +56,44 @@ export function CardPalette({
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = (cards ?? []).filter(
-      (c) =>
-        c.log_models.includes(logModel) &&
-        (!q ||
-          c.title.toLowerCase().includes(q) ||
-          c.module_name.toLowerCase().includes(q) ||
-          (c.description ?? "").toLowerCase().includes(q)),
-    );
-    const byModule = new Map<string, { id: string; name: string; cards: DashboardCard[] }>();
-    for (const c of filtered) {
-      const g = byModule.get(c.module_id) ?? { id: c.module_id, name: c.module_name, cards: [] };
-      g.cards.push(c);
-      byModule.set(c.module_id, g);
+    const matches = (title: string, moduleName: string, description: string | null) =>
+      !q ||
+      title.toLowerCase().includes(q) ||
+      moduleName.toLowerCase().includes(q) ||
+      (description ?? "").toLowerCase().includes(q);
+
+    const byModule = new Map<string, { id: string; name: string; entries: Entry[] }>();
+    const ensure = (id: string, name: string) => {
+      const g = byModule.get(id) ?? { id, name, entries: [] };
+      byModule.set(id, g);
+      return g;
+    };
+
+    for (const c of cards ?? []) {
+      if (!c.log_models.includes(logModel) || !matches(c.title, c.module_name, c.description)) continue;
+      ensure(c.module_id, c.module_name).entries.push({
+        type: "widget",
+        key: `w:${c.module_id}:${c.widget_id}`,
+        title: c.title,
+        description: c.description,
+        icon: c.icon,
+        card: c,
+      });
+    }
+    for (const d of datasets ?? []) {
+      if (!d.log_models.includes(logModel) || !matches(d.title, d.module_name, d.description)) continue;
+      ensure(d.module_id, d.module_name).entries.push({
+        type: "viz",
+        key: `d:${d.module_id}:${d.dataset_id}`,
+        title: d.title,
+        description: d.description,
+        icon: d.icon,
+        shape: d.shape,
+        dataset: d,
+      });
     }
     return [...byModule.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [cards, query, logModel]);
+  }, [cards, datasets, query, logModel]);
 
   const searching = query.trim().length > 0;
   const toggle = (id: string) =>
@@ -58,21 +104,24 @@ export function CardPalette({
       return next;
     });
 
+  const requestFor = (entry: Entry): AddRequest =>
+    entry.type === "widget"
+      ? { kind: "widget", card: entry.card }
+      : { kind: "viz", dataset: entry.dataset };
+
   return (
     <div className="flex h-full w-64 shrink-0 flex-col border-r border-border bg-muted/20">
       <div className="border-b border-border p-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Cards
+          Cards &amp; data
         </p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          Drag onto the board to add.
-        </p>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">Drag onto the board to add.</p>
         <div className="relative mt-2">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search cards…"
+            placeholder="Search cards & data…"
             className="h-8 pl-7 text-xs"
           />
         </div>
@@ -80,10 +129,10 @@ export function CardPalette({
 
       <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
         <div className="space-y-3 p-3">
-          {isLoading && <p className="text-xs text-muted-foreground">Loading cards…</p>}
+          {isLoading && <p className="text-xs text-muted-foreground">Loading…</p>}
           {!isLoading && groups.length === 0 && (
             <p className="text-xs text-muted-foreground">
-              No cards match. Modules expose cards via their manifest.
+              No matches. Modules expose cards and datasets via their manifest.
             </p>
           )}
           {groups.map((group) => {
@@ -104,7 +153,7 @@ export function CardPalette({
                     {group.name}
                   </span>
                   <span className="shrink-0 rounded-full bg-background/80 px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground">
-                    {group.cards.length}
+                    {group.entries.length}
                   </span>
                   <ChevronDown
                     className={cn(
@@ -116,11 +165,11 @@ export function CardPalette({
 
                 {open && (
                   <div className="space-y-1 p-1.5">
-                    {group.cards.map((card) => {
-                      const Icon = cardIcon(card.icon);
+                    {group.entries.map((entry) => {
+                      const Icon = cardIcon(entry.icon);
                       return (
                         <div
-                          key={`${card.module_id}:${card.widget_id}`}
+                          key={entry.key}
                           // Pointer-drag (not HTML5 DnD, which the prod proxy
                           // strips): press to start, the canvas tracks the cursor
                           // and drops. `touch-none` stops the scroll-area from
@@ -128,7 +177,7 @@ export function CardPalette({
                           onPointerDown={(e) => {
                             if (e.button !== 0) return;
                             e.preventDefault();
-                            onStartAdd(card, e);
+                            onStartAdd(requestFor(entry), e);
                           }}
                           className={cn(
                             "group flex w-full touch-none items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-left",
@@ -137,12 +186,19 @@ export function CardPalette({
                         >
                           <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-xs font-medium">
-                              {card.title}
+                            <span className="flex items-center gap-1.5">
+                              <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                                {entry.title}
+                              </span>
+                              {entry.type === "viz" && (
+                                <span className="shrink-0 rounded bg-muted px-1 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                                  {entry.shape}
+                                </span>
+                              )}
                             </span>
-                            {card.description && (
+                            {entry.description && (
                               <span className="mt-0.5 line-clamp-2 block text-[11px] leading-snug text-muted-foreground">
-                                {card.description}
+                                {entry.description}
                               </span>
                             )}
                           </span>

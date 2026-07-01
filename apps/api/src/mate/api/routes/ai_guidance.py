@@ -95,7 +95,7 @@ def _hash_payload(payload: Any) -> str:
     return hashlib.blake2b(raw, digest_size=16).hexdigest()
 
 
-async def _build_payload(module_id: str, log_id: str, user_id: str) -> tuple[Any, str, str]:
+async def build_payload(module_id: str, log_id: str, user_id: str) -> tuple[Any, str, str]:
     """Resolve a module's ``guidance_payload`` for a log.
 
     Returns ``(payload, system_prompt, user_prefix)``.
@@ -137,7 +137,7 @@ async def _build_payload(module_id: str, log_id: str, user_id: str) -> tuple[Any
     return payload, system_prompt, user_prefix
 
 
-async def _enabled_modules_with_guidance(session: SessionDep, user_id: str) -> list[str]:
+async def enabled_modules_with_guidance(session: SessionDep, user_id: str) -> list[str]:
     """Return ids of loaded modules that are enabled AND expose guidance_payload."""
     rows = await session.execute(
         select(ModuleConfig.module_id, ModuleConfig.enabled).where(ModuleConfig.user_id == user_id)
@@ -165,7 +165,7 @@ async def module_guidance(
     log_id: str = Query(..., min_length=1),
 ) -> GuidanceResponse:
     await get_owned_event_log(session, log_id, user.id)
-    payload, system_prompt, user_prefix = await _build_payload(module_id, log_id, user.id)
+    payload, system_prompt, user_prefix = await build_payload(module_id, log_id, user.id)
     output_hash = _hash_payload(payload)
     cache = ResultCache(log_id, module_id, user.id)
 
@@ -235,7 +235,7 @@ async def module_guidance_stream(
     log_id: str = Query(..., min_length=1),
 ) -> StreamingResponse:
     await get_owned_event_log(session, log_id, user.id)
-    payload, system_prompt, user_prefix = await _build_payload(module_id, log_id, user.id)
+    payload, system_prompt, user_prefix = await build_payload(module_id, log_id, user.id)
     output_hash = _hash_payload(payload)
     cfg = await load_ai_config(session, user.id)
     cache = ResultCache(log_id, module_id, user.id)
@@ -309,7 +309,7 @@ async def process_guidance(
     user: CurrentUserDep,
 ) -> GuidanceResponse:
     await get_owned_event_log(session, log_id, user.id)
-    module_ids = await _enabled_modules_with_guidance(session, user.id)
+    module_ids = await enabled_modules_with_guidance(session, user.id)
     if not module_ids:
         raise HTTPException(
             409,
@@ -319,7 +319,7 @@ async def process_guidance(
     composite: dict[str, Any] = {}
     for mid in module_ids:
         try:
-            payload, _sys, _prefix = await _build_payload(mid, log_id, user.id)
+            payload, _sys, _prefix = await build_payload(mid, log_id, user.id)
             composite[mid] = payload
         except HTTPException:
             # Skip modules without data yet - overview still works on the rest.

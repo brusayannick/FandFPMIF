@@ -72,7 +72,7 @@ export function CardConfigForm({
   );
 }
 
-function Field({
+export function Field({
   fieldKey,
   prop,
   value,

@@ -7,6 +7,7 @@ router; this router covers the platform's own module-meta surface.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import tempfile
 from pathlib import Path
@@ -35,6 +36,7 @@ from mate.api.modules.installs import (
 )
 from mate.api.policy import SCOPE_MODULE, resolve
 from mate.api.schemas.event_logs import LogModel
+from mate.api.storage.module_archive import delete_module_archive_sync
 
 # UserSetting key holding the per-user record of which default module ids have
 # already been offered to a user (a JSON list). Seeding grants only the defaults
@@ -518,6 +520,9 @@ async def uninstall(module_id: str, session: SessionDep, user: CurrentUserDep) -
         if target.exists():
             remove_module_artifacts(target)
             shutil.rmtree(target, ignore_errors=True)
+        # Drop the S3 source archive too (no-op in local mode) so a later boot
+        # doesn't re-materialise a module the last owner just removed.
+        await asyncio.to_thread(delete_module_archive_sync, module_id)
 
     # Scope the event to this user so the WS only notifies their sessions -
     # other owners' module lists are unaffected.

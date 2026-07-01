@@ -29,6 +29,7 @@ from mate.api.schemas.event_log_data import (
     ColumnType,
     DataQuality,
 )
+from mate.api.storage import eviction
 from mate.api.storage import sync as storage_sync
 
 CANONICAL_ROLES: dict[str, ColumnRole] = {
@@ -107,15 +108,27 @@ class EventLogAccess:
         self._active_filter = active_filter or None
         self._paths = log_paths(log_id, user_id)
         self._conn: duckdb.DuckDBPyConnection | None = None
+        # Pins the log dir against the S3 cache reaper for the read's lifetime.
+        self._lease: str | None = None
 
     async def __aenter__(self) -> EventLogAccess:
-        # In S3 mode, pull the log dir from the bucket if the local cache is cold
-        # (fresh VM / wiped data dir). No-op in local mode and on a warm cache.
-        await storage_sync.hydrate_log(self.user_id, self.log_id)
-        if not self._paths.events.exists():
-            raise FileNotFoundError(
-                f"Event log {self.log_id} has no events.parquet - import not finished?"
-            )
+        # Lease before hydrate so the reaper can't evict the tree out from under
+        # the read (or mid-download). Released in __aexit__ / on the error path.
+        self._lease = await eviction.acquire_lease_async(self._paths.root)
+        try:
+            # In S3 mode, pull the log dir from the bucket if the local cache is
+            # cold (fresh VM / evicted). No-op in local mode and on a warm cache.
+            await storage_sync.hydrate_log(self.user_id, self.log_id)
+            if not self._paths.events.exists():
+                raise FileNotFoundError(
+                    f"Event log {self.log_id} has no events.parquet - import not finished?"
+                )
+        except BaseException:
+            # Lease was just acquired above; release it on any entry failure so a
+            # __aexit__ that never runs can't strand it.
+            eviction.release_lease(self._lease)
+            self._lease = None
+            raise
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -125,6 +138,9 @@ class EventLogAccess:
             except Exception:
                 pass
             self._conn = None
+        if self._lease is not None:
+            eviction.release_lease(self._lease)
+            self._lease = None
 
     @property
     def events_path(self) -> Path:

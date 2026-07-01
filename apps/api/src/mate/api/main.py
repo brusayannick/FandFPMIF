@@ -29,22 +29,28 @@ from sqlalchemy import select
 from mate.api import __version__
 from mate.api.config import get_settings
 from mate.api.db.engine import dispose_engine, get_sessionmaker
-from mate.api.db.models import Job, WatchedFolder
+from mate.api.db.models import Job, ModuleInstall, WatchedFolder
 from mate.api.duckdb.pool import get_duckdb_pool
 from mate.api.events import EventBus, set_event_bus
 from mate.api.ingest.dispatch import register_import_handler
 from mate.api.ingest.watch import scan_watch
+from mate.api.jobs.maintenance import prune_old_jobs
 from mate.api.jobs.runtime import JobRuntime, load_persisted_concurrency, set_job_runtime
 from mate.api.jobs.supervisor import get_child_supervisor
 from mate.api.middleware import UsageTrackingMiddleware
 from mate.api.modules import CapabilityRegistry, ModuleLoader, set_module_loader
 from mate.api.modules.hot_reload import HotReload, sweep_stale_workdirs
 from mate.api.modules.install_jobs import register_module_install_handlers
+from mate.api.modules.maintenance import gc_orphaned_uploaded_modules
 from mate.api.modules.processing import ModuleProcessingCoordinator, set_coordinator
 from mate.api.routes import v1
 from mate.api.routes.analytics import prune_expired, record_server_event
 from mate.api.schemas.common import HealthResponse
 from mate.api.storage import get_storage_settings
+from mate.api.storage.db_backup import backup_sync, db_backup_loop
+from mate.api.storage.eviction import eviction_loop
+from mate.api.storage.migration import register_storage_migration_handler
+from mate.api.storage.module_archive import restore_missing_modules_sync
 from mate.api.system.metrics import ResourceSampler, set_resource_sampler
 
 # Daily - re-evaluated every loop iteration against the current
@@ -52,25 +58,32 @@ from mate.api.system.metrics import ResourceSampler, set_resource_sampler
 _RETENTION_INTERVAL_SECONDS = 24 * 60 * 60
 
 
-async def _analytics_retention_loop() -> None:
-    """Periodically prune analytics rows older than the configured window.
+async def _retention_loop() -> None:
+    """Periodically prune expired analytics rows + terminal jobs.
 
-    A no-op when retention is unset; users on "forever" pay nothing. Errors
-    are swallowed so a transient DB hiccup never tears down the loop.
+    Both no-op when their retention window is unset (forever); a deployment that
+    keeps everything pays nothing. Errors are swallowed so a transient DB hiccup
+    never tears down the loop.
     """
-    log = structlog.get_logger("analytics.retention")
+    log = structlog.get_logger("retention")
     sm = get_sessionmaker()
+    job_retention_days = get_settings().job_retention_days
     while True:
         try:
             await asyncio.sleep(_RETENTION_INTERVAL_SECONDS)
             async with sm() as session:
                 pruned = await prune_expired(session)
                 if pruned:
-                    log.info("analytics.retention.pruned", events=pruned)
+                    log.info("retention.analytics_pruned", events=pruned)
+            if job_retention_days > 0:
+                async with sm() as session:
+                    removed = await prune_old_jobs(session, job_retention_days)
+                    if removed:
+                        log.info("retention.jobs_pruned", jobs=removed)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.warning("analytics.retention.failed", error=str(exc))
+            log.warning("retention.failed", error=str(exc))
 
 
 async def _job_event_recorder_loop(bus: EventBus) -> None:
@@ -276,6 +289,21 @@ async def lifespan(app: FastAPI):
     )
     set_module_loader(loader)
     register_module_install_handlers(runtime, loader)
+    register_storage_migration_handler(runtime)
+
+    # S3 mode: reclaim orphaned uploaded-module dirs (zero install rows), then
+    # re-materialise any *owned* upload whose source is missing locally (fresh
+    # VM). Both run before the loader discovers modules, so it sees the right set
+    # and rebuilds venvs/bundles. Scoped to the install-row set so GC + restore
+    # never fight over a dir.
+    if get_storage_settings().is_s3:
+        async with get_sessionmaker()() as session:
+            rows = await session.execute(select(ModuleInstall.module_id).distinct())
+            install_ids = {mid for (mid,) in rows.all()}
+        up_dir = settings.uploaded_modules_dir.resolve()
+        await asyncio.to_thread(gc_orphaned_uploaded_modules, up_dir, install_ids)
+        await asyncio.to_thread(restore_missing_modules_sync, up_dir, install_ids)
+
     try:
         await loader.load_all()
     except Exception:
@@ -300,6 +328,14 @@ async def lifespan(app: FastAPI):
     async with get_sessionmaker()() as session:
         await coordinator.reconcile_boot(session)
 
+    # Re-enqueue precompute jobs a prior process left interrupted (its slow
+    # modules were still running/queued at a `--reload` restart or crash). Runs
+    # now that the loader has re-registered their handlers, and before the app
+    # serves any new import, so a killed cv4cdd / complexity-over-time actually
+    # reruns and writes its output instead of leaving an empty result cache the
+    # panel reads as "nothing happened".
+    await runtime.resume_interrupted_precompute()
+
     # Sweep any `ff-mod-*` temp dirs older than 24h that earlier crashes left
     # behind (the per-invocation cleanup in `_invoke_handler` handles the
     # happy path; this catches SIGKILL/restart leaks).
@@ -318,10 +354,16 @@ async def lifespan(app: FastAPI):
     # primary store) are live from the first request after a restart.
     get_storage_settings()
 
-    retention_task = asyncio.create_task(_analytics_retention_loop())
+    retention_task = asyncio.create_task(_retention_loop())
     job_event_task = asyncio.create_task(_job_event_recorder_loop(bus))
     watch_poll_task = asyncio.create_task(_watched_folder_poll_loop(runtime))
     processing_task = asyncio.create_task(_module_processing_loop(bus, coordinator))
+    # S3-mode local-cache reaper: bounds the working set so the bucket can be the
+    # authoritative copy. No-op in local mode or with no budget set.
+    eviction_task = asyncio.create_task(eviction_loop())
+    # S3-mode metadata.db snapshot loop: keeps a restorable DB copy in the bucket
+    # so losing the VM doesn't orphan its objects. No-op in local mode.
+    db_backup_task = asyncio.create_task(db_backup_loop())
 
     # Live CPU/RAM sampler for Admin → System. Built after the loader so its first
     # breakdown can already see subprocess workers; manages its own asyncio task.
@@ -329,9 +371,23 @@ async def lifespan(app: FastAPI):
     set_resource_sampler(sampler)
     await sampler.start()
 
+    # Run the MCP streamable-HTTP session manager for the app's lifetime when
+    # the server is mounted (a mounted sub-app's own lifespan never fires).
+    mcp_cm = None
+    if settings.mcp_enabled:
+        from mate.api.mcp import mcp_session_manager
+
+        mcp_cm = mcp_session_manager()
+        await mcp_cm.__aenter__()
+
     try:
         yield
     finally:
+        if mcp_cm is not None:
+            try:
+                await mcp_cm.__aexit__(None, None, None)
+            except Exception:
+                structlog.get_logger("api.shutdown").exception("shutdown.mcp_stop_failed")
         # Authoritative stop, first and unconditional: SIGKILL every child the
         # platform owns (offload children, subprocess + per-job workers) through
         # the one controller, so nothing survives shutdown regardless of how the
@@ -341,7 +397,14 @@ async def lifespan(app: FastAPI):
             get_child_supervisor().kill_all()
         except Exception:
             structlog.get_logger("api.shutdown").exception("shutdown.kill_all_failed")
-        for task in (retention_task, job_event_task, watch_poll_task, processing_task):
+        for task in (
+            retention_task,
+            job_event_task,
+            watch_poll_task,
+            processing_task,
+            eviction_task,
+            db_backup_task,
+        ):
             task.cancel()
             try:
                 await task
@@ -369,12 +432,25 @@ async def lifespan(app: FastAPI):
         set_module_loader(None)
         set_job_runtime(None)
         set_event_bus(None)
+        # Final metadata.db snapshot to S3 (no-op in local mode) before the engine
+        # closes, so a clean shutdown leaves the bucket fully current.
+        try:
+            await asyncio.to_thread(backup_sync)
+        except Exception:
+            structlog.get_logger("api.shutdown").warning("shutdown.db_backup_failed", exc_info=True)
         get_duckdb_pool().close_all()
         await dispose_engine()
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    if settings.demo_mode and settings.mcp_enabled:
+        # The demo bypass is refused on /mcp (see mcp/auth.resolve_mcp_principal),
+        # but this combination must never reach production - flag it loudly.
+        structlog.get_logger("api.startup").warning(
+            "mcp.demo_mode_combo",
+            detail="DEMO_MODE and MCP_ENABLED are both on; never do this in production.",
+        )
     app = FastAPI(
         title="Mate API",
         version=__version__,
@@ -392,6 +468,17 @@ def create_app() -> FastAPI:
     # server-side analytics events (transparent to streaming responses).
     app.add_middleware(UsageTrackingMiddleware)
     app.include_router(v1)
+
+    # Read-only MCP server for external consumers (opt-in). Mounted as a raw
+    # ASGI sub-app (the module loader's @route mechanism can't host one); its
+    # streamable-HTTP session manager is run from the lifespan below.
+    if settings.mcp_enabled:
+        from mate.api.mcp import build_mcp_asgi_app
+        from mate.api.mcp.oauth import router as mcp_oauth_router
+
+        app.mount("/mcp", build_mcp_asgi_app())
+        # OAuth protected-resource metadata at the root (RFC 9728 well-known path).
+        app.include_router(mcp_oauth_router)
 
     @app.get("/health", response_model=HealthResponse, tags=["meta"])
     async def health() -> HealthResponse:

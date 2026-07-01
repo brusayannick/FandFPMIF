@@ -152,6 +152,46 @@ class ManifestFrontend(BaseModel):
     page_layout: list[PageLayoutSection] = Field(default_factory=list)
 
 
+class DatasetEntry(BaseModel):
+    """A named, typed *data* output a module exposes for the platform's generic
+    visualization layer.
+
+    Unlike a ``WidgetEntry`` (which ships a module-authored React component), a
+    dataset is data only: it points at an existing module ``@route`` whose JSON
+    response the platform normalizes into a shape-tagged ``DatasetEnvelope`` and
+    renders with one of the platform's *generic* visualizations (bar, line,
+    table, process-map, ...). Surfaced by the dataset catalog
+    (``GET /api/v1/datasets/catalog``) so the Dashboards palette can offer it
+    without loading any bundle.
+    """
+
+    id: str
+    title: str | None = None
+    description: str | None = None
+    # Lucide icon name (e.g. "Network"); the frontend maps it to a glyph and
+    # falls back to a generic icon when unknown or absent.
+    icon: str | None = None
+    # The data shape this dataset produces. Drives which generic visualizations
+    # can render it - a viz declares which shape(s) it `accepts`.
+    shape: Literal["table", "graph", "kpi", "tree", "blob"]
+    # Module sub-route (leading slash, e.g. "/dfg") whose JSON response carries
+    # the data. The platform calls ``GET /api/v1/modules/{module_id}{route}``,
+    # so the existing per-request ephemeral filter + result-cache variant apply
+    # unchanged.
+    route: str
+    # Which log data model(s) this dataset applies to. A dashboard is created
+    # for one model (case-centric vs object-centric/OCEL) and its palette only
+    # offers datasets whose `log_models` include the board's model. Defaults to
+    # case-centric so the common case needs no declaration.
+    log_models: list[Literal["case_centric", "object_centric"]] = Field(
+        default_factory=lambda: ["case_centric"]
+    )
+    # Optional JSON-Schema-flavoured params (same dialect as `config_schema`)
+    # the dataset's route accepts as query params. Passed through to the
+    # frontend as-is; rendering/validation is the frontend's job.
+    params_schema: dict[str, Any] | None = None
+
+
 class AiModelSlot(BaseModel):
     """One labelled (provider, model) selector exposed on the module's
     settings page. The actual API keys come from the platform's global
@@ -226,6 +266,11 @@ class Manifest(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     dependencies: Dependencies = Field(default_factory=Dependencies)
     frontend: ManifestFrontend = Field(default_factory=ManifestFrontend)
+    # Named, typed *data* outputs (vs `frontend.widgets`, which are rendered
+    # React components). Each points at an existing module route; the platform
+    # normalizes the response into a shape-tagged envelope and renders it with a
+    # generic visualization. Surfaced by `GET /api/v1/datasets/catalog`.
+    datasets: list[DatasetEntry] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
     default_enabled: bool = True
     # Whether the module is safe to run against confidential data - i.e. it

@@ -38,6 +38,20 @@ interface Usage {
   error: string | null;
 }
 
+interface CacheConfig {
+  enabled: boolean;
+  max_bytes: number;
+  dry_run: boolean;
+  min_age_seconds: number;
+  local_used_bytes: number;
+}
+
+interface CacheFormState {
+  max_gb: string; // 0 / blank = disabled
+  dry_run: boolean;
+  min_age_min: string; // minutes
+}
+
 const GIB = 1024 ** 3;
 
 function formatBytes(n: number | null): string {
@@ -81,10 +95,22 @@ function formFromConfig(c: StorageConfig): FormState {
   };
 }
 
+function cacheFormFrom(c: CacheConfig): CacheFormState {
+  return {
+    max_gb: c.max_bytes > 0 ? String(Math.round((c.max_bytes / GIB) * 10) / 10) : "",
+    dry_run: c.dry_run,
+    min_age_min: String(Math.max(0, Math.round(c.min_age_seconds / 60))),
+  };
+}
+
 export default function AdminStoragePage() {
   const [config, setConfig] = useState<StorageConfig | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [cache, setCache] = useState<CacheConfig | null>(null);
+  const [cacheForm, setCacheForm] = useState<CacheFormState | null>(null);
+  const [cacheSaving, setCacheSaving] = useState(false);
+  const [migrating, setMigrating] = useState<"to_s3" | "to_local" | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [loadingUsage, setLoadingUsage] = useState(false);
@@ -101,6 +127,19 @@ export default function AdminStoragePage() {
     }
   }, []);
 
+  const loadCache = useCallback(async () => {
+    try {
+      const res = await rawFetch("/api/v1/admin/storage/cache");
+      if (res.ok) {
+        const data = (await res.json()) as CacheConfig;
+        setCache(data);
+        setCacheForm(cacheFormFrom(data));
+      }
+    } catch {
+      // Non-fatal: the cache card just stays blank.
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -112,7 +151,10 @@ export default function AdminStoragePage() {
         setConfig(data);
         if (data.is_admin) {
           setForm(formFromConfig(data));
-          if (data.mode === "s3") void loadUsage();
+          if (data.mode === "s3") {
+            void loadUsage();
+            void loadCache();
+          }
         }
       } catch {
         if (!cancelled) setConfig({ is_admin: false } as StorageConfig);
@@ -121,7 +163,7 @@ export default function AdminStoragePage() {
     return () => {
       cancelled = true;
     };
-  }, [loadUsage]);
+  }, [loadUsage, loadCache]);
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => (f ? { ...f, [key]: value } : f));
@@ -186,6 +228,68 @@ export default function AdminStoragePage() {
       toast.error(`Save failed: ${(err as Error).message}`);
     } finally {
       setSaving(false);
+    }
+  }
+
+  function setCacheField<K extends keyof CacheFormState>(key: K, value: CacheFormState[K]) {
+    setCacheForm((f) => (f ? { ...f, [key]: value } : f));
+  }
+
+  function buildCacheBody(f: CacheFormState) {
+    const gb = f.max_gb.trim() === "" ? 0 : Number(f.max_gb);
+    const min = Number(f.min_age_min);
+    return {
+      max_bytes: Number.isFinite(gb) && gb > 0 ? Math.round(gb * GIB) : 0,
+      dry_run: f.dry_run,
+      min_age_seconds: Number.isFinite(min) && min > 0 ? Math.round(min * 60) : 0,
+    };
+  }
+
+  async function onSaveCache() {
+    if (!cacheForm) return;
+    setCacheSaving(true);
+    try {
+      const res = await rawFetch("/api/v1/admin/storage/cache", {
+        method: "PUT",
+        json: buildCacheBody(cacheForm),
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        toast.error(
+          (detail as { detail?: string } | null)?.detail ?? `Save failed (${res.status}).`,
+        );
+        return;
+      }
+      const data = (await res.json()) as CacheConfig;
+      setCache(data);
+      setCacheForm(cacheFormFrom(data));
+      toast.success("Cache budget saved.");
+    } catch (err) {
+      toast.error(`Save failed: ${(err as Error).message}`);
+    } finally {
+      setCacheSaving(false);
+    }
+  }
+
+  async function onMigrate(direction: "to_s3" | "to_local") {
+    setMigrating(direction);
+    try {
+      const res = await rawFetch("/api/v1/admin/storage/migrate", {
+        method: "POST",
+        json: { direction },
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        toast.error(
+          (detail as { detail?: string } | null)?.detail ?? `Migration failed (${res.status}).`,
+        );
+        return;
+      }
+      toast.success("Migration started — track it in Admin → Jobs.");
+    } catch (err) {
+      toast.error(`Migration failed: ${(err as Error).message}`);
+    } finally {
+      setMigrating(null);
     }
   }
 
@@ -412,6 +516,102 @@ export default function AdminStoragePage() {
                     )}
                   </>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {config?.mode === "s3" && cacheForm && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Local cache budget</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  The bucket is authoritative; local disk is a cache. When it exceeds
+                  the budget, the least-recently-used logs &amp; outputs are evicted
+                  locally — they stay in the bucket and re-download on next use.
+                  Eviction is active only with a budget above 0 and dry-run off.
+                </p>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <Stat label="Local cache" value={formatBytes(cache?.local_used_bytes ?? null)} />
+                  <Stat
+                    label="Status"
+                    value={
+                      cache?.enabled ? (cache.dry_run ? "Dry-run" : "Active") : "Disabled"
+                    }
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Budget (GiB, 0 = disabled)" htmlFor="cache-max">
+                    <Input
+                      id="cache-max"
+                      inputMode="numeric"
+                      placeholder="0"
+                      value={cacheForm.max_gb}
+                      onChange={(e) => setCacheField("max_gb", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Min age (minutes)" htmlFor="cache-age">
+                    <Input
+                      id="cache-age"
+                      inputMode="numeric"
+                      placeholder="10"
+                      value={cacheForm.min_age_min}
+                      onChange={(e) => setCacheField("min_age_min", e.target.value)}
+                    />
+                  </Field>
+                </div>
+                <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                  <Label htmlFor="cache-dry" className="text-sm">
+                    Dry run
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      (log evictions, delete nothing)
+                    </span>
+                  </Label>
+                  <Switch
+                    id="cache-dry"
+                    checked={cacheForm.dry_run}
+                    onCheckedChange={(v) => setCacheField("dry_run", v)}
+                  />
+                </div>
+                <div className="flex justify-end pt-1">
+                  <Button onClick={onSaveCache} disabled={cacheSaving} className="cursor-pointer">
+                    {cacheSaving ? "Saving…" : "Save budget"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {config?.mode === "s3" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Data migration</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Switching the backend doesn&apos;t move existing data. Copy it across —
+                  copy-only, the source is never deleted. Run <strong>S3 → local</strong>{" "}
+                  before switching back to local disk. Progress shows in Admin → Jobs.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => void onMigrate("to_s3")}
+                    disabled={migrating !== null}
+                    className="cursor-pointer"
+                  >
+                    {migrating === "to_s3" ? "Starting…" : "Copy local → S3"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => void onMigrate("to_local")}
+                    disabled={migrating !== null}
+                    className="cursor-pointer"
+                  >
+                    {migrating === "to_local" ? "Starting…" : "Copy S3 → local"}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}

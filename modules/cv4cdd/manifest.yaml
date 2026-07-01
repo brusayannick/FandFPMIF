@@ -85,6 +85,15 @@ frontend:
             ui:
               widget: slider
 
+# Data-only output for the platform's generic visualization layer.
+datasets:
+  - id: detections
+    title: Drift detections
+    description: Computer-vision-detected concept drifts with type and confidence.
+    icon: AlertTriangle
+    shape: table
+    route: /results
+
 permissions:
   - read:event_log
   - write:module_results

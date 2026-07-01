@@ -27,6 +27,7 @@ import structlog
 from mate.api.db.engine import get_sessionmaker
 from mate.api.jobs.runtime import JobHandle, JobRuntime
 from mate.api.modules.installs import module_owned_by_other, record_install
+from mate.api.storage.module_archive import archive_module_sync
 from mate.sdk.errors import ModuleManifestError
 from mate.sdk.manifest import Manifest
 
@@ -80,6 +81,9 @@ def _install_from_upload(loader: ModuleLoader):
                 await handle.progress(60, 100, stage="installing", message="Resolving dependencies")
                 await loader.load_one(folder, manifest)
                 await _record_owner(handle.user_id, manifest.id, "upload")
+                # S3 mode: archive the source so a fresh VM can re-materialise it
+                # (best-effort + local-mode no-op, inside the helper).
+                await asyncio.to_thread(archive_module_sync, folder, manifest.id)
                 await handle.progress(100, 100, stage="ready", message="Module installed")
                 handle.payload["module_id"] = manifest.id
                 await handle.bus.publish(

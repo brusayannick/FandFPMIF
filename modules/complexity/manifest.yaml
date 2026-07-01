@@ -68,6 +68,15 @@ frontend:
       min_w: 5
       min_h: 6
 
+# Data-only output for the platform's generic visualization layer.
+datasets:
+  - id: metrics
+    title: Complexity metrics
+    description: Headline EPA-based complexity measures (magnitude, variety, entropy, Lempel-Ziv).
+    icon: Layers
+    shape: kpi
+    route: /metrics
+
 permissions:
   - read:event_log
   - write:module_results

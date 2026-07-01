@@ -64,6 +64,14 @@ services:
       # network alias for the public hostname (see below), so these calls
       # resolve to our Caddy on the internal network instead. Caddy serves the
       # pm-mate-vm cert (name mismatch for pm-mate) → skip verify on this hop.
+      #
+      # Staged replacement for the line below (see auth.ts KEYCLOAK_INTERNAL_URL):
+      # route the server-side OIDC back-channel straight to Keycloak over the
+      # internal network so there is no HTTPS cert-name-mismatch hop to bypass.
+      # Roll out in order: (1) uncomment the next line + redeploy; (2) verify a
+      # full login AND a token refresh succeed; (3) only THEN delete the
+      # NODE_TLS_REJECT_UNAUTHORIZED line.
+      # KEYCLOAK_INTERNAL_URL: http://keycloak:8080/auth/realms/flows-funds
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
       # Sessions are client-side cookie JWE (Auth.js default): SESSION_STORE_DIR is
       # intentionally unset. The full access+refresh cookie (chunked if >4KB) now

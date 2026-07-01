@@ -37,6 +37,7 @@ from typing import Any
 import structlog
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.orm import aliased
 
 from mate.api.config import Settings, get_settings
 from mate.api.db.engine import get_sessionmaker
@@ -111,6 +112,13 @@ WORKER_CONCURRENCY_KEY = "worker_concurrency"
 # Queue sentinel that asks one worker to retire (graceful scale-down). It can
 # never collide with a real job id (those are UUIDv7 strings).
 _RETIRE = object()
+
+# Import-job type whose children are the per-module precompute jobs. Mirrors
+# ``mate.api.ingest.dispatch.IMPORT_JOB_TYPE`` - inlined so the jobs layer never
+# imports the ingest layer. A precompute child is idempotent (it recomputes from
+# the log and overwrites its result cache), so one interrupted by a restart is
+# safe to re-run; the import job itself is not (partial parquet writes).
+_IMPORT_JOB_TYPE = "event_log.import"
 
 # Per-batch grace for `stop()`'s task drains. Pure-asyncio tasks settle far
 # inside this; it only bites when a handler is wedged in an uncancellable C call
@@ -569,16 +577,45 @@ class JobRuntime:
         log.info("job_runtime.started", workers=self._target_concurrency)
 
     async def _reconcile_orphan_running(self) -> None:
-        """Fail any rows left in `running` by a previous process.
+        """Reconcile rows left ``running`` by a previous process.
 
-        A worker can only ever crash mid-job (process killed, container
-        restart) - there's no recovery thread to resume an in-flight job, so
-        the row would otherwise stay `running` forever and the UI would show
-        a phantom active task.
+        A worker can only crash mid-job (process killed, ``--reload`` restart,
+        container stop) - there's no in-process thread to resume an in-flight
+        job, so a ``running`` row would otherwise stay ``running`` forever and
+        show a phantom active task. We split by resumability:
+
+        * **Precompute children** (an idempotent ``@on_event`` + ``@job`` under
+          an import job) are reset to ``queued`` instead of failed;
+          ``resume_interrupted_precompute()`` re-enqueues them once the loader
+          has re-registered their handlers. Without this a log whose *slow*
+          modules (cv4cdd, complexity-over-time) were still running at a dev
+          ``--reload`` restart stranded them as ``failed`` with empty result
+          caches - the panels then read "nothing", so the jobs looked like they
+          "did nothing".
+        * **Everything else** (the import job itself, route-triggered jobs) is
+          failed as before: re-running isn't safe / wasn't asked for.
         """
         sm = get_sessionmaker()
+        parent = aliased(Job)
         async with sm() as session:
-            result = await session.execute(
+            # Interrupted precompute children (parent is an import job) → requeue.
+            resumable = set(
+                (
+                    await session.execute(
+                        select(Job.id)
+                        .join(parent, Job.parent_job_id == parent.id)
+                        .where(Job.status == "running", parent.type == _IMPORT_JOB_TYPE)
+                    )
+                ).scalars()
+            )
+            if resumable:
+                await session.execute(
+                    update(Job)
+                    .where(Job.id.in_(resumable))
+                    .values(status="queued", started_at=None, error=None, progress_current=0)
+                )
+            # Anything still `running` after the requeue is non-resumable → fail.
+            failed = await session.execute(
                 update(Job)
                 .where(Job.status == "running")
                 .values(
@@ -588,11 +625,48 @@ class JobRuntime:
                 )
             )
             await session.commit()
-            if result.rowcount:
+            if resumable or failed.rowcount:
                 log.info(
                     "job_runtime.orphans_reconciled",
-                    count=result.rowcount,
+                    requeued=len(resumable),
+                    failed=failed.rowcount,
                 )
+
+    async def resume_interrupted_precompute(self) -> None:
+        """Re-enqueue precompute children a previous process left ``queued``.
+
+        Covers both jobs genuinely queued at the crash and the ``running`` ones
+        ``_reconcile_orphan_running()`` reset to ``queued``. Called from the
+        lifespan *after* the loader re-registers the ``module.<id>.event.<topic>``
+        handlers (a queued job with no handler would just fail in ``_run_one``)
+        and before the app serves any new import, so it never double-enqueues a
+        live job. Each precompute handler rebuilds its context purely from the
+        persisted payload (``log_id`` + ``_event_payload``), so the DB row alone
+        is enough to re-run it to completion - which writes the module output and
+        lets the processing gate finally reach ``ready``.
+        """
+        sm = get_sessionmaker()
+        parent = aliased(Job)
+        async with sm() as session:
+            rows = (
+                await session.execute(
+                    select(Job.id, Job.type)
+                    .join(parent, Job.parent_job_id == parent.id)
+                    .where(Job.status == "queued", parent.type == _IMPORT_JOB_TYPE)
+                )
+            ).all()
+        # Skip a job whose module was uninstalled since the crash (handler gone);
+        # enqueuing it would only fail it. Rare, and the gate cascade-skips it.
+        resumable = [jid for (jid, jtype) in rows if jtype in self._handlers]
+        unhandled = {jtype for (_jid, jtype) in rows if jtype not in self._handlers}
+        for job_id in resumable:
+            await self._queue.put(job_id)
+        if resumable or unhandled:
+            log.info(
+                "job_runtime.precompute_resumed",
+                resumed=len(resumable),
+                unhandled=len(unhandled),
+            )
 
     async def stop(self) -> None:
         if not self._running:

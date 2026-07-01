@@ -747,3 +747,67 @@ export interface SystemResources {
   sample_interval_seconds: number;
   history_window_seconds: number;
 }
+
+/** GET /api/v1/api-tokens item – a per-user personal access token (no secret). */
+export interface ApiTokenInfo {
+  id: string;
+  name: string;
+  token_prefix: string;
+  scopes: string[];
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked: boolean;
+}
+
+/** POST /api/v1/api-tokens – adds the cleartext `token`, shown exactly once. */
+export interface CreateTokenResponse extends ApiTokenInfo {
+  token: string;
+}
+
+export interface McpScopeInfo {
+  id: string;
+  description: string;
+}
+
+export interface McpOAuthInfo {
+  authorization_server: string;
+  client_id: string | null;
+  metadata_url: string;
+}
+
+/** GET /api/v1/api-tokens/mcp-info – MCP availability, endpoint, OAuth + scopes. */
+export interface McpInfo {
+  enabled: boolean;
+  url: string;
+  require_consent: boolean;
+  consented: boolean;
+  mint_allowed: boolean;
+  scopes_supported: McpScopeInfo[];
+  oauth: McpOAuthInfo;
+}
+
+/** GET/PUT /api/v1/api-tokens/consent – per-user external-egress consent. */
+export interface McpConsentState {
+  required: boolean;
+  consented: boolean;
+}
+
+/** GET/PUT /api/v1/system/mcp – admin live config. */
+export interface McpAdminConfig {
+  boot_enabled: boolean;
+  enabled: boolean;
+  mint_policy: string;
+}
+
+/** GET /api/v1/admin/api-tokens – org-wide token (admin). */
+export interface AdminApiTokenInfo {
+  id: string;
+  user_id: string;
+  user_email: string | null;
+  name: string;
+  token_prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked: boolean;
+}

@@ -1057,9 +1057,10 @@ async def download_event_log(log_id: str, user: AdminUserDep, session: SessionDe
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event log not found")
 
     paths = log_paths(log_id, row.user_id)
-    # The retained upload may live only in S3 on a cold cache - pull the log dir
-    # back before locating it (no-op in local mode), mirroring re-import.
-    await storage_sync.hydrate_log(row.user_id, log_id)
+    # The retained upload may live only in S3 on a cold cache - pull just the
+    # original (this serves the file; it never reads the parquet) before locating
+    # it. No-op in local mode.
+    await storage_sync.hydrate_original(row.user_id, log_id)
     located = paths.find_original()
     if located is None or not located.exists():
         raise HTTPException(

@@ -19,7 +19,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mate.api.db.models import Dashboard, DashboardShare, TeamMember, User
+from mate.api.db.models import Dashboard, DashboardShare, Flow, FlowShare, TeamMember, User
 
 
 def user_label(u: User | None) -> str:
@@ -78,6 +78,39 @@ async def get_accessible_dashboard(
     raise HTTPException(status_code=404, detail="Dashboard not found.")
 
 
+def _flow_share_target_clause(user_id: str, team_ids: set[str]):
+    conds = [FlowShare.target_user_id == user_id]
+    if team_ids:
+        conds.append(FlowShare.target_team_id.in_(team_ids))
+    return or_(*conds)
+
+
+async def flow_shared_with(
+    session: AsyncSession, flow_id: str, user_id: str, team_ids: set[str]
+) -> bool:
+    """Is *flow_id* shared with *user_id* (directly or via *team_ids*)?"""
+    stmt = (
+        select(FlowShare.id)
+        .where(FlowShare.flow_id == flow_id, _flow_share_target_clause(user_id, team_ids))
+        .limit(1)
+    )
+    return (await session.execute(stmt)).first() is not None
+
+
+async def get_accessible_flow(session: AsyncSession, flow_id: str, user_id: str) -> Flow:
+    """Return a flow the user may *view* - owner or share recipient (404 on no
+    access, mirroring :func:`get_accessible_dashboard`)."""
+    row = await session.get(Flow, flow_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Flow not found.")
+    if row.user_id == user_id:
+        return row
+    team_ids = await user_team_ids(session, user_id)
+    if await flow_shared_with(session, flow_id, user_id, team_ids):
+        return row
+    raise HTTPException(status_code=404, detail="Flow not found.")
+
+
 async def can_share_with_team(session: AsyncSession, team_id: str, user_id: str) -> bool:
     """A user may share with a team only if they belong to it - so a board
     can't be pushed to a team the sharer isn't part of."""
@@ -107,7 +140,7 @@ async def user_can_read_log(session: AsyncSession, log_id: str, user_id: str) ->
     revoking access is automatic.
     """
     team_ids = await user_team_ids(session, user_id)
-    stmt = (
+    dash_stmt = (
         select(DashboardShare.id)
         .join(Dashboard, Dashboard.id == DashboardShare.dashboard_id)
         .where(
@@ -116,4 +149,16 @@ async def user_can_read_log(session: AsyncSession, log_id: str, user_id: str) ->
         )
         .limit(1)
     )
-    return (await session.execute(stmt)).first() is not None
+    if (await session.execute(dash_stmt)).first() is not None:
+        return True
+    # A shared flow bound to this log also grants its recipients read access.
+    flow_stmt = (
+        select(FlowShare.id)
+        .join(Flow, Flow.id == FlowShare.flow_id)
+        .where(
+            Flow.event_log_id == log_id,
+            _flow_share_target_clause(user_id, team_ids),
+        )
+        .limit(1)
+    )
+    return (await session.execute(flow_stmt)).first() is not None

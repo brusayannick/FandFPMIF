@@ -37,6 +37,7 @@ from fastapi.responses import StreamingResponse
 
 from mate.api.auth import CurrentUserDep
 from mate.api.events import get_event_bus
+from mate.api.shutdown import is_shutting_down
 
 router = APIRouter(tags=["events"])
 
@@ -44,6 +45,10 @@ router = APIRouter(tags=["events"])
 # treat a quiet stream as dead and close it. A `job.progress` tick is usually
 # far more frequent, but the stream can sit silent for minutes between jobs.
 _HEARTBEAT_S = 15.0
+
+# Re-check the shutdown flag this often so a `while True` stream self-closes
+# within ~one interval of SIGTERM, ahead of uvicorn's graceful-shutdown timeout.
+_SHUTDOWN_POLL_S = 2.0
 
 # Headers that keep proxies from buffering the stream (mirrors the AI route).
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -71,14 +76,24 @@ async def stream_events(
         # `async with` lives inside the generator so the bus subscription is torn
         # down the moment the client disconnects (the generator is closed).
         async with bus.subscribe(topics) as stream:
+            idle = 0.0
             while True:
+                # Poll the shutdown flag so the stream exits during uvicorn's
+                # connection drain instead of being force-cancelled at the grace
+                # deadline (which prints a CancelledError ASGI traceback).
+                if is_shutting_down():
+                    return
                 try:
-                    env = await asyncio.wait_for(anext(stream), _HEARTBEAT_S)
+                    env = await asyncio.wait_for(anext(stream), _SHUTDOWN_POLL_S)
                 except TimeoutError:
-                    yield ": ping\n\n"
+                    idle += _SHUTDOWN_POLL_S
+                    if idle >= _HEARTBEAT_S:
+                        idle = 0.0
+                        yield ": ping\n\n"
                     continue
                 except StopAsyncIteration:
                     return
+                idle = 0.0
                 # Filter cross-user events. System-emitted envelopes (no
                 # `user_id` in payload) are always forwarded - they're
                 # operator-level, never user data.

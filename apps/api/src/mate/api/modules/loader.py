@@ -427,6 +427,11 @@ def _decode_event_filter_header(raw: str | None) -> list[dict[str, Any]] | None:
     return cleaned or None
 
 
+# Public alias for first-party callers (datasets / flows routes) that decode the
+# ephemeral filter header the same way module routes do.
+decode_event_filter_header = _decode_event_filter_header
+
+
 def _extra_handler_params(bound_method: Callable[..., Any]) -> list[inspect.Parameter]:
     """Return a handler's parameters after `ctx`.
 
@@ -1305,6 +1310,38 @@ class ModuleLoader:
             return await asyncio.to_thread(bound_method, ctx, *args, **kwargs)
         finally:
             shutil.rmtree(ctx.workdir, ignore_errors=True)
+
+    async def run_dataset_route(
+        self,
+        module_id: str,
+        route: str,
+        log_id: str,
+        user_id: str,
+        *,
+        method: str = "get",
+        filter_override: list[dict[str, Any]] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        """Invoke a loaded module's ``@route`` handler programmatically.
+
+        The public entry the dataset/flow layers use to produce a module's data
+        without an HTTP round-trip - it reuses the module's result cache and the
+        ephemeral filter exactly like a real request. Returns the raw handler
+        result (the dataset/flow layer normalizes it into an envelope)."""
+        loaded = self.loaded.get(module_id)
+        if loaded is None:
+            raise ValueError(f"Module {module_id!r} is not loaded.")
+        inst = loaded.instance
+        handler: Callable[..., Any] | None = None
+        for name in dir(inst):
+            spec = get_route_spec(getattr(type(inst), name, None))
+            if spec is not None and spec.path == route and spec.method.lower() == method.lower():
+                handler = getattr(inst, name)
+                break
+        if handler is None:
+            raise ValueError(f"No {method.upper()} route {route!r} on module {module_id!r}.")
+        ctx = await self._make_context(module_id, log_id, user_id, filter_override=filter_override)
+        return await self._invoke_handler(handler, ctx, **(params or {}))
 
     def _uses_worker_execution(self, module_id: str) -> bool:
         """Whether *module_id* is an in-process module that opted into per-job

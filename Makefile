@@ -23,13 +23,13 @@ preflight: ## Free $(PORT) + reap stale API / orphaned offload workers from a pr
 dev: preflight ## Run the API and the web dev server together (no docker)
 	uv run alembic -c apps/api/alembic.ini upgrade head
 	@trap 'kill 0' INT; \
-	(uv run uvicorn mate.api.main:app --reload --reload-dir apps/api/src --reload-dir packages/module-sdk-py/src --app-dir apps/api/src --host 127.0.0.1 --port $(PORT) --timeout-graceful-shutdown 10) & \
+	(uv run uvicorn mate.api.main:app --reload --reload-dir apps/api/src --reload-dir packages/module-sdk-py/src --app-dir apps/api/src --host 127.0.0.1 --port $(PORT) --timeout-graceful-shutdown 3) & \
 	(cd apps/web && pnpm dev) & \
 	wait
 
 dev-api: preflight ## Run only the API (with --reload)
 	uv run alembic -c apps/api/alembic.ini upgrade head
-	uv run uvicorn mate.api.main:app --reload --reload-dir apps/api/src --reload-dir packages/module-sdk-py/src --app-dir apps/api/src --host 127.0.0.1 --port $(PORT) --timeout-graceful-shutdown 10
+	uv run uvicorn mate.api.main:app --reload --reload-dir apps/api/src --reload-dir packages/module-sdk-py/src --app-dir apps/api/src --host 127.0.0.1 --port $(PORT) --timeout-graceful-shutdown 3
 
 dev-web: ## Run only the web dev server
 	cd apps/web && pnpm dev

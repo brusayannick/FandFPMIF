@@ -23,10 +23,27 @@ export { dashboardKeys };
  * model in `routes/modules.py`.
  */
 
+/** Points a `kind:"viz"` card at a module dataset (manifest `datasets:`). */
+export interface DatasetRef {
+  module_id: string;
+  dataset_id: string;
+}
+
 export interface DashboardItem {
   i: string;
-  module_id: string;
-  widget_id: string;
+  /** Discriminates the card type. Absent on legacy items (they predate the
+   * field) ⇒ treated as "widget". */
+  kind?: "widget" | "viz" | "flow";
+  /** widget cards: present when kind is "widget" (or legacy). */
+  module_id?: string;
+  widget_id?: string;
+  /** viz cards: the dataset + chosen generic viz + field mapping. */
+  dataset_ref?: DatasetRef | null;
+  viz_id?: string | null;
+  mapping?: Record<string, unknown>;
+  /** flow cards: a flow's terminal viz node (viz config lives on the node). */
+  flow_id?: string | null;
+  node_id?: string | null;
   title?: string | null;
   x: number;
   y: number;
@@ -271,6 +288,34 @@ export function useCardCatalog() {
   return useQuery({
     queryKey: dashboardKeys.cards(),
     queryFn: () => api<DashboardCard[]>("/api/v1/modules/cards"),
+    staleTime: 60_000,
+  });
+}
+
+/** One module *dataset* (manifest `datasets:`) the palette can drop as a
+ * generic-viz card. Mirrors `DatasetCatalogEntry` in `routes/datasets.py`. */
+export interface DatasetCatalogEntry {
+  module_id: string;
+  module_name: string;
+  dataset_id: string;
+  title: string;
+  description: string | null;
+  icon: string | null;
+  /** The data shape – drives which generic viz can render it. */
+  shape: "table" | "graph" | "kpi" | "tree" | "blob";
+  /** Module sub-route (leading slash) the card fetches the data from. */
+  route: string;
+  log_models: LogModel[];
+  params_schema: WidgetConfigSchema | null;
+}
+
+/** Every dataset exposed by the modules the user owns – powers the palette's
+ * generic-viz section. Filtered by the board's `log_model` client-side, exactly
+ * like `useCardCatalog`. */
+export function useDatasetCatalog() {
+  return useQuery({
+    queryKey: ["datasets", "catalog"],
+    queryFn: () => api<DatasetCatalogEntry[]>("/api/v1/datasets/catalog"),
     staleTime: 60_000,
   });
 }

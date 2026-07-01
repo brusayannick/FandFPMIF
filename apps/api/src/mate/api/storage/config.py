@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -57,6 +58,45 @@ _cache: StorageSettings | None = None
 _lock = threading.Lock()
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _load_from_env() -> StorageSettings | None:
+    """Build S3 settings from ``STORAGE_*`` env vars, or None when not configured.
+
+    A pre-boot fallback: the ``storage_config`` row lives *inside* metadata.db, so
+    a fresh VM (no DB yet) - e.g. the ``db_backup restore`` CLI run before alembic -
+    has no other way to learn the bucket. Consulted ONLY when the DB has no row, so
+    it never overrides an admin's explicit choice. Secret is plaintext here (env is
+    already a trusted channel; no Fernet needed).
+    """
+    if os.environ.get("STORAGE_MODE", "").strip().lower() != "s3":
+        return None
+    endpoint = os.environ.get("STORAGE_S3_ENDPOINT") or None
+    bucket = os.environ.get("STORAGE_S3_BUCKET") or None
+    if not endpoint or not bucket:
+        return None
+    return StorageSettings(
+        mode="s3",
+        endpoint_url=endpoint,
+        bucket=bucket,
+        region=os.environ.get("STORAGE_S3_REGION") or None,
+        access_key=os.environ.get("STORAGE_S3_ACCESS_KEY") or None,
+        secret_key=os.environ.get("STORAGE_S3_SECRET_KEY") or None,
+        path_style=_env_bool("STORAGE_S3_PATH_STYLE", True),
+        use_ssl=_env_bool("STORAGE_S3_USE_SSL", True),
+        prefix=(os.environ.get("STORAGE_S3_PREFIX") or "").strip("/"),
+    )
+
+
+def _env_or_default() -> StorageSettings:
+    return _load_from_env() or _DEFAULT
+
+
 def _fernet() -> Fernet:
     settings = get_settings()
     # Falls back to the DB URL so local dev works with no extra env; prod MUST
@@ -89,11 +129,11 @@ def _sqlite_path() -> str | None:
 def _load_from_db() -> StorageSettings:
     path = _sqlite_path()
     if not path:
-        return _DEFAULT
+        return _env_or_default()
     try:
         conn = sqlite3.connect(path)
     except sqlite3.Error:
-        return _DEFAULT
+        return _env_or_default()
     try:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -102,12 +142,12 @@ def _load_from_db() -> StorageSettings:
             (StorageConfig.SINGLETON_ID,),
         ).fetchone()
     except sqlite3.Error:
-        # Table not created yet (pre-migration) → safe local default.
-        return _DEFAULT
+        # Table not created yet (pre-migration / fresh VM) → env fallback or local.
+        return _env_or_default()
     finally:
         conn.close()
     if row is None:
-        return _DEFAULT
+        return _env_or_default()
     return StorageSettings(
         mode=row["mode"] or "local",
         endpoint_url=row["endpoint_url"],

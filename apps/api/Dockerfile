@@ -48,4 +48,4 @@ EXPOSE 8000
 # and the lifespan shutdown never runs - the container is SIGKILLed at the grace
 # deadline instead. With `exec`, uvicorn gets the signal and drains gracefully.
 # `init: true` in compose adds a PID-1 reaper for any escaped grandchild.
-CMD ["sh", "-c", "alembic -c apps/api/alembic.ini upgrade head && exec uvicorn mate.api.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 10"]
+CMD ["sh", "-c", "alembic -c apps/api/alembic.ini upgrade head && exec mate-api --host 0.0.0.0 --port 8000"]

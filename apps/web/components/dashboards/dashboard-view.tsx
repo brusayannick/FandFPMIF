@@ -341,7 +341,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
                   className="shrink-0 overflow-hidden"
                 >
                   <CardPalette
-                    onStartAdd={(card, e) => startAddRef.current?.(card, e)}
+                    onStartAdd={(req, e) => startAddRef.current?.(req, e)}
                     logModel={dashboard.log_model}
                   />
                 </motion.div>

@@ -90,6 +90,35 @@ frontend:
       min_w: 6
       min_h: 10
 
+# Data-only outputs for the platform's generic visualization layer. Each points
+# at a route above; the platform normalizes the response into a shape-tagged
+# envelope and renders it with a generic viz (no module-authored component).
+datasets:
+  - id: dfg
+    title: Directly-follows graph
+    description: Activities and their directly-follows relations (frequency + performance on edges).
+    icon: Network
+    shape: graph
+    route: /dfg
+  - id: petri_net
+    title: Petri net
+    description: Petri net mined with the Inductive miner (places, transitions, arcs).
+    icon: Workflow
+    shape: graph
+    route: /petri-net/inductive
+  - id: process_tree
+    title: Process tree
+    description: Hierarchical process tree of the discovered model.
+    icon: ListTree
+    shape: tree
+    route: /process-tree
+  - id: heuristics_net
+    title: Heuristics net
+    description: Dependency graph mined with the Heuristics miner.
+    icon: Network
+    shape: graph
+    route: /heuristics-net
+
 permissions:
   - read:event_log
   - write:module_results

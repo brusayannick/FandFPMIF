@@ -15,6 +15,16 @@
 :443 {
 	tls /etc/letsencrypt/live/pm-mate-vm.uni-muenster.de/fullchain.pem /etc/letsencrypt/live/pm-mate-vm.uni-muenster.de/privkey.pem
 
+	# Security headers applied to every upstream. HSTS deliberately omits
+	# includeSubDomains/preload: this is a shared uni domain, so we assert it
+	# only for this exact host. nosniff + Referrer-Policy are always safe.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
 	# FastAPI backend – REST under /api/v1, plus WebSocket (live jobs/events)
 	# and SSE (Mate AI streaming). Caddy proxies both transparently.
 	@api path /api/v1/*
@@ -38,6 +48,18 @@
 		not path /api/v1/* /health /auth/* /_next/static/* /_next/image*
 	}
 	header @webDoc Cache-Control "no-store"
+
+	# Frame protection + CSP for the web app only (NOT /api, /health, or the
+	# Keycloak pages under /auth, which set their own headers). CSP ships in
+	# Report-Only first: it never blocks, it only surfaces violations in the
+	# browser console so the policy can be tightened before it is enforced.
+	# To enforce, rename the header to Content-Security-Policy and drop any
+	# 'unsafe-*' the app no longer needs.
+	@webApp not path /api/v1/* /health /auth/*
+	header @webApp {
+		X-Frame-Options "SAMEORIGIN"
+		Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
+	}
 
 	# Everything else – the Next.js app, its static assets, and Auth.js
 	# routes at /api/auth/*.

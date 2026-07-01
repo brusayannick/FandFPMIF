@@ -18,13 +18,15 @@ from pydantic import BaseModel, Field
 from mate.api.auth import ADMIN_ROLE, AdminUserDep, CurrentUserDep
 from mate.api.db.models import StorageConfig
 from mate.api.db.session import SessionDep
-from mate.api.storage import s3
+from mate.api.jobs.runtime import get_job_runtime
+from mate.api.storage import eviction, s3
 from mate.api.storage.config import (
     StorageSettings,
     encrypt_secret,
     get_storage_settings,
     invalidate,
 )
+from mate.api.storage.migration import MIGRATION_JOB_TYPE
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/admin/storage", tags=["admin"])
@@ -76,6 +78,32 @@ class UsageOut(BaseModel):
     object_count: int = 0
     quota_bytes: int | None = None
     error: str | None = None
+
+
+class CacheConfigOut(BaseModel):
+    # In S3 mode local disk is a reclaimable cache; these tune the reaper that
+    # bounds it (see S3_OFFLOAD.md). ``enabled`` reflects S3 mode + a budget set.
+    enabled: bool = False
+    max_bytes: int = 0
+    dry_run: bool = True
+    min_age_seconds: int = 600
+    local_used_bytes: int = 0
+
+
+class CacheConfigIn(BaseModel):
+    max_bytes: int = Field(default=0, ge=0)
+    dry_run: bool = True
+    min_age_seconds: int = Field(default=600, ge=0)
+
+
+class MigrateIn(BaseModel):
+    # ``to_s3``: push existing local data up after a local→s3 switch.
+    # ``to_local``: pull S3 data down before flipping back to local.
+    direction: str = Field(pattern="^(to_s3|to_local)$")
+
+
+class MigrateOut(BaseModel):
+    job_id: str
 
 
 # --------------------------------------------------------------------------
@@ -238,4 +266,67 @@ async def get_usage(user: AdminUserDep) -> UsageOut:
         used_bytes=used.used_bytes,
         object_count=used.object_count,
         quota_bytes=s.quota_bytes,
+    )
+
+
+@router.get("/cache", response_model=CacheConfigOut)
+async def get_cache_config(user: AdminUserDep) -> CacheConfigOut:
+    """Current local-cache reaper config (env defaults + live override) plus the
+    bytes the cache occupies on local disk right now."""
+    cfg = await eviction.load_eviction_config()
+    used = await run_in_threadpool(eviction.local_cache_bytes)
+    return CacheConfigOut(
+        enabled=get_storage_settings().is_s3 and cfg.max_bytes > 0,
+        max_bytes=cfg.max_bytes,
+        dry_run=cfg.dry_run,
+        min_age_seconds=int(cfg.min_age_seconds),
+        local_used_bytes=used,
+    )
+
+
+@router.post("/migrate", response_model=MigrateOut)
+async def migrate_data(body: MigrateIn, user: AdminUserDep) -> MigrateOut:
+    """Submit a copy-only data migration between backends as a tracked job.
+
+    Both directions read/write the bucket, so S3 must be the active backend - run
+    ``to_local`` BEFORE switching the config back to local. The job never deletes
+    the source; watch it in Admin → Jobs.
+    """
+    if not get_storage_settings().is_s3:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Migration requires the S3 backend to be active. Switch to S3 first.",
+        )
+    job_id = await get_job_runtime().submit(
+        type_=MIGRATION_JOB_TYPE,
+        user_id=user.id,
+        title=f"Storage migration ({body.direction})",
+        subtitle="storage.migrate",
+        payload={"direction": body.direction},
+    )
+    log.info("admin_storage_migrate_submitted", admin_id=user.id, direction=body.direction)
+    return MigrateOut(job_id=job_id)
+
+
+@router.put("/cache", response_model=CacheConfigOut)
+async def put_cache_config(body: CacheConfigIn, user: AdminUserDep) -> CacheConfigOut:
+    """Persist a live override of the reaper budget / dry-run flag (no restart).
+
+    Stored in ``system_settings`` under ``storage.cache``; the reaper re-reads it
+    each tick. Setting ``max_bytes`` to 0 disables eviction (local disk keeps
+    every synced copy)."""
+    await eviction.save_eviction_config(body.max_bytes, body.dry_run, body.min_age_seconds)
+    log.info(
+        "admin_storage_cache_saved",
+        admin_id=user.id,
+        max_bytes=body.max_bytes,
+        dry_run=body.dry_run,
+    )
+    used = await run_in_threadpool(eviction.local_cache_bytes)
+    return CacheConfigOut(
+        enabled=get_storage_settings().is_s3 and body.max_bytes > 0,
+        max_bytes=body.max_bytes,
+        dry_run=body.dry_run,
+        min_age_seconds=body.min_age_seconds,
+        local_used_bytes=used,
     )

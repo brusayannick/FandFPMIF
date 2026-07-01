@@ -404,7 +404,7 @@ class ConformanceModule(Module):
             return {"kind": "conformance", "ran": False, "has_model": False, "technique": technique}
         cached = await self._cached_results(ctx, technique=technique)
         if cached is not None:
-            return {"ran": True, **cached}
+            return {"ran": True, "has_model": True, **cached}
         return {
             "kind": "conformance",
             "ran": False,

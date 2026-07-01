@@ -615,6 +615,44 @@ class Dashboard(Base):
     __table_args__ = (Index("ix_dashboards_user_created_at", "user_id", "created_at"),)
 
 
+class Flow(Base):
+    """A node-graph data pipeline ("flow") - the schematic builder, parallel to
+    :class:`Dashboard`. The user wires ``source -> module -> transform -> viz``
+    nodes on a canvas; ``graph_json`` holds the whole graph::
+
+        {"nodes": [{"id": "...", "type": "source|module|transform|viz",
+                    "position": {"x": 0, "y": 0}, "data": {...}}],
+         "edges": [{"id": "...", "source": "...", "target": "...",
+                    "sourceHandle": null, "targetHandle": null}]}
+
+    Bound to one event log (nulled, not cascade-deleted, when the log goes away).
+    A terminal viz node can also be placed on a dashboard as a ``kind:"flow"``
+    card, so one flow can feed many boards."""
+
+    __tablename__ = "flows"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    event_log_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("process_logs.id", ondelete="SET NULL")
+    )
+    log_model: Mapped[str] = mapped_column(
+        String(16), default="case_centric", server_default="case_centric", nullable=False
+    )
+    graph_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    __table_args__ = (Index("ix_flows_user_created_at", "user_id", "created_at"),)
+
+
 class Team(Base):
     """A named group of users (a "workspace") used as a dashboard-share target.
 
@@ -690,3 +728,67 @@ class DashboardShare(Base):
         Index("ix_dashboard_shares_target_user", "target_user_id"),
         Index("ix_dashboard_shares_target_team", "target_team_id"),
     )
+
+
+class FlowShare(Base):
+    """A read grant for one flow to one target (user or team) - the flow analogue
+    of :class:`DashboardShare`. Exactly one of ``target_user_id`` /
+    ``target_team_id`` is set. Read-only: recipients view the flow + its data
+    (owner-resolved via ``user_can_read_log``) but never mutate it."""
+
+    __tablename__ = "flow_shares"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    flow_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("flows.id", ondelete="CASCADE"), nullable=False
+    )
+    target_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE")
+    )
+    target_team_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("teams.id", ondelete="CASCADE")
+    )
+    created_by: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_flow_shares_flow", "flow_id"),
+        Index("ix_flow_shares_target_user", "target_user_id"),
+        Index("ix_flow_shares_target_team", "target_team_id"),
+    )
+
+
+class ApiToken(Base):
+    """Per-user personal access token (PAT) for non-browser API access.
+
+    The only machine-to-machine credential the platform issues: Keycloak only
+    mints short-lived, browser-bound access tokens, so an external MCP client
+    (Claude Desktop, claude.ai, a customer agent) authenticates with one of
+    these instead. The plaintext secret (``mate_pat_<random>``) is shown to the
+    user exactly once at creation and never stored - only its ``token_hash``
+    (blake2b) is persisted, so a DB leak can't reconstruct a usable token.
+    ``token_prefix`` keeps a non-secret fragment for display in the UI. A token
+    is non-admin by construction (it resolves to its owner with no roles).
+    """
+
+    __tablename__ = "api_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    token_prefix: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Granted OAuth-style scopes (e.g. ["processes:read", "modules:read"]). An
+    # empty list means "all read scopes" (back-compat for tokens minted before
+    # scoping). Enforced per MCP tool.
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    __table_args__ = (Index("ix_api_tokens_user", "user_id"),)

@@ -32,6 +32,7 @@ from mate.api.db.session import SessionDep
 from mate.api.events import get_event_bus
 from mate.api.jobs.runtime import get_job_runtime
 from mate.api.schemas.jobs import JobDetail
+from mate.api.shutdown import is_shutting_down
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -130,6 +131,8 @@ async def resume_queue(user: CurrentUserDep) -> None:
 
 # Idle keep-alive cadence; matches ``events_sse._HEARTBEAT_S``.
 _HEARTBEAT_S = 15.0
+# Shutdown-flag poll cadence; matches ``events_sse._SHUTDOWN_POLL_S``.
+_SHUTDOWN_POLL_S = 2.0
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
@@ -165,14 +168,24 @@ async def stream_job(job_id: str, session: SessionDep, user: CurrentUserDep) -> 
     async def _gen() -> AsyncIterator[str]:
         yield _sse(snapshot)
         async with bus.subscribe(["job.*"]) as stream:
+            idle = 0.0
             while True:
+                # Poll the shutdown flag so the stream exits during uvicorn's
+                # connection drain instead of being force-cancelled at the grace
+                # deadline (which prints a CancelledError ASGI traceback).
+                if is_shutting_down():
+                    return
                 try:
-                    env = await asyncio.wait_for(anext(stream), _HEARTBEAT_S)
+                    env = await asyncio.wait_for(anext(stream), _SHUTDOWN_POLL_S)
                 except TimeoutError:
-                    yield ": ping\n\n"
+                    idle += _SHUTDOWN_POLL_S
+                    if idle >= _HEARTBEAT_S:
+                        idle = 0.0
+                        yield ": ping\n\n"
                     continue
                 except StopAsyncIteration:
                     return
+                idle = 0.0
                 payload = env.payload
                 if payload.get("id") != job_id:
                     continue

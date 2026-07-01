@@ -112,6 +112,40 @@ class Settings(BaseSettings):
     # within the freshness window. 0 disables; bounded by a per-frame size guard.
     event_log_cache_entries: int = Field(default=3, ge=0, le=64)
 
+    # --- S3 local-cache eviction (see S3_OFFLOAD.md) -----------------------
+    # In S3 mode the bucket is authoritative and local disk is a reclaimable
+    # cache. When the cache exceeds ``local_cache_max_bytes`` a background reaper
+    # deletes the least-recently-used log/output dirs locally (they survive on S3
+    # and re-hydrate on the next read). ``0`` disables eviction - local disk keeps
+    # every synced copy, the pre-eviction behaviour. No effect in local mode,
+    # where the local copy is the only copy. Admins override these live at
+    # Admin → Storage (persisted in ``system_settings`` under ``storage.cache``).
+    local_cache_max_bytes: int = Field(
+        default=0,
+        ge=0,
+        description="LOCAL_CACHE_MAX_BYTES - S3-mode local cache high-water mark (0=disabled).",
+    )
+    # Safety: the reaper logs candidates but deletes nothing while true. Soak in
+    # dry-run, confirm the candidate set, then flip to false to enable deletes.
+    cache_evict_dry_run: bool = Field(
+        default=True,
+        description="CACHE_EVICT_DRY_RUN - log eviction candidates without deleting.",
+    )
+    # Never evict a dir accessed within this window - guards against deleting a
+    # tree whose S3 upload is still in flight just after a write.
+    cache_evict_min_age_seconds: int = Field(default=600, ge=0)
+    # How often the reaper wakes.
+    cache_evict_interval_seconds: int = Field(default=60, ge=5, le=3600)
+
+    # Jobs-table retention (see S3_OFFLOAD.md). Terminal jobs older than this many
+    # days are pruned by the daily retention sweeper - bounds metadata.db growth on
+    # a busy deployment. `0` keeps every job forever (the pre-retention behaviour).
+    job_retention_days: int = Field(
+        default=0,
+        ge=0,
+        description="JOB_RETENTION_DAYS - prune terminal jobs older than N days (0=keep forever).",
+    )
+
     # Live system-resource sampler (Admin → System). A background task samples
     # CPU/RAM every ``metrics_sample_interval_seconds`` into a ring buffer of the
     # last ``metrics_history_samples`` points (default 90 x 2s = 3 min of history).
@@ -170,6 +204,47 @@ class Settings(BaseSettings):
     storage_encryption_key: str | None = Field(
         default=None,
         description="STORAGE_ENCRYPTION_KEY - encrypts the stored S3 secret key.",
+    )
+
+    # MCP server (Model Context Protocol). When enabled the API mounts a
+    # read-only MCP endpoint at ``/mcp`` (streamable HTTP) so external MCP
+    # clients (Claude Desktop, claude.ai, customer agents) can consume a user's
+    # process-mining outputs. Authenticated by a per-user API token (PAT) minted
+    # at Settings → API tokens. Default OFF - turning it on opens a network
+    # surface that reaches outside the local box, so it must be a deliberate
+    # opt-in (consistent with the local-first default).
+    mcp_enabled: bool = Field(
+        default=False,
+        description="MCP_ENABLED - mount the read-only MCP server at /mcp.",
+    )
+    # Public base URL of this API (e.g. https://mate.example.com), used only to
+    # advertise the MCP endpoint URL in the UI. Empty falls back to deriving it
+    # from the incoming request.
+    api_base_url: str | None = Field(
+        default=None,
+        description="API_BASE_URL - public base URL, advertised for the MCP endpoint.",
+    )
+    # MCP rate limiting + concurrency (single-instance, in-process). The per-user
+    # token bucket admits ``per_minute`` requests with a ``burst`` ceiling;
+    # ``0`` disables it. Concurrency caps bound simultaneous tool executions.
+    mcp_rate_limit_per_minute: int = Field(default=120, ge=0, le=100_000)
+    mcp_rate_limit_burst: int = Field(default=40, ge=0, le=100_000)
+    mcp_max_concurrency_per_user: int = Field(default=4, ge=1, le=64)
+    mcp_max_concurrency_global: int = Field(default=32, ge=1, le=512)
+    # Wall-clock cap on a single MCP tool call (a tool runs inline in the request,
+    # not via the job runtime, so it needs its own timeout).
+    mcp_tool_timeout_seconds: float = Field(default=30.0, ge=1, le=600)
+    # Pre-registered Keycloak public OAuth client id for MCP clients (DCR not
+    # assumed). Surfaced via /api/v1/api-tokens/mcp-info; empty = PAT-only.
+    mcp_oauth_client_id: str | None = Field(
+        default=None,
+        description="MCP_OAUTH_CLIENT_ID - pre-registered Keycloak client for MCP OAuth.",
+    )
+    # Require explicit per-user opt-in before MCP serves a user's data to an
+    # external client (local-first egress gate). Off = minting a token suffices.
+    mcp_require_egress_consent: bool = Field(
+        default=True,
+        description="MCP_REQUIRE_EGRESS_CONSENT - gate MCP data egress on per-user consent.",
     )
 
     @property

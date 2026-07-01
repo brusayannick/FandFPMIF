@@ -47,6 +47,7 @@ from mate.api.schemas.event_logs import (
     XmlProbeResponse,
 )
 from mate.api.storage import sync as storage_sync
+from mate.api.storage.quota import over_quota_sync
 from mate.api.uuid7 import uuid7_str
 
 log = structlog.get_logger(__name__)
@@ -113,6 +114,14 @@ async def create_event_log(
 
     if folder_id is not None:
         await get_owned_folder(session, folder_id, user.id)
+
+    # Reject up-front when the bucket is at its quota (S3 mode + quota set only),
+    # before staging any bytes. A guardrail: an unknown usage never blocks.
+    if await asyncio.to_thread(over_quota_sync):
+        raise HTTPException(
+            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+            detail="Storage quota reached. Delete data or raise the quota in Admin → Storage.",
+        )
 
     log_id = uuid7_str()
     paths = log_paths(log_id, user.id)
@@ -499,6 +508,7 @@ async def reimport_event_log(
     # The retained upload may live only in the S3 bucket on a cold cache - pull
     # the log dir back before locating it (no-op in local mode).
     await storage_sync.hydrate_log(user.id, log_id)
+    await storage_sync.hydrate_original(user.id, log_id)
     # OCEL stores its upload under the real suffix (jsonocel/xmlocel/sqlite), not
     # original.ocel - locate by glob so re-import works for every format.
     original_path = paths.original_for(row.source_format)
@@ -597,6 +607,7 @@ async def remap_event_log(
     paths = log_paths(log_id, user.id)
     # Pull the retained upload back from S3 if the local cache is cold.
     await storage_sync.hydrate_log(user.id, log_id)
+    await storage_sync.hydrate_original(user.id, log_id)
     original_path = paths.original_for(row.source_format)
     if not original_path.exists():
         raise HTTPException(
@@ -672,6 +683,7 @@ async def duplicate_event_log(
     src_paths = log_paths(log_id, user.id)
     # On a cold S3 cache the bytes live only in the bucket - pull them first.
     await storage_sync.hydrate_log(user.id, log_id)
+    await storage_sync.hydrate_original(user.id, log_id)
     if not src_paths.exists():
         raise HTTPException(
             status_code=409,

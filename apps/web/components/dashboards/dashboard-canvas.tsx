@@ -14,8 +14,11 @@ import {
   type CanvasSettings,
   type DashboardCard as CatalogCard,
   type DashboardItem,
+  type DatasetCatalogEntry,
   type WidgetConfigSchema,
 } from "@/lib/dashboard-queries";
+import type { CardPatch } from "@/components/dashboards/dashboard-card";
+import { defaultVizForShape, vizRegistry } from "@/lib/visualizations/registry";
 
 import "react-grid-layout/css/styles.css";
 
@@ -94,11 +97,62 @@ type FreeResize = {
   snapshot: DashboardItem[];
 };
 
+/** A palette item being added: a module-authored widget card, or a generic-viz
+ * card bound to a module dataset. */
+export type AddRequest =
+  | { kind: "widget"; card: CatalogCard }
+  | { kind: "viz"; dataset: DatasetCatalogEntry };
+
 /** Synchronously begins a palette→canvas add at the pointer's position. The
  * canvas hands one of these to the palette (via a ref) so the palette's
  * `pointerdown` attaches the drag listeners in the same tick — identical to the
  * canvas's own free-drag, not deferred through React state + an effect. */
-export type AddStarter = (card: CatalogCard, e: React.PointerEvent) => void;
+export type AddStarter = (req: AddRequest, e: React.PointerEvent) => void;
+
+/** Drop size for an add request: the widget's declared size, or the default
+ * viz's default geometry for a dataset (sized by its shape's default viz). */
+function addGeometry(req: AddRequest): { w: number; h: number } {
+  if (req.kind === "widget") return { w: req.card.default_w, h: req.card.default_h };
+  const d = vizRegistry[defaultVizForShape(req.dataset.shape)]?.defaults;
+  return { w: d?.w ?? 6, h: d?.h ?? 8 };
+}
+
+/** Build the placed item for an add request at `(x, y)`. A widget card carries
+ * `module_id`/`widget_id`; a viz card carries `dataset_ref` + a default viz for
+ * the dataset's shape (empty mapping ⇒ renders immediately or prompts config). */
+function buildAddItem(req: AddRequest, i: string, x: number, y: number): DashboardItem {
+  if (req.kind === "widget") {
+    const c = req.card;
+    return {
+      i,
+      kind: "widget",
+      module_id: c.module_id,
+      widget_id: c.widget_id,
+      title: c.title,
+      x,
+      y,
+      w: c.default_w,
+      h: c.default_h,
+      config: configDefaults(c.config_schema),
+    };
+  }
+  const ds = req.dataset;
+  const vizId = defaultVizForShape(ds.shape);
+  const g = vizRegistry[vizId]?.defaults;
+  return {
+    i,
+    kind: "viz",
+    dataset_ref: { module_id: ds.module_id, dataset_id: ds.dataset_id },
+    viz_id: vizId,
+    mapping: {},
+    title: ds.title,
+    x,
+    y,
+    w: g?.w ?? 6,
+    h: g?.h ?? 8,
+    config: {},
+  };
+}
 
 /** Layout/child id of the live placeholder shown while adding from the palette. */
 const ADD_GHOST_ID = "__add_ghost__";
@@ -160,7 +214,10 @@ export function DashboardCanvas({
   const schemaFor = useMemo(() => {
     const map = new Map<string, WidgetConfigSchema | null>();
     for (const c of catalog ?? []) map.set(`${c.module_id}:${c.widget_id}`, c.config_schema);
-    return (moduleId: string, widgetId: string) => map.get(`${moduleId}:${widgetId}`);
+    // viz cards drive their settings from the viz registry + dataset columns
+    // (see VizSettings), not a widget config_schema.
+    return (it: DashboardItem) =>
+      it.kind === "viz" ? undefined : map.get(`${it.module_id}:${it.widget_id}`);
   }, [catalog]);
   // Per-widget grid constraints from the catalog, keyed by `module:widget`:
   //  - `resizable`       whether the user may resize the card at all,
@@ -183,8 +240,16 @@ export function DashboardCanvas({
         fixedW: num(c.default_w, FALLBACK.fixedW),
         fixedH: num(c.default_h, FALLBACK.fixedH),
       });
-    return (moduleId: string, widgetId: string) =>
-      map.get(`${moduleId}:${widgetId}`) ?? FALLBACK;
+    return (it: DashboardItem) => {
+      // viz cards are always resizable; their floor comes from the viz registry.
+      if (it.kind === "viz") {
+        const d = it.viz_id ? vizRegistry[it.viz_id]?.defaults : undefined;
+        return d
+          ? { resizable: true, minW: d.minW, minH: d.minH, fixedW: d.w, fixedH: d.h }
+          : FALLBACK;
+      }
+      return map.get(`${it.module_id}:${it.widget_id}`) ?? FALLBACK;
+    };
   }, [catalog]);
 
   // Live free-mode drag state. `liveItems` overrides the rendered layout while a
@@ -193,10 +258,10 @@ export function DashboardCanvas({
   const [liveItems, setLiveItems] = useState<DashboardItem[] | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
-  // Live palette→canvas add state. `addCard` is the card being added (drives the
-  // ghost + chip); `addPointer` positions the chip; `addCell` is the snapped grid
-  // cell under the cursor (null when off-grid).
-  const [addCard, setAddCard] = useState<CatalogCard | null>(null);
+  // Live palette→canvas add state. `addReq` is the item being added - a widget
+  // card or a dataset viz (drives the ghost + chip); `addPointer` positions the
+  // chip; `addCell` is the snapped grid cell under the cursor (null when off-grid).
+  const [addReq, setAddReq] = useState<AddRequest | null>(null);
   const [addPointer, setAddPointer] = useState<{ x: number; y: number } | null>(null);
   const [addCell, setAddCell] = useState<{ x: number; y: number } | null>(null);
   // Card lifecycle animation state. `recentlyAddedId` pops the just-dropped card
@@ -234,19 +299,9 @@ export function DashboardCanvas({
   // hovered cell that real cards reflow around (same machinery as a free drag),
   // so the preview matches exactly what `commitAdd` will persist.
   const ghostItem = useMemo<DashboardItem | null>(() => {
-    if (!addCard || !addCell) return null;
-    return {
-      i: ADD_GHOST_ID,
-      module_id: addCard.module_id,
-      widget_id: addCard.widget_id,
-      title: addCard.title,
-      x: addCell.x,
-      y: addCell.y,
-      w: addCard.default_w,
-      h: addCard.default_h,
-      config: {},
-    };
-  }, [addCard, addCell]);
+    if (!addReq || !addCell) return null;
+    return buildAddItem(addReq, ADD_GHOST_ID, addCell.x, addCell.y);
+  }, [addReq, addCell]);
 
   // Cards render from the committed `items` (stable content) and are positioned
   // by the `layout` prop, which carries live positions during a free drag or a
@@ -261,7 +316,7 @@ export function DashboardCanvas({
   const layout = useMemo<Layout[]>(
     () =>
       displayItems.map((it) => {
-        const c = constraintsFor(it.module_id, it.widget_id);
+        const c = constraintsFor(it);
         if (!c.resizable) {
           // Fixed-size card: lock to the declared size and forbid resize. The
           // stored w/h is ignored so even an old placement renders at the fixed
@@ -303,7 +358,7 @@ export function DashboardCanvas({
   const onItemsChangeRef = useRef(onItemsChange);
   onItemsChangeRef.current = onItemsChange;
   const updateItem = useCallback(
-    (id: string, patch: { title?: string; config?: Record<string, unknown> }) =>
+    (id: string, patch: CardPatch) =>
       onItemsChangeRef.current(
         itemsRef.current.map((it) => (it.i === id ? { ...it, ...patch } : it)),
       ),
@@ -334,10 +389,7 @@ export function DashboardCanvas({
     [reduceMotion, removeItem, schedule],
   );
   const cardHandlers = useMemo(() => {
-    const m = new Map<
-      string,
-      { onUpdate: (p: { title?: string; config?: Record<string, unknown> }) => void; onRemove: () => void }
-    >();
+    const m = new Map<string, { onUpdate: (p: CardPatch) => void; onRemove: () => void }>();
     for (const it of items)
       m.set(it.i, { onUpdate: (p) => updateItem(it.i, p), onRemove: () => requestRemove(it.i) });
     return m;
@@ -347,7 +399,7 @@ export function DashboardCanvas({
     // RGL fires this on mount, on resize, and on its own (non-free) drags. While
     // a free drag/resize or palette add is in flight the layout prop is ours (it
     // carries the ghost/reflow), so ignore the echo or we'd persist the preview.
-    if (!editing || dragRef.current || resizeRef.current || addCard) return;
+    if (!editing || dragRef.current || resizeRef.current || addReq) return;
     const byId = new Map(next.map((l) => [l.i, l]));
     const merged = items.map((it) => {
       const l = byId.get(it.i);
@@ -392,7 +444,7 @@ export function DashboardCanvas({
     // Resize: the corner handle. The card keeps its (x, y); only w/h grow, and
     // the cards it now overlaps reflow below it.
     if (target.closest(".dashboard-resize-handle")) {
-      const c = constraintsFor(it.module_id, it.widget_id);
+      const c = constraintsFor(it);
       if (!c.resizable) return;
       const { minW, minH } = c;
       resizeRef.current = {
@@ -524,21 +576,12 @@ export function DashboardCanvas({
   // Append `card` and reflow existing cards around it (same as the live ghost
   // preview), then hand the new list to the parent. Refs so it's stable for the
   // gesture effect below.
-  const commitAdd = useCallback((card: CatalogCard, x: number, y: number) => {
-    const newItem: DashboardItem = {
-      i:
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `card-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      module_id: card.module_id,
-      widget_id: card.widget_id,
-      title: card.title,
-      x,
-      y,
-      w: card.default_w,
-      h: card.default_h,
-      config: configDefaults(card.config_schema),
-    };
+  const commitAdd = useCallback((req: AddRequest, x: number, y: number) => {
+    const id =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `card-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const newItem = buildAddItem(req, id, x, y);
     onItemsChangeRef.current(reflowFree([...itemsRef.current, newItem], newItem.i, x, y));
     // Pop the new card in; clear the flag after the animation (no-op under
     // reduced motion, where the CSS guard strips the animation duration).
@@ -588,25 +631,26 @@ export function DashboardCanvas({
   // preview a ghost, then on release drop at the hovered cell — or, if it was a
   // click with no real movement, append at the bottom so a plain click still adds.
   const startAdd = useCallback(
-    (card: CatalogCard, e: React.PointerEvent) => {
+    (req: AddRequest, e: React.PointerEvent) => {
       if (!editing) return;
       const startX = e.clientX;
       const startY = e.clientY;
-      setAddCard(card);
+      const w = addGeometry(req).w;
+      setAddReq(req);
       setAddPointer({ x: startX, y: startY });
-      setAddCell(cellWithinGrid(startX, startY, card.default_w));
+      setAddCell(cellWithinGrid(startX, startY, w));
       let moved = false;
       const move = (ev: PointerEvent) => {
         if (Math.abs(ev.clientX - startX) > 4 || Math.abs(ev.clientY - startY) > 4) moved = true;
         setAddPointer({ x: ev.clientX, y: ev.clientY });
-        setAddCell(cellWithinGrid(ev.clientX, ev.clientY, card.default_w));
+        setAddCell(cellWithinGrid(ev.clientX, ev.clientY, w));
       };
       const finish = (ev: PointerEvent) => {
         cleanup();
-        const cell = cellWithinGrid(ev.clientX, ev.clientY, card.default_w);
-        if (cell) commitAdd(card, cell.x, cell.y);
+        const cell = cellWithinGrid(ev.clientX, ev.clientY, w);
+        if (cell) commitAdd(req, cell.x, cell.y);
         else if (!moved)
-          commitAdd(card, 0, itemsRef.current.reduce((m, it) => Math.max(m, it.y + it.h), 0));
+          commitAdd(req, 0, itemsRef.current.reduce((m, it) => Math.max(m, it.y + it.h), 0));
       };
       const cancel = () => cleanup();
       const cleanup = () => {
@@ -614,7 +658,7 @@ export function DashboardCanvas({
         window.removeEventListener("pointerup", finish);
         window.removeEventListener("pointercancel", cancel);
         addTeardownRef.current = () => {};
-        setAddCard(null);
+        setAddReq(null);
         setAddPointer(null);
         setAddCell(null);
       };
@@ -679,13 +723,13 @@ export function DashboardCanvas({
                   item={it}
                   logId={logId}
                   editing={editing}
-                  schema={schemaFor(it.module_id, it.widget_id)}
+                  schema={schemaFor(it)}
                   chrome={settings.chrome}
                   onUpdate={h?.onUpdate ?? (() => {})}
                   onRemove={h?.onRemove ?? (() => {})}
                 />
               </div>
-              {freeReflow && constraintsFor(it.module_id, it.widget_id).resizable && (
+              {freeReflow && constraintsFor(it).resizable && (
                 // Custom resize grip (RGL's native resize is off in free mode):
                 // `onPointerDown` reads `.dashboard-resize-handle` to start a
                 // reflow-driven resize. Clickable even at opacity 0. Omitted for
@@ -704,14 +748,14 @@ export function DashboardCanvas({
           </div>
         )}
       </GridLayout>
-      {addCard &&
+      {addReq &&
         addPointer &&
         createPortal(
           <div
             className="pointer-events-none fixed z-50 max-w-[16rem] truncate rounded-md border border-border bg-card px-2 py-1 text-xs font-medium shadow-lg animate-in fade-in-0 zoom-in-95 duration-150"
             style={{ left: addPointer.x + 12, top: addPointer.y + 12 }}
           >
-            {addCard.title}
+            {addReq.kind === "widget" ? addReq.card.title : addReq.dataset.title}
           </div>,
           document.body,
         )}

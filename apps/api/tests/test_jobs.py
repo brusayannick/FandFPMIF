@@ -424,3 +424,102 @@ async def test_sse_events_receives_job_lifecycle(client: AsyncClient) -> None:
     assert "job.queued" in topics
     assert "job.started" in topics
     assert "job.completed" in topics
+
+
+@pytest.mark.asyncio
+async def test_interrupted_precompute_resumes_on_restart() -> None:
+    """A precompute job killed mid-run (or left queued) by a restart must re-run
+    on the next boot, not strand with an empty result cache.
+
+    Regression: importing a log locally with `make dev` (`uvicorn --reload`), the
+    *slow* modules (cv4cdd ~70s, complexity-over-time) were still running when a
+    reload restarted the API. The boot reconcile marked them `failed` and stranded
+    the queued ones, so nothing ever wrote their output - the dock showed the jobs
+    but their panels were empty, i.e. they "did nothing". Precompute jobs are
+    idempotent and re-runnable from their persisted row, so an interrupted one is
+    reset to `queued` and re-enqueued instead.
+    """
+    from mate.api.config import get_settings
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.db.models import Job
+    from mate.api.events.bus import EventBus
+    from mate.api.jobs.runtime import JobRuntime
+
+    from .conftest import TEST_USER_ID
+
+    rt = JobRuntime(settings=get_settings(), bus=EventBus())
+    ran: list[str] = []
+
+    async def precompute(handle: object) -> None:
+        ran.append(handle.id)  # type: ignore[attr-defined]
+
+    # Precompute handlers are registered under exactly this type shape by the
+    # module loader (`module.<id>.event.<topic>`).
+    rt.register("module.demo.event.log_imported", precompute)
+    sm = get_sessionmaker()
+
+    async def _status(job_id: str) -> str:
+        async with sm() as session:
+            job = await session.get(Job, job_id)
+            assert job is not None
+            return job.status
+
+    def _child(jid: str, status: str, *, parent: str | None) -> Job:
+        return Job(
+            id=jid,
+            user_id=TEST_USER_ID,
+            type="module.demo.event.log_imported",
+            title="demo precompute",
+            module_id="demo",
+            parent_job_id=parent,
+            payload_json={"log_id": "log-1", "_event_payload": {}},
+            status=status,
+        )
+
+    # The state a crash-mid-import leaves behind: a completed import job with one
+    # child left `running` (slow module killed mid-run) and one still `queued`
+    # (never got a worker), plus an unrelated `running` job with no import parent
+    # (must fail as before, not resume).
+    seeded = ["imp-1", "pc-running", "pc-queued", "other-running"]
+    async with sm() as session:
+        session.add(
+            Job(
+                id="imp-1",
+                user_id=TEST_USER_ID,
+                type="event_log.import",
+                title="import",
+                payload_json={"log_id": "log-1"},
+                status="completed",
+            )
+        )
+        session.add(_child("pc-running", "running", parent="imp-1"))
+        session.add(_child("pc-queued", "queued", parent="imp-1"))
+        session.add(_child("other-running", "running", parent=None))
+        await session.commit()
+
+    try:
+        await rt.start()  # runs _reconcile_orphan_running
+
+        # Killed precompute child → reset to `queued` (resumable), not failed.
+        assert await _status("pc-running") == "queued"
+        # Unrelated running job (no import parent) → failed as before.
+        assert await _status("other-running") == "failed"
+
+        await rt.resume_interrupted_precompute()
+
+        for jid in ("pc-running", "pc-queued"):
+            for _ in range(60):  # ≤3s
+                if await _status(jid) == "completed":
+                    break
+                await asyncio.sleep(0.05)
+            assert await _status(jid) == "completed", jid
+        assert set(ran) == {"pc-running", "pc-queued"}  # both actually re-ran
+        assert await _status("other-running") == "failed"  # never resumed
+    finally:
+        await rt.stop()
+        async with sm() as session:
+            for jid in seeded:
+                row = await session.get(Job, jid)
+                if row is not None:
+                    await session.delete(row)
+            await session.commit()

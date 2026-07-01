@@ -85,6 +85,15 @@ class DashboardShareOut(BaseModel):
     created_at: datetime
 
 
+class FlowShareOut(BaseModel):
+    id: str
+    flow_id: str
+    kind: Literal["user", "team"]
+    target_id: str
+    label: str
+    created_at: datetime
+
+
 class ShareTarget(BaseModel):
     """A candidate the current user can share a dashboard with."""
 

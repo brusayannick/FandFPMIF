@@ -4,7 +4,11 @@ FROM python:3.12-slim AS base
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    # Slow/throttled connections need a generous download budget — cvxopt
+    # (a pm4py dep) alone is ~20 MB and blows the default 30s ceiling. Also
+    # applies to the first-boot per-module dep installs.
+    UV_HTTP_TIMEOUT=600
 
 # git – required by the module install + AI-refactor flows when the source
 # is a git URL (shell-out via `asyncio.create_subprocess_exec("git", ...)`).

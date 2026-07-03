@@ -8,12 +8,18 @@ import {
   Activity,
   AlertTriangle,
   ArrowUp,
+  Boxes,
+  Compass,
   FileText,
+  Gauge,
+  GitCompare,
   Lightbulb,
   ListChecks,
+  Network,
   RotateCcw,
   ShieldCheck,
   Sparkles,
+  TrendingUp,
   Waves,
   Workflow,
   X,
@@ -58,42 +64,24 @@ interface Starter {
   subtitle: string;
 }
 
-// Starters shown when there's no process context (landing, settings, etc.).
+// Default starters – shown whenever no specific module panel is active (landing,
+// settings, and the process overview page). Kept general/navigational rather than
+// asking about "this process" — the assistant can answer or drop a nav chip.
 const DEFAULT_STARTERS: Starter[] = [
   {
     icon: FileText,
-    title: "Summarize this process",
-    subtitle: "Get a quick overview of variants and bottlenecks",
+    title: "How do I import an event log?",
+    subtitle: "Bring a new process into MATE from XES or CSV",
   },
   {
-    icon: Lightbulb,
-    title: "Explain a variant",
-    subtitle: "Walk me through how a specific path flows",
+    icon: Workflow,
+    title: "What can MATE analyse?",
+    subtitle: "Overview of the available analysis modules",
   },
   {
-    icon: Zap,
-    title: "Find bottlenecks",
-    subtitle: "Highlight the slowest steps across cases",
-  },
-];
-
-// Process-level starters – shown on /processes/{logId} when no module is active.
-// These replace the inline "Generate AI overview" and "Check data quality" cards.
-const PROCESS_STARTERS: Starter[] = [
-  {
-    icon: Sparkles,
-    title: "Generate an AI overview of this process",
-    subtitle: "Cross-module summary of the key findings",
-  },
-  {
-    icon: ShieldCheck,
-    title: "Check data quality for this log",
-    subtitle: "Surface import or event issues worth fixing first",
-  },
-  {
-    icon: Zap,
-    title: "Find bottlenecks across the process",
-    subtitle: "Highlight the slowest steps and rework loops",
+    icon: Compass,
+    title: "Take me to my processes",
+    subtitle: "Open your uploaded event logs",
   },
 ];
 
@@ -103,7 +91,7 @@ const MODULE_STARTERS: Record<string, Starter[]> = {
     {
       icon: Sparkles,
       title: "Interpret these complexity metrics",
-      subtitle: "Translate entropy and Pentland values into plain language",
+      subtitle: "A plain-language read of the complexity scores",
     },
     {
       icon: AlertTriangle,
@@ -120,17 +108,17 @@ const MODULE_STARTERS: Record<string, Starter[]> = {
     {
       icon: Zap,
       title: "Find the worst bottlenecks",
-      subtitle: "Activities and handovers dragging cycle time",
+      subtitle: "The steps slowing the process down most",
     },
     {
       icon: Activity,
       title: "Explain the cycle-time distribution",
-      subtitle: "What median, p90, and lead time tell us here",
+      subtitle: "How long cases take and how much it varies",
     },
     {
       icon: ListChecks,
       title: "Suggest performance improvements",
-      subtitle: "Prioritised actions based on the KPIs",
+      subtitle: "Concrete ways to speed the process up",
     },
   ],
   cv4cdd: [
@@ -165,6 +153,159 @@ const MODULE_STARTERS: Record<string, Starter[]> = {
       icon: AlertTriangle,
       title: "Flag suspicious rework or loops",
       subtitle: "Highlight unusual structures in the model",
+    },
+  ],
+  ocel_discovery: [
+    {
+      icon: Workflow,
+      title: "Walk me through the object-centric model",
+      subtitle: "How objects and activities connect in this process",
+    },
+    {
+      icon: Boxes,
+      title: "Summarise the object types",
+      subtitle: "Which objects flow through the process",
+    },
+    {
+      icon: Network,
+      title: "Which activities span many object types?",
+      subtitle: "Where the object types interact most",
+    },
+  ],
+  complexity_over_time: [
+    {
+      icon: TrendingUp,
+      title: "Explain the complexity trend",
+      subtitle: "How complexity rose or fell across time slices",
+    },
+    {
+      icon: AlertTriangle,
+      title: "Point out complexity spikes",
+      subtitle: "Periods where the process got more chaotic",
+    },
+    {
+      icon: ListChecks,
+      title: "Suggest what to investigate",
+      subtitle: "Where the trend warrants a closer look",
+    },
+  ],
+  complexity_v2: [
+    {
+      icon: Sparkles,
+      title: "Summarise the complexity metrics",
+      subtitle: "Plain-language read of the 28-metric suite",
+    },
+    {
+      icon: AlertTriangle,
+      title: "Flag the metrics that stand out",
+      subtitle: "Values far from a typical process",
+    },
+    {
+      icon: ListChecks,
+      title: "Suggest next analysis steps",
+      subtitle: "Where to dig deeper based on these results",
+    },
+  ],
+  log_evolution: [
+    {
+      icon: Activity,
+      title: "Summarise how the log evolves",
+      subtitle: "How the process changes over time",
+    },
+    {
+      icon: AlertTriangle,
+      title: "Spot backlogs or rising WIP",
+      subtitle: "Periods where work piled up",
+    },
+    {
+      icon: Waves,
+      title: "Point out seasonality or growth",
+      subtitle: "Recurring patterns and trends over time",
+    },
+  ],
+  conformance: [
+    {
+      icon: ShieldCheck,
+      title: "Summarise the conformance results",
+      subtitle: "How well the log matches the reference model",
+    },
+    {
+      icon: AlertTriangle,
+      title: "Which activities deviate most?",
+      subtitle: "Where the log breaks from the model",
+    },
+    {
+      icon: ListChecks,
+      title: "Suggest ways to improve compliance",
+      subtitle: "Actions to close the biggest gaps",
+    },
+  ],
+  concept_drift_explainer: [
+    {
+      icon: Lightbulb,
+      title: "Summarise the drift explanations",
+      subtitle: "Why the process changed, in plain language",
+    },
+    {
+      icon: ListChecks,
+      title: "List the top root causes",
+      subtitle: "The main reasons the process changed",
+    },
+    {
+      icon: FileText,
+      title: "Which documents explain the drift?",
+      subtitle: "Evidence found in your uploaded documents",
+    },
+  ],
+  agentsimulator: [
+    {
+      icon: Sparkles,
+      title: "Summarise the simulation results",
+      subtitle: "How the simulated process compares to the real log",
+    },
+    {
+      icon: Gauge,
+      title: "How realistic is the simulation?",
+      subtitle: "How closely it matches the real process",
+    },
+    {
+      icon: Activity,
+      title: "What did it learn about resources?",
+      subtitle: "How each resource behaves in the simulation",
+    },
+  ],
+  pcomp: [
+    {
+      icon: GitCompare,
+      title: "Explain the comparison result",
+      subtitle: "Whether the two logs differ significantly",
+    },
+    {
+      icon: Sparkles,
+      title: "Is the difference significant?",
+      subtitle: "What the statistical test concludes",
+    },
+    {
+      icon: ListChecks,
+      title: "What should I check next?",
+      subtitle: "Where the two logs diverge most",
+    },
+  ],
+  process_comparison: [
+    {
+      icon: GitCompare,
+      title: "Summarise the differences",
+      subtitle: "How the compared logs differ overall",
+    },
+    {
+      icon: AlertTriangle,
+      title: "Which activities changed most?",
+      subtitle: "The activities that differ most between the logs",
+    },
+    {
+      icon: Sparkles,
+      title: "How similar are the processes?",
+      subtitle: "An overall read of how similar they are",
     },
   ],
 };
@@ -334,16 +475,17 @@ export function MateAiSidebar() {
         genericModuleStarters(activeModule?.name ?? "this module")
       );
     }
-    if (chatContext?.log_id) return PROCESS_STARTERS;
+    // Process overview page (log_id, no active module) now shows the default
+    // starters too — the process-specific set was removed.
     return DEFAULT_STARTERS;
-  }, [activeModuleId, activeModule, chatContext]);
+  }, [activeModuleId, activeModule]);
 
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const track = useTrack();
   const router = useProgressRouter();
-  const { setTheme } = useTheme();
+  const { setTheme, theme } = useTheme();
   const updateOnboarding = useUpdateOnboarding();
   const { data: onboarding } = useOnboardingState();
 
@@ -384,21 +526,58 @@ export function MateAiSidebar() {
     }
   };
 
-  const onAction = (action: ActionTarget) => {
+  // Current value of a whitelisted UI setting – captured before applying so the
+  // chip's "Undo" can restore it.
+  const readUiSetting = (setting: string): string | boolean | undefined => {
+    const s = useUi.getState();
+    switch (setting) {
+      case "notifications_muted":
+        return s.notificationsMuted;
+      case "confidential_only":
+        return s.confidentialOnly;
+      case "sidebar_collapsed":
+        return s.sidebarCollapsed;
+      case "show_unavailable_modules":
+        return s.showUnavailableModules;
+      case "show_disabled_modules":
+        return s.showDisabledModules;
+      case "date_format":
+        return s.dateFormat;
+      case "timezone":
+        return s.timezone;
+      case "csv_delimiter":
+        return s.csvDelimiter;
+      case "csv_timestamp_format":
+        return s.csvTimestampFormat;
+    }
+    return undefined;
+  };
+
+  // Apply a whitelisted setting and return a closure that reverts it to its prior
+  // value (used by the chip's "Undo"). void when there's nothing to revert.
+  const onAction = (action: ActionTarget): (() => void) | void => {
     track(EV.AI_ACTION_APPLIED, { setting: action.setting, target: action.target });
     if (action.target === "theme") {
+      const prev = theme ?? "system";
       setTheme(String(action.value));
-    } else if (action.target === "onboarding") {
+      return () => setTheme(prev);
+    }
+    if (action.target === "onboarding") {
       if (action.setting === "experience_level" && onboarding) {
+        const prev = onboarding.experience_level;
         // Preserve the completed flag – only re-tune the proficiency level.
         updateOnboarding.mutate({
           completed: onboarding.completed,
           experience_level: action.value as "beginner" | "intermediate" | "expert",
         });
+        return () =>
+          updateOnboarding.mutate({ completed: onboarding.completed, experience_level: prev });
       }
-    } else {
-      applyUiSetting(action.setting, action.value);
+      return;
     }
+    const prev = readUiSetting(action.setting);
+    applyUiSetting(action.setting, action.value);
+    if (prev !== undefined) return () => applyUiSetting(action.setting, prev);
   };
 
   const isStreaming = streamingContent !== null;
@@ -696,6 +875,7 @@ export function MateAiSidebar() {
                         <NavWidget
                           targets={msg.navTargets}
                           actions={msg.actionTargets}
+                          currentPath={pathname ?? undefined}
                           onNavigate={onNavigate}
                           onAction={onAction}
                         />

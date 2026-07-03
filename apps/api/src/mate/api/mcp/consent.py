@@ -3,8 +3,9 @@
 Mate's local-first ethos: data leaving the box to an external LLM client is an
 explicit, revocable choice. When ``mcp_require_egress_consent`` is on (default),
 a user must opt in (Settings → API & MCP) before any MCP tool returns their
-data; tools 403 until then. Mirrors the ``allow_process_data`` gate on the
-in-app assistant. [[project_ai_data_wall]]
+data; tools 403 until then. Unlike the in-app MATE AI assistant (which shares
+process *aggregates* by default), MCP egress stays consent-gated because it can
+expose far more than rolled-up stats. [[project_ai_data_wall]]
 """
 
 from __future__ import annotations

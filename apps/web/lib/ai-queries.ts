@@ -27,9 +27,6 @@ export interface AiConfig {
   /** Optional cheaper model (same provider) used only for MATE AI's navigation
    *  intent classifier. Falls back to `selected_model` when null. */
   classifier_model: string | null;
-  /** Opt-in: let MATE AI read process names + stats to answer data questions and
-   *  navigate to named processes. Sends that data to the provider → off by default. */
-  allow_process_data: boolean;
 }
 
 export type { AiConfigOut } from "@/lib/api-types";
@@ -51,7 +48,6 @@ export function maskedToDraft(masked: AiConfigOut): AiConfig {
     selected_provider: masked.selected_provider,
     selected_model: masked.selected_model,
     classifier_model: masked.classifier_model,
-    allow_process_data: masked.allow_process_data,
   };
 }
 
@@ -87,7 +83,6 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
   selected_provider: null,
   selected_model: null,
   classifier_model: null,
-  allow_process_data: false,
 };
 
 const KEYS = {

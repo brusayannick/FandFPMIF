@@ -39,10 +39,6 @@ class AiConfigPayload(BaseModel):
     # behind MATE AI's navigation routing. Falls back to ``selected_model`` when
     # unset, so existing configs keep working untouched.
     classifier_model: str | None = None
-    # Opt-in: when true, MATE AI may read the user's process data (names + stats
-    # like variant/case counts) to answer questions and navigate to named
-    # processes. Sends that data to the configured provider, so it defaults off.
-    allow_process_data: bool = False
 
 
 class AiConfigOut(BaseModel):
@@ -68,7 +64,6 @@ class AiConfigOut(BaseModel):
     selected_provider: Provider | None = None
     selected_model: str | None = None
     classifier_model: str | None = None
-    allow_process_data: bool = False
     controlled_by_admin: bool = False
 
 
@@ -86,7 +81,6 @@ def mask_config(cfg: AiConfigPayload, *, controlled_by_admin: bool) -> AiConfigO
         selected_provider=cfg.selected_provider,
         selected_model=cfg.selected_model,
         classifier_model=cfg.classifier_model,
-        allow_process_data=cfg.allow_process_data,
         controlled_by_admin=controlled_by_admin,
     )
 

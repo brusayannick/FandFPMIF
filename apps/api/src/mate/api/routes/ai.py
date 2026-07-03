@@ -22,6 +22,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Path
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mate.api.ai_config import (
     AI_CONFIG_KEY,
@@ -333,7 +334,45 @@ async def _activities_variants_block(
     return header + "\n" + "\n\n".join(blocks)
 
 
-async def _build_context_block(context: ChatContext | None, user_id: str) -> str:
+async def _user_enabled_module_ids(session: AsyncSession, user_id: str) -> list[str]:
+    """Ids of modules the user has installed AND enabled that are also loaded.
+
+    Mirrors the enablement logic in ``ai_nav.build_user_destinations`` but returns
+    plain ids: the chat context surfaces *every* such module's cached output - not
+    only those exposing ``guidance_payload`` - so a newly added module is covered
+    automatically without touching this route.
+    """
+    from sqlalchemy import select
+
+    from mate.api.db.models import ModuleConfig
+    from mate.api.modules import get_module_loader
+    from mate.api.modules.installs import user_module_ids
+
+    try:
+        loader = get_module_loader()
+    except HTTPException:
+        return []
+    owned = await user_module_ids(session, user_id)
+    rows = await session.execute(
+        select(ModuleConfig.module_id, ModuleConfig.enabled).where(
+            ModuleConfig.user_id == user_id
+        )
+    )
+    enabled_map: dict[str, bool] = {mid: en for mid, en in rows.all()}
+    out: list[str] = []
+    for m in loader.manifests():
+        if m.id not in owned:
+            continue
+        if not enabled_map.get(m.id, m.default_enabled):
+            continue
+        if m.id in loader.loaded:
+            out.append(m.id)
+    return out
+
+
+async def _build_context_block(
+    context: ChatContext | None, user_id: str, session: AsyncSession
+) -> str:
     if context is None or not context.log_id:
         return ""
     # Local imports keep `routes/ai.py` free of module-loader symbols at import
@@ -346,64 +385,67 @@ async def _build_context_block(context: ChatContext | None, user_id: str) -> str
     except HTTPException:
         return ""
 
-    # An empty module_ids list means "every module the loader knows about that
-    # exposes guidance_payload" - the natural default when the frontend just
-    # detected it's on a process page.
-    module_ids = context.module_ids or [
-        mid
-        for mid, loaded in loader.loaded.items()
-        if callable(getattr(loaded.instance, "guidance_payload", None))
-    ]
-    if not module_ids:
+    # Surface the cached output of EVERY module the user has installed and enabled,
+    # not just those exposing guidance_payload. New modules are covered for free.
+    enabled_ids = await _user_enabled_module_ids(session, user_id)
+    if not enabled_ids:
         return ""
+    # Put the module the user is currently viewing first so a tight char budget
+    # never truncates the most relevant output.
+    current = context.module_ids[0] if context.module_ids else None
+    if current in enabled_ids:
+        enabled_ids = [current] + [m for m in enabled_ids if m != current]
 
     parts: list[str] = ["Current process context (cached module outputs):"]
     remaining = _CONTEXT_CHAR_BUDGET
-    for mid in module_ids:
+    for mid in enabled_ids:
         loaded = loader.loaded.get(mid)
         if loaded is None:
             continue
+        data: Any = None
+        # Prefer the module's curated payload. restrict_event_log=True walls off
+        # raw XES/parquet access: guidance_payload sees only its own cached
+        # outputs, never event rows.
         fn = getattr(loaded.instance, "guidance_payload", None)
-        if not callable(fn):
-            continue
-        # Prefer the module's curated payload over scanning raw cache keys.
-        # restrict_event_log=True walls off raw XES/parquet access: a module's
-        # guidance_payload sees only its own cached outputs, never event rows.
-        try:
-            ctx = await loader._make_context(
-                mid, context.log_id, user_id, restrict_event_log=True
-            )
-        except Exception:
-            continue
-        try:
-            data = (
-                await fn(ctx)
-                if asyncio.iscoroutinefunction(fn)
-                else await asyncio.to_thread(fn, ctx)
-            )
-        except Exception:
-            data = None
-        finally:
-            import shutil as _shutil
+        if callable(fn):
+            try:
+                ctx = await loader._make_context(
+                    mid, context.log_id, user_id, restrict_event_log=True
+                )
+            except Exception:
+                ctx = None
+            if ctx is not None:
+                try:
+                    data = (
+                        await fn(ctx)
+                        if asyncio.iscoroutinefunction(fn)
+                        else await asyncio.to_thread(fn, ctx)
+                    )
+                except Exception:
+                    data = None
+                finally:
+                    import shutil as _shutil
 
-            _shutil.rmtree(ctx.workdir, ignore_errors=True)
+                    _shutil.rmtree(ctx.workdir, ignore_errors=True)
         if data is None:
-            # Fall back to dumping every JSON cache entry the module wrote.
+            # No curated payload (or it produced nothing): dump the module's raw
+            # JSON cache entries for this log. Skips internal `__`-prefixed keys.
             cache = ResultCache(context.log_id, mid, user_id)
             try:
                 files = list(cache.dir.glob("*.json"))
             except OSError:
                 files = []
-            data = {}
+            dumped: dict[str, Any] = {}
             for path in files:
                 if path.name.startswith("__"):
                     continue
                 try:
-                    data[path.stem] = json.loads(path.read_text())
+                    dumped[path.stem] = json.loads(path.read_text())
                 except (OSError, json.JSONDecodeError):
                     continue
-            if not data:
+            if not dumped:
                 continue
+            data = dumped
         body = json.dumps(data, default=str)[:remaining]
         parts.append(f"### Module: {mid}\n```json\n{body}\n```")
         remaining -= len(body)
@@ -489,29 +531,30 @@ async def chat(
             "user. Do not describe how to navigate and do not mention the shortcut; answer "
             "the substance of the question in 1-2 short sentences."
         )
-    # Sensitive: only share process data with the provider when the user opted in.
-    if cfg.allow_process_data:
-        processes = await list_user_processes(session, user.id)
-        summary = _process_summary_block(processes)
-        if summary:
-            parts.append(summary)
-        # When viewing a specific process, add its activity/variant catalogue
-        # (aggregates the user already sees in-app). Ownership-checked; skipped
-        # for object-centric logs, which have no case-centric variants.
-        ctx_log_id = payload.context.log_id if payload.context else None
-        if ctx_log_id:
-            try:
-                log_row = await get_owned_event_log(session, ctx_log_id, user.id)
-            except HTTPException:
-                log_row = None
-            if log_row is not None and getattr(log_row, "log_model", None) != "object_centric":
-                av_block = await _activities_variants_block(
-                    ctx_log_id, user.id, log_row.active_filter
-                )
-                if av_block:
-                    parts.append(av_block)
+    # Process data (aggregates only - names, counts, activity/variant catalogues
+    # the user already sees in-app; never raw event rows) is always shared with
+    # the provider so MATE AI can answer data questions out of the box.
+    processes = await list_user_processes(session, user.id)
+    summary = _process_summary_block(processes)
+    if summary:
+        parts.append(summary)
+    # When viewing a specific process, add its activity/variant catalogue
+    # (aggregates the user already sees in-app). Ownership-checked; skipped
+    # for object-centric logs, which have no case-centric variants.
+    ctx_log_id = payload.context.log_id if payload.context else None
+    if ctx_log_id:
+        try:
+            log_row = await get_owned_event_log(session, ctx_log_id, user.id)
+        except HTTPException:
+            log_row = None
+        if log_row is not None and getattr(log_row, "log_model", None) != "object_centric":
+            av_block = await _activities_variants_block(
+                ctx_log_id, user.id, log_row.active_filter
+            )
+            if av_block:
+                parts.append(av_block)
 
-    context_block = await _build_context_block(payload.context, user.id)
+    context_block = await _build_context_block(payload.context, user.id, session)
     if context_block:
         parts.append(context_block)
     if cfg.system_prompt:

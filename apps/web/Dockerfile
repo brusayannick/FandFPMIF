@@ -1,5 +1,13 @@
 # syntax=docker/dockerfile:1.7
 FROM node:22.18.0-alpine AS base
+# Slow/throttled connections blow pnpm's default 60s per-request fetch timeout
+# on big packages (next, swc, esbuild). Raise the budget + retries so the
+# install stage doesn't abort mid-download. Mirrors UV_HTTP_TIMEOUT on the API.
+# pnpm/npm both read these npm_config_* env vars.
+ENV npm_config_fetch_timeout=600000 \
+    npm_config_fetch_retries=5 \
+    npm_config_fetch_retry_maxtimeout=600000 \
+    npm_config_fetch_retry_mintimeout=20000
 # Install pnpm directly via npm instead of corepack: pinned older Node images
 # ship a corepack with stale signature keys / a vm bug that breaks `pnpm install`.
 RUN npm install -g pnpm@latest
@@ -38,6 +46,11 @@ RUN pnpm build
 FROM node:22.18.0-alpine AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
+# Same generous fetch budget for the bundler's npm install below.
+ENV npm_config_fetch_timeout=600000 \
+    npm_config_fetch_retries=5 \
+    npm_config_fetch_retry_maxtimeout=600000 \
+    npm_config_fetch_retry_mintimeout=20000
 WORKDIR /app
 
 COPY --from=builder /repo/apps/web/.next/standalone /app/

@@ -223,7 +223,6 @@ async def test_ai_config_put_403_when_controlled(client: AsyncClient) -> None:
                 "custom": {"api_key": None, "base_url": None},
                 "selected_provider": "anthropic",
                 "selected_model": "x",
-                "allow_process_data": False,
             },
         )
         assert resp.status_code == 403

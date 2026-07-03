@@ -536,7 +536,6 @@ export interface AiConfigOut {
   selected_provider: AiProviderId | null;
   selected_model: string | null;
   classifier_model: string | null;
-  allow_process_data: boolean;
   /** When true, an admin has locked AI settings for all users (read-only). */
   controlled_by_admin: boolean;
 }

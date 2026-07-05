@@ -110,7 +110,18 @@ export function ModelStoreCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+          {title}
+          {locked && (
+            <Badge
+              variant="outline"
+              className="h-5 gap-1 border-destructive/30 bg-destructive/10 px-1.5 py-0 text-[10px] text-destructive"
+            >
+              <Lock className="h-3 w-3" />
+              Admin-controlled
+            </Badge>
+          )}
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {store.description && (
@@ -118,11 +129,11 @@ export function ModelStoreCard({
         )}
 
         {locked && (
-          <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-            <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+          <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+            <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
             <span>
-              The detection model is set by your administrator and applies to
-              everyone. You can't change the selection here.
+              The detection model is controlled by your administrator. You
+              cannot change the selection.
             </span>
           </div>
         )}
@@ -169,7 +180,7 @@ export function ModelStoreCard({
             value={(locked ? modelsQ.data?.active : selected) ?? undefined}
             onValueChange={onChangeSelection}
             disabled={locked}
-            className="gap-2"
+            className={locked ? "gap-2 opacity-60" : "gap-2"}
           >
             {models.map((m) => {
               const busy = pendingName === m.name;

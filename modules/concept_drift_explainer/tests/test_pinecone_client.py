@@ -9,7 +9,6 @@ verification run in the README.
 from __future__ import annotations
 
 import pytest
-
 from modules.concept_drift_explainer.utils.pinecone_client import (
     DEFAULT_DIMENSION,
     _configured_dimension,

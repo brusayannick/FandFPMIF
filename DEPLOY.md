@@ -296,6 +296,27 @@ Then in a browser:
    live updates stall but everything else works, the uni proxy likely needs
    WebSocket/streaming passthrough enabled for this alias – that's the first
    thing to raise with FB4 IT.
+6. **Confirm the realm-hardening one-shot ran.** The `keycloak-config` service
+   patches `sslRequired` + session lifetimes once per deploy, then exits:
+   `$DC logs keycloak-config` → expect
+   `realm 'flows-funds' hardening applied: sslRequired=EXTERNAL …`. A non-zero
+   exit leaves Keycloak + app running but the realm unpatched — fix
+   `KEYCLOAK_ADMIN_PASSWORD` and re-run `$DC up -d`.
+7. **Log in once in Safari, not only Chrome.** Safari enforces cookie
+   size/eviction more strictly. The server-side session store (`SESSION_STORE_DIR`
+   on the web service, §5) keeps the auth cookie ~64 B so the full Keycloak token
+   never chunks — without it Safari drops a chunk and loops between the app and
+   `/login` (Chrome tolerates the same chunked cookie). See Troubleshooting.
+
+> **Staged rollout — internal OIDC back-channel (removes the TLS bypass).** The
+> web container sets `NODE_TLS_REJECT_UNAUTHORIZED=0` to tolerate the cert-name
+> mismatch on the server-side Keycloak hop. To remove it, in order: (1) uncomment
+> `KEYCLOAK_INTERNAL_URL: http://keycloak:8080/auth/realms/flows-funds` on the web
+> service, `$DC up -d`; (2) verify a full login **and** a token refresh (leave a
+> tab idle past the access-token expiry, then click — must not bounce to `/login`)
+> both succeed; (3) only then delete `NODE_TLS_REJECT_UNAUTHORIZED`. A wrong
+> internal URL breaks login, and dropping the bypass first removes the fallback —
+> never combine the steps.
 
 ## Updating a running deployment
 
@@ -420,6 +441,7 @@ docker run --rm -v kc-data:/v -v "$PWD":/b alpine tar czf /b/kc-data.tgz -C /v .
 | --- | --- |
 | Every API call 401s after login | `KEYCLOAK_JWKS_URL` missing the `/auth` prefix, or `KEYCLOAK_ISSUER` ≠ the issuer Keycloak actually mints (check §6 step 3). |
 | Redirect loop / "invalid redirect_uri" at login | Prod `redirectUris`/`webOrigins` not added to the realm (§2), or realm imported before the edit. |
+| Safari (not Chrome) loops between the app and `/login` after a successful login | `SESSION_STORE_DIR` unset on the web service → the full Keycloak token rides in the session cookie, chunks past 4KB, and Safari drops/evicts a chunk so `auth()` can't decode it. Set `SESSION_STORE_DIR: /app/sessions` + the `./data/web-sessions` volume (§5) so the cookie holds only an opaque id. |
 | Login page styled wrong / 404 on `/auth/...` assets | `KC_HTTP_RELATIVE_PATH` and the Caddy `/auth/*` route out of sync. |
 | Live jobs/AI never update, page otherwise fine | WebSocket/SSE not passed through by the uni proxy (§6 step 5). |
 | `tls` cert errors on proxy start | Mounted only `live/` instead of all of `/etc/letsencrypt` – the symlinks into `archive/` break. |

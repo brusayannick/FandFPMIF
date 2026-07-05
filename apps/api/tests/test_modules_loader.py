@@ -243,6 +243,49 @@ async def test_module_assets_served_and_traversal_rejected(
 
 
 @pytest.mark.asyncio
+async def test_module_asset_etag_revalidation(client_with_sample_mod: AsyncClient) -> None:
+    """Bundles revalidate via ETag: 200 + ETag first, 304 on If-None-Match,
+    fresh 200 once the file changes (new mtime/size => new tag)."""
+    from mate.api.config import get_settings
+
+    settings = get_settings()
+    dist_dir = settings.modules_dir / "sample_mod" / ".dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    panel = dist_dir / "panel.js"
+    panel.write_text("module.exports = { Panel: () => null };\n")
+
+    first = await client_with_sample_mod.get("/api/v1/modules/sample_mod/assets/panel.js")
+    assert first.status_code == 200
+    etag = first.headers.get("etag")
+    assert etag
+    assert first.headers.get("cache-control") == "private, no-cache"
+
+    revalidated = await client_with_sample_mod.get(
+        "/api/v1/modules/sample_mod/assets/panel.js",
+        headers={"If-None-Match": etag},
+    )
+    assert revalidated.status_code == 304
+    assert revalidated.content == b""
+    assert revalidated.headers.get("etag") == etag
+
+    # Weak-tag + list forms match too (browsers may send either).
+    weak = await client_with_sample_mod.get(
+        "/api/v1/modules/sample_mod/assets/panel.js",
+        headers={"If-None-Match": f'W/{etag}, "other"'},
+    )
+    assert weak.status_code == 304
+
+    # Rebuild -> different size (and mtime) -> stale tag gets a fresh 200.
+    panel.write_text("module.exports = { Panel: () => null }; // rebuilt\n")
+    changed = await client_with_sample_mod.get(
+        "/api/v1/modules/sample_mod/assets/panel.js",
+        headers={"If-None-Match": etag},
+    )
+    assert changed.status_code == 200
+    assert changed.headers.get("etag") != etag
+
+
+@pytest.mark.asyncio
 async def test_module_install_from_upload(client_with_sample_mod: AsyncClient) -> None:
     """Upload a zipped module with a different id, wait for the install job to
     complete, and confirm the new module is loaded and routable."""

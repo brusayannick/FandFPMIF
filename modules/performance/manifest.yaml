@@ -3,11 +3,11 @@ name: Performance
 version: 1.0.0
 category: foundation
 description: >-
-  Measures process speed and bottlenecks: throughput, lead, cycle, and sojourn
-  times, the 90th-percentile cycle time, and a performance-annotated
-  directly-follows graph.
+  Measures process speed and bottlenecks: throughput, cycle times, lead time,
+  and the 90th-percentile cycle time.
 keywords: ["performance", "bottleneck", "cycle time", "throughput", "lead time", "slow", "kpi", "sojourn", "p90", "waiting time"]
 author: FlowFactory
+author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

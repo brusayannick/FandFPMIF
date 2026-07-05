@@ -15,6 +15,17 @@
 :443 {
 	tls /etc/letsencrypt/live/pm-mate-vm.uni-muenster.de/fullchain.pem /etc/letsencrypt/live/pm-mate-vm.uni-muenster.de/privkey.pem
 
+	# Compress text-ish responses. The content-type allowlist deliberately
+	# omits text/event-stream: compressing SSE would buffer the live job /
+	# event streams. API JSON usually arrives pre-gzipped (GZipMiddleware);
+	# Caddy passes already-encoded responses through untouched.
+	encode {
+		zstd gzip
+		match {
+			header Content-Type application/json* application/javascript* text/html* text/css* image/svg+xml* font/*
+		}
+	}
+
 	# Security headers applied to every upstream. HSTS deliberately omits
 	# includeSubDomains/preload: this is a shared uni domain, so we assert it
 	# only for this exact host. nosniff + Referrer-Policy are always safe.

@@ -1,13 +1,14 @@
 id: conformance
 name: Conformance Checking
-version: 0.1.0
+version: 1.0.0
 category: advanced
 description: >-
   Upload a reference BPMN model and check your event log against it. Computes
   fitness, precision and per-activity deviations with pm4py (token-based replay
   by default, alignments optional) and paints the deviations onto the diagram.
 keywords: ["conformance", "conformance checking", "fitness", "precision", "deviation", "token replay", "alignments", "reference model", "bpmn", "compliance"]
-author: Mate
+author: FlowFactory
+author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

@@ -307,7 +307,6 @@ class Cv4cddModule(Module):
         This replicates the reference pipeline's import step exactly, giving
         the same trace order as the standalone cv4cdd tool.
         """
-        import pandas as pd
         from pm4py.algo.filtering.log.attributes import attributes_filter
         from pm4py.objects.conversion.log import converter as log_converter
         from pm4py.objects.log.importer.xes import importer as xes_importer

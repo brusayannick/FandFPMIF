@@ -168,6 +168,7 @@ export interface ModuleSummary {
     | string;
   description: string | null;
   author: string | null;
+  author_url: string | null;
   license: string | null;
   provides: string[];
   consumes: string[];

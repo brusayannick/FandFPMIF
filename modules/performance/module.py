@@ -72,7 +72,6 @@ async def _per_activity_sojourn(df: Any, freq_rows: list[tuple]) -> list[dict[st
     """
 
     def _run() -> dict[str, list[float]]:
-        import pandas as pd
 
         sorted_df = df.sort_values(["case_id", "timestamp"])
         sorted_df["next_ts"] = sorted_df.groupby("case_id")["timestamp"].shift(-1)

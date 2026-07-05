@@ -145,6 +145,23 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+    healthcheck:
+      # IPv4 loopback explicitly - node may resolve localhost to ::1 while
+      # `next start` listens on 0.0.0.0 (v4). Any response < 500 counts (the
+      # login page answers 200 unauthenticated). Runs on the standalone
+      # runner's own node binary, no curl/wget needed in the image.
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3000/login', (r) => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # First boot esbuilds every module panel before next starts.
+      start_period: 120s
     restart: unless-stopped
 
 volumes:

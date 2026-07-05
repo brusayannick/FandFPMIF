@@ -43,7 +43,7 @@ export function ChartFrame({
   return (
     <div className="flex h-full w-full flex-col">
       {legend ? (
-        <div className="mb-1 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+        <div className="mb-1 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] text-muted-foreground">
           {legend}
         </div>
       ) : null}
@@ -57,9 +57,14 @@ export function ChartFrame({
 
 export function LegendDot({ color, label }: { color: string; label: string }) {
   return (
-    <span className="flex items-center gap-1.5">
-      <span className="inline-block h-2.5 w-2.5 rounded-[2px]" style={{ backgroundColor: color }} />
-      <span className="truncate">{label}</span>
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span
+        className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
+        style={{ backgroundColor: color }}
+      />
+      <span className="max-w-[16ch] truncate" title={label}>
+        {label}
+      </span>
     </span>
   );
 }

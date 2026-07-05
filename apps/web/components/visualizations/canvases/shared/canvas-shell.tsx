@@ -101,7 +101,10 @@ function CanvasInner({
   const onFit = useCallback(() => fitView({ duration: 200, padding: 0.2 }), [fitView]);
 
   return (
-    <div className="relative h-full w-full">
+    // Fade the whole canvas in once it mounts with data – charts/graphs land
+    // softly instead of popping. Opacity-only, so xyflow's own layout math is
+    // unaffected; runtime external => module canvases inherit this free.
+    <div className="relative h-full w-full animate-in fade-in-0 duration-300">
       <ReactFlow
         nodes={nodes}
         edges={edges}

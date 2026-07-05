@@ -46,6 +46,7 @@ from mate.api.ai_nav import (
 from mate.api.auth import CurrentUserDep, get_owned_event_log
 from mate.api.db.models import UserSetting
 from mate.api.db.session import SessionDep
+from mate.api.shutdown import is_shutting_down
 
 # Re-exported so any caller that previously imported these names from
 # `routes.ai` still works. The real definitions live in `_ai_config`.
@@ -533,10 +534,17 @@ async def _stream_chat(
     try:
         if provider == "anthropic":
             async for chunk in _stream_anthropic(cfg, messages):
+                # Bow out at the next delta boundary once shutdown starts, so the
+                # generator closes (and the upstream httpx stream with it) during
+                # uvicorn's connection drain instead of being force-cancelled.
+                if is_shutting_down():
+                    return
                 yield chunk
         else:
             base_url = "https://api.openai.com/v1" if provider == "openai" else (p.base_url or "")
             async for chunk in _stream_openai_compat(cfg, messages, base_url, p.api_key):
+                if is_shutting_down():
+                    return
                 yield chunk
     except httpx.HTTPError as exc:
         log.warning("ai.chat.stream_failed", provider=provider, error=str(exc))

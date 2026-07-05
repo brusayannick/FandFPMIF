@@ -13,6 +13,7 @@ GET  /jobs/{id}/stream           - high-frequency SSE progress for a single job
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncIterator
 from datetime import datetime
@@ -168,32 +169,44 @@ async def stream_job(job_id: str, session: SessionDep, user: CurrentUserDep) -> 
     async def _gen() -> AsyncIterator[str]:
         yield _sse(snapshot)
         async with bus.subscribe(["job.*"]) as stream:
+            # One pending pull kept alive across idle ticks - see events_sse._gen:
+            # `asyncio.wait(timeout=)` doesn't cancel on timeout, so a quiet
+            # interval no longer closes the bus generator (which used to end the
+            # stream ~2 s after connect and drop events in the reconnect gap).
+            nxt = asyncio.ensure_future(anext(stream))
             idle = 0.0
-            while True:
-                # Poll the shutdown flag so the stream exits during uvicorn's
-                # connection drain instead of being force-cancelled at the grace
-                # deadline (which prints a CancelledError ASGI traceback).
-                if is_shutting_down():
-                    return
-                try:
-                    env = await asyncio.wait_for(anext(stream), _SHUTDOWN_POLL_S)
-                except TimeoutError:
-                    idle += _SHUTDOWN_POLL_S
-                    if idle >= _HEARTBEAT_S:
-                        idle = 0.0
-                        yield ": ping\n\n"
-                    continue
-                except StopAsyncIteration:
-                    return
-                idle = 0.0
-                payload = env.payload
-                if payload.get("id") != job_id:
-                    continue
-                if payload.get("user_id") not in (None, user.id):
-                    continue
-                yield _sse(env.to_json())
-                if env.topic in {"job.completed", "job.failed", "job.cancelled"}:
-                    # Terminal event - end the stream cleanly.
-                    return
+            try:
+                while True:
+                    # Poll the shutdown flag so the stream exits during uvicorn's
+                    # connection drain instead of being force-cancelled at the
+                    # grace deadline (which prints a CancelledError ASGI traceback).
+                    if is_shutting_down():
+                        return
+                    done, _ = await asyncio.wait({nxt}, timeout=_SHUTDOWN_POLL_S)
+                    if not done:
+                        idle += _SHUTDOWN_POLL_S
+                        if idle >= _HEARTBEAT_S:
+                            idle = 0.0
+                            yield ": ping\n\n"
+                        continue
+                    try:
+                        env = nxt.result()
+                    except StopAsyncIteration:
+                        return
+                    nxt = asyncio.ensure_future(anext(stream))
+                    idle = 0.0
+                    payload = env.payload
+                    if payload.get("id") != job_id:
+                        continue
+                    if payload.get("user_id") not in (None, user.id):
+                        continue
+                    yield _sse(env.to_json())
+                    if env.topic in {"job.completed", "job.failed", "job.cancelled"}:
+                        # Terminal event - end the stream cleanly.
+                        return
+            finally:
+                nxt.cancel()
+                with contextlib.suppress(BaseException):
+                    await nxt
 
     return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)

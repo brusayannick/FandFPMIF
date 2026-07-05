@@ -255,6 +255,9 @@ class Manifest(BaseModel):
     category: ModuleCategory
     description: str | None = None
     author: str | None = None
+    # Optional link for the author badge in the UI - the cited paper, upstream
+    # repo, or homepage. Omitting it keeps the badge non-clickable.
+    author_url: str | None = None
     license: str | None = None
 
     requirements: Requirements = Field(default_factory=Requirements)

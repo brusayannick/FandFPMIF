@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { ModuleCard } from "@/components/processes/module-card";
 import { useModules } from "@/lib/queries";
+import { stagger } from "@/lib/stagger";
 import { useUi } from "@/lib/stores/ui";
 import type { ModuleSummary } from "@/lib/api-types";
 
@@ -44,6 +45,18 @@ export function ModuleGrid({ logId }: { logId: string }) {
     () => [...grouped.values()].reduce((n, bucket) => n + bucket.length, 0),
     [grouped],
   );
+
+  // Running card index across category buckets, so the entrance stagger
+  // cascades over the whole grid instead of restarting per section.
+  const categoryOffsets = useMemo(() => {
+    const offsets = new Map<string, number>();
+    let n = 0;
+    for (const c of CATEGORIES) {
+      offsets.set(c.id, n);
+      n += grouped.get(c.id)?.length ?? 0;
+    }
+    return offsets;
+  }, [grouped]);
 
   if (isLoading) {
     return (
@@ -126,8 +139,16 @@ export function ModuleGrid({ logId }: { logId: string }) {
               <span className="text-[10px] text-muted-foreground/60">({bucket.length})</span>
             </div>
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {bucket.map((m) => (
-                <ModuleCard key={m.id} module={m} logId={logId} />
+              {bucket.map((m, i) => (
+                // Entrance stagger lives on a wrapper so the card's own hover
+                // transform isn't pinned by the filled animation.
+                <div
+                  key={m.id}
+                  className="h-full animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both duration-300"
+                  style={stagger((categoryOffsets.get(c.id) ?? 0) + i)}
+                >
+                  <ModuleCard module={m} logId={logId} />
+                </div>
               ))}
             </div>
           </section>

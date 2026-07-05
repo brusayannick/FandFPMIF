@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, FileBox, ShieldAlert, Trash2 } from "lucide-react";
+import { ArrowLeft, FileBox, Lock, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { toastError } from "@/lib/toast";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ActionButton } from "@/components/ui/action-button";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -256,11 +257,11 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
       </Button>
 
       {controlled && (
-        <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            This module&apos;s configuration is controlled by your administrator
-            and is read-only. The shared settings below apply to your account.
+            This module is controlled by your administrator. Its settings
+            cannot be changed.
           </span>
         </div>
       )}
@@ -275,7 +276,13 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
               </Badge>
               <span className="text-xs font-normal text-muted-foreground">{m.version}</span>
             </CardTitle>
-            <div className="flex items-center gap-2 shrink-0">
+            <div
+              className={
+                controlled
+                  ? "flex items-center gap-2 shrink-0 opacity-60"
+                  : "flex items-center gap-2 shrink-0"
+              }
+            >
               {cfgLoading ? (
                 <Skeleton className="h-6 w-24" />
               ) : (
@@ -391,14 +398,16 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
               ) : (
                 <span />
               )}
-              <Button
+              <ActionButton
                 size="sm"
                 onClick={onSaveConfig}
-                disabled={update.isPending || cfgLoading || controlled}
+                isPending={update.isPending}
+                isSuccess={update.isSuccess}
+                disabled={cfgLoading || controlled}
                 className="cursor-pointer"
               >
                 Save AI models
-              </Button>
+              </ActionButton>
             </div>
           </CardContent>
         </Card>
@@ -429,24 +438,27 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
             ) : (
               <>
                 {hasSchema && (
-                  <ModuleConfigForm
-                    properties={properties}
-                    values={draft}
-                    onChange={(key, val) => setDraft((d) => ({ ...d, [key]: val }))}
-                    disabled={controlled}
-                  />
+                  <div className={controlled ? "opacity-60" : undefined}>
+                    <ModuleConfigForm
+                      properties={properties}
+                      values={draft}
+                      onChange={(key, val) => setDraft((d) => ({ ...d, [key]: val }))}
+                      disabled={controlled}
+                    />
+                  </div>
                 )}
                 {hasSchema && !controlled && <Separator />}
                 {!controlled && (
                   <div className="flex justify-end">
-                    <Button
+                    <ActionButton
                       size="sm"
                       onClick={onSaveConfig}
-                      disabled={update.isPending}
+                      isPending={update.isPending}
+                      isSuccess={update.isSuccess}
                       className="cursor-pointer"
                     >
                       Save configuration
-                    </Button>
+                    </ActionButton>
                   </div>
                 )}
               </>

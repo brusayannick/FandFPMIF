@@ -24,6 +24,7 @@ sys.setrecursionlimit(10_000)
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import select
 
 from mate.api import __version__
@@ -467,6 +468,11 @@ def create_app() -> FastAPI:
     # Times a curated allowlist of business operations and records them as
     # server-side analytics events (transparent to streaming responses).
     app.add_middleware(UsageTrackingMiddleware)
+    # Compress JSON/JS bodies (variants, events pages, module bundles): the VM
+    # proxy does not compress for us. Starlette's GZipMiddleware skips
+    # `text/event-stream` by default, so the SSE endpoints (/events,
+    # /jobs/{id}/stream, AI chat) keep flushing live and unbuffered.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.include_router(v1)
 
     # Read-only MCP server for external consumers (opt-in). Mounted as a raw

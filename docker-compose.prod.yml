@@ -37,7 +37,9 @@ services:
       - caddy-config:/config
     depends_on:
       web:
-        condition: service_started
+        # The base compose defines the web healthcheck (login-page probe), so
+        # the proxy only fronts a web container that actually answers.
+        condition: service_healthy
       api:
         condition: service_healthy
       keycloak:
@@ -73,11 +75,22 @@ services:
       # NODE_TLS_REJECT_UNAUTHORIZED line.
       # KEYCLOAK_INTERNAL_URL: http://keycloak:8080/auth/realms/flows-funds
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
-      # Sessions are client-side cookie JWE (Auth.js default): SESSION_STORE_DIR is
-      # intentionally unset. The full access+refresh cookie (chunked if >4KB) now
-      # fits the uni edge proxy's enlarged header buffer, so the on-disk store
-      # (Option 3, the 502 workaround) is no longer needed. To revert, restore
-      # SESSION_STORE_DIR + the ./data/web-sessions volume.
+      # Server-side session store (Option 3): the Auth.js session cookie carries
+      # ONLY an opaque id; the access+refresh JWT lives on disk under
+      # SESSION_STORE_DIR (the ./data/web-sessions volume below). Re-enabled
+      # 2026-07-05 to fix a Safari-only infinite /login redirect loop — the
+      # cookie-JWE default chunks the full Keycloak token past 4KB, and Safari
+      # evicts/drops the chunked __Secure-authjs.session-token.N cookies where
+      # Chrome tolerates them, so auth() can't reassemble+decode the session and
+      # bounces to /login forever. The ~64 B id cookie sidesteps every browser
+      # per-cookie/per-domain size limit. (The uni edge proxy's header buffer was
+      # already enlarged, so the original 502 driver for this store is moot.)
+      # DO NOT unset again without re-testing login in Safari.
+      SESSION_STORE_DIR: /app/sessions
+    volumes:
+      # Backs SESSION_STORE_DIR above — one JSON file per session. Merges with
+      # the base web service's ./modules mount (compose concatenates volume lists).
+      - ./data/web-sessions:/app/sessions
     ports: !reset []
 
   api:
@@ -129,6 +142,26 @@ services:
       # Drop the base file's "8080" entirely from the merged config.
       KC_HOSTNAME_PORT: !reset null
     ports: !reset []
+
+  # One-shot: waits for Keycloak to be healthy, patches the realm hardening
+  # settings that the import-once realm JSON can't change on an existing DB
+  # (sslRequired + session lifetimes), then exits. Reuses the keycloak image so
+  # kcadm.sh + its JRE are already present. `restart: no` → runs once per deploy.
+  keycloak-config:
+    image: mate-keycloak:26-debian
+    build:
+      context: .
+      dockerfile: infra/keycloak/Dockerfile
+    restart: "no"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    entrypoint: ["/bin/bash", "/opt/keycloak/apply-realm-hardening.sh"]
+    volumes:
+      - ./infra/keycloak/apply-realm-hardening.sh:/opt/keycloak/apply-realm-hardening.sh:ro
 
 volumes:
   caddy-data:

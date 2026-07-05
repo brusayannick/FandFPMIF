@@ -43,16 +43,10 @@ let warnedIngestFailure = false;
 let cachedToken: string | null = null;
 
 async function accessToken(): Promise<string | null> {
-  try {
-    const { getSession } = await import("next-auth/react");
-    const session = (await getSession()) as
-      | { accessToken?: string; error?: string }
-      | null;
-    // Don't reuse a token from a session that failed to refresh.
-    cachedToken = session?.error ? null : session?.accessToken ?? null;
-  } catch {
-    // Keep the last known token on a transient failure.
-  }
+  // Shared cached session from lib/api – no per-flush /api/auth/session
+  // roundtrip. Returns undefined for missing/refresh-failed sessions.
+  const { sessionAccessToken } = await import("@/lib/api");
+  cachedToken = (await sessionAccessToken()) ?? null;
   return cachedToken;
 }
 

@@ -29,6 +29,9 @@ declare module "next-auth" {
     accessToken?: string;
     error?: "RefreshAccessTokenError";
     provider?: string;
+    /** Unix seconds the access token expires at – lets the browser cache the
+     * session (lib/api.ts) instead of hitting /api/auth/session per request. */
+    expiresAt?: number;
     user: {
       id: string;
       /** Keycloak realm roles, surfaced for client-side nav gating. */
@@ -286,6 +289,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       session.accessToken = token.accessToken;
       session.error = token.error;
       session.provider = token.provider;
+      session.expiresAt = token.expiresAt;
       if (token.sub) session.user.id = token.sub;
       // The demo sentinel token isn't a JWT, so roles can't be decoded from it –
       // derive them from DEMO_ADMIN instead (mirrors the API's demo_admin flag).

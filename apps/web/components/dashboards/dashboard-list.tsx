@@ -50,6 +50,7 @@ import {
 } from "@/components/page";
 import { cn } from "@/lib/cn";
 import { formatRelative } from "@/lib/format";
+import { stagger } from "@/lib/stagger";
 import {
   canvasSettings,
   useCreateDashboard,
@@ -207,10 +208,14 @@ export function DashboardList() {
         />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {dashboards.map((d) => (
-            <Card
+          {dashboards.map((d, i) => (
+            <div
               key={d.id}
-              className="group relative transition-colors hover:border-primary/40"
+              className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both duration-300"
+              style={stagger(i)}
+            >
+            <Card
+              className="group relative h-full transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
               onMouseEnter={() => prefetchDashboard(qc, d.id)}
             >
               <Link href={`/dashboards/${d.id}`} className="absolute inset-0" aria-label={d.name}>
@@ -262,6 +267,7 @@ export function DashboardList() {
                 )}
               </CardContent>
             </Card>
+            </div>
           ))}
         </div>
       )}
@@ -274,33 +280,38 @@ export function DashboardList() {
             <h2 className="text-sm font-medium">Shared with me</h2>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {sharedWithMe.map((d) => (
-              <Card
-              key={d.id}
-              className="group relative transition-colors hover:border-primary/40"
-              onMouseEnter={() => prefetchDashboard(qc, d.id)}
-            >
-                <Link
-                  href={`/dashboards/${d.id}`}
-                  className="absolute inset-0"
-                  aria-label={d.name}
+            {sharedWithMe.map((d, i) => (
+              <div
+                key={d.id}
+                className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both duration-300"
+                style={stagger(i)}
+              >
+                <Card
+                  className="group relative h-full transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+                  onMouseEnter={() => prefetchDashboard(qc, d.id)}
                 >
-                  <span className="sr-only">{d.name}</span>
-                </Link>
-                <CardHeader className="pb-2">
-                  <CardTitle className="truncate text-base">{d.name}</CardTitle>
-                </CardHeader>
-                <CardContent className="text-xs text-muted-foreground">
-                  <div className="flex items-center gap-3">
-                    <span className="inline-flex items-center gap-1">
-                      <LayoutDashboard className="h-3.5 w-3.5" />
-                      {d.card_count} card{d.card_count === 1 ? "" : "s"}
-                    </span>
-                    <span>by {d.owner_label}</span>
-                  </div>
-                  {d.description && <p className="mt-2 line-clamp-2">{d.description}</p>}
-                </CardContent>
-              </Card>
+                  <Link
+                    href={`/dashboards/${d.id}`}
+                    className="absolute inset-0"
+                    aria-label={d.name}
+                  >
+                    <span className="sr-only">{d.name}</span>
+                  </Link>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="truncate text-base">{d.name}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-xs text-muted-foreground">
+                    <div className="flex items-center gap-3">
+                      <span className="inline-flex items-center gap-1">
+                        <LayoutDashboard className="h-3.5 w-3.5" />
+                        {d.card_count} card{d.card_count === 1 ? "" : "s"}
+                      </span>
+                      <span>by {d.owner_label}</span>
+                    </div>
+                    {d.description && <p className="mt-2 line-clamp-2">{d.description}</p>}
+                  </CardContent>
+                </Card>
+              </div>
             ))}
           </div>
         </div>

@@ -1,24 +1,28 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { ArrowLeft, Share2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { FlowCanvasSkeleton } from "@/components/flows/flow-canvas-skeleton";
 import { FlowEditor } from "@/components/flows/flow-editor";
-import { FlowShareDialog } from "@/components/flows/flow-share-dialog";
 import { useFlow } from "@/lib/flow-queries";
+
+// The share dialog (radix Dialog + react-hook-form + zod) is only opened on
+// demand; lazy-load it so its deps stay out of the /flows/[flowId] First Load JS.
+const FlowShareDialog = dynamic(
+  () => import("@/components/flows/flow-share-dialog").then((m) => m.FlowShareDialog),
+  { ssr: false },
+);
 
 export function FlowEditorPage({ flowId }: { flowId: string }) {
   const { data: flow, isLoading, isError } = useFlow(flowId);
   const [shareOpen, setShareOpen] = useState(false);
 
   if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading flow…
-      </div>
-    );
+    return <FlowCanvasSkeleton />;
   }
   if (isError || !flow) {
     return (

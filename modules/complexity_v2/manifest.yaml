@@ -1,5 +1,5 @@
 id: complexity_v2
-name: Complexity v2
+name: Complexity V2
 version: 1.0.0
 category: advanced
 description: >-
@@ -8,6 +8,7 @@ description: >-
   directly-follows transition-probability matrix. Based on Langer's thesis on
   business process complexity.
 author: E. Langer
+author_url: https://github.com/MrWaitomo/WWU_processcomplexity
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

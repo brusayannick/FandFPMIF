@@ -1,6 +1,6 @@
 id: process_comparison
 name: Process Comparison
-version: 0.1.0
+version: 1.0.0
 category: comparison
 description: >-
   Compares two or more event logs side by side: an overlaid
@@ -8,6 +8,7 @@ description: >-
   footprints), and per-activity frequency changes.
 keywords: ["compare", "comparison", "diff", "difference", "versus", "overlay", "two logs", "process comparison"]
 author: FlowFactory
+author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
 license: MIT
 # Runs entirely locally (pm4py / duckdb) – safe against confidential logs.
 isConfidentialSafe: true

@@ -1,12 +1,13 @@
 id: pcomp
 name: Pcomp
-version: 0.2.0
+version: 1.0.0
 category: comparison
 description: >-
   Tests whether two event logs differ in a statistically meaningful way,
   comparing them with Earth Mover's Distance via a permutation or bootstrap test
   and reporting a p-value.
 author: C. Pitsch
+author_url: https://github.com/cpitsch/pcomp
 license: MIT
 isConfidentialSafe: true
 

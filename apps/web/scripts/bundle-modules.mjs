@@ -126,7 +126,10 @@ function commonOptions(entry, outdir) {
     target: "es2022",
     jsx: "automatic",
     jsxImportSource: "react",
-    sourcemap: "inline",
+    // Inline maps only while watching (dev DX). One-shot builds ship a linked
+    // panel.js.map instead – inline maps double-to-triple panel.js (discovery:
+    // 2.3MB inline vs ~0.7MB linked) and every user downloads them.
+    sourcemap: WATCH ? "inline" : "linked",
     legalComments: "none",
     logLevel: WATCH ? "info" : "warning",
     // Runtime externals stay as require() calls; the frontend loader resolves

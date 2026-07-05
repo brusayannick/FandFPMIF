@@ -32,11 +32,14 @@ import type { EventLogDetail, FilterEntry } from "@/lib/api-types";
 import { formatNumber } from "@/lib/format";
 import { getActivityRenameMap } from "@/lib/activity-rename";
 import { cn } from "@/lib/cn";
+import { PROCESS_PAGE_SIZE } from "@/lib/query-keys";
 
 import { EventsTable } from "./events-table";
 
 const PAGE_SIZES = [25, 50, 100, 200];
-const DEFAULT_PAGE_SIZE = 50;
+// Shared with prefetchProcessTabs (client-prefetch.ts): the prefetched first
+// page must hash to the same query key this tab reads on first render.
+const DEFAULT_PAGE_SIZE = PROCESS_PAGE_SIZE;
 
 export function EventsTab({ logId, log }: { logId: string; log: EventLogDetail }) {
   const activityRenames = useMemo(() => getActivityRenameMap(log), [log]);

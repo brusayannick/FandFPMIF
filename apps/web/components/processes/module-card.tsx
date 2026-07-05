@@ -11,6 +11,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
+import { prefetchModulePanel } from "@/lib/module-panels";
 import { hasActiveModuleJob, useJobsStore } from "@/lib/stores/jobs";
 import type { ModuleSummary } from "@/lib/api-types";
 
@@ -103,9 +104,15 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
     </Card>
   );
 
+  // Warm the panel bundle on hover/focus intent so the module page renders
+  // without the fetch+eval stall. Same idea as the sidebar's data prefetch.
+  const warmPanel = module.has_frontend ? () => prefetchModulePanel(module.id) : undefined;
+
   const content = navigable ? (
     <Link
       href={href}
+      onMouseEnter={warmPanel}
+      onFocus={warmPanel}
       className="block h-full rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       {card}

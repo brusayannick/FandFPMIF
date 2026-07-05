@@ -6,7 +6,9 @@ import { Plus, Trash2, Workflow } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
+import { CardGridSkeleton } from "@/components/skeletons";
 import { useCreateFlow, useDeleteFlow, useFlows } from "@/lib/flow-queries";
+import { stagger } from "@/lib/stagger";
 
 /** Index of the node-graph builder - parallel to the dashboards list. */
 export function FlowList() {
@@ -38,7 +40,7 @@ export function FlowList() {
       </header>
 
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <CardGridSkeleton count={6} />
       ) : !flows?.length ? (
         <div className="rounded-lg border border-dashed border-border p-10 text-center">
           <Workflow className="mx-auto h-8 w-8 text-muted-foreground/60" />
@@ -49,11 +51,15 @@ export function FlowList() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {flows.map((f) => (
+          {flows.map((f, i) => (
             <div
               key={f.id}
+              className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both duration-300"
+              style={stagger(i)}
+            >
+            <div
               className={cn(
-                "group relative rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/40",
+                "group relative h-full rounded-lg border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md",
               )}
             >
               <Link href={`/flows/${f.id}`} className="block">
@@ -75,6 +81,7 @@ export function FlowList() {
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
+            </div>
             </div>
           ))}
         </div>

@@ -119,14 +119,23 @@ function MetricTable({
   enrichedSupported: boolean;
 }) {
   const enrichedUnavailable = group.category === "Enriched Entropy" && !enrichedSupported;
+  const uniformSource =
+    group.items.length > 0 && group.items.every((i) => i.source === group.items[0].source)
+      ? group.items[0].source
+      : null;
 
   return (
     <Card>
       <CardContent>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">{group.category}</h3>
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold">{group.category}</h3>
+            {uniformSource ? (
+              <div className="text-[11px] text-muted-foreground">{uniformSource}</div>
+            ) : null}
+          </div>
           {enrichedUnavailable ? (
-            <span className="text-[11px] text-muted-foreground">
+            <span className="shrink-0 text-[11px] text-muted-foreground">
               XES standard attributes missing
             </span>
           ) : null}
@@ -150,7 +159,9 @@ function MetricTable({
                       </code>
                       <span>{item.name}</span>
                     </div>
-                    <div className="text-[11px] text-muted-foreground">{item.source}</div>
+                    {uniformSource ? null : (
+                      <div className="text-[11px] text-muted-foreground">{item.source}</div>
+                    )}
                   </td>
                   <td className="py-1.5 pr-3 tabular-nums">
                     {formatMetric(item.key, item.value, values)}

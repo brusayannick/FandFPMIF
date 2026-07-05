@@ -1,8 +1,11 @@
-import pandas as pd
-import numpy as np
-import scipy.stats as st
 import math
+
+import numpy as np
+import pandas as pd
+import scipy.stats as st
+
 from source.arrival_distribution import get_best_fitting_distribution, get_inter_arrival_times
+
 
 def get_case_arrival_times(df, start_timestamp, num_cases_to_simulate, train=True, train_params=None):
     if train:

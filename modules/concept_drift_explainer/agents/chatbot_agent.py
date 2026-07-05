@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import textwrap
-from typing import Dict, List
 
 from langchain_core.language_models import BaseChatModel
 from pydantic.v1 import BaseModel, Field
@@ -30,7 +29,7 @@ def _format_chat_history(chat_history: list) -> str:
     return "\n".join(f"Human: {q}\nAssistant: {a}" for q, a in chat_history)
 
 
-def _format_full_analysis_context(full_state_log: List[Dict]) -> str:
+def _format_full_analysis_context(full_state_log: list[dict]) -> str:
     out = ""
     for i, state in enumerate(full_state_log, 1):
         drift_info = state.get("drift_info", {}) or {}

@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Play, ShieldCheck, Sparkles, Upload } from "lucide-react";
+import { Play, Sparkles, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -322,11 +322,17 @@ function Legend() {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
       <LegendSwatch className="bg-emerald-500/30 border-emerald-500/60" label="Conforming" />
-      <LegendSwatch className="bg-red-500/40 border-red-500/70" label="Deviating" />
-      <LegendSwatch className="border-dashed border-amber-500/70 bg-amber-500/20" label="No log match" />
       <span className="inline-flex items-center gap-1.5">
-        <ShieldCheck className="h-3.5 w-3.5" /> Color depth tracks deviation count
+        <span
+          className="h-3 w-8 rounded-sm border border-red-500/70 bg-gradient-to-r from-red-500/15 to-red-600/90"
+          aria-hidden
+        />
+        Deviating — deeper red = more deviations
       </span>
+      <LegendSwatch
+        className="border-dashed border-amber-500/70 bg-amber-500/20"
+        label="Model task not found in log"
+      />
     </div>
   );
 }

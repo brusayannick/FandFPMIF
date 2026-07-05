@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -16,7 +17,7 @@ import {
   PageDescription,
 } from "@/components/page";
 import { EmptyState } from "@/components/empty-state";
-import { FileBox, Plus, RotateCcw } from "lucide-react";
+import { FileBox, Lock, Plus, RotateCcw } from "lucide-react";
 import { toastError } from "@/lib/toast";
 import {
   useModules,
@@ -115,6 +116,8 @@ function ModuleCard({ m }: { m: ModuleSummary }) {
   const { data: cfg } = useModuleConfig(m.id);
   const update = useUpdateModuleConfig();
   const enabled = cfg?.enabled ?? m.enabled;
+  // Admin locked this module's config platform-wide: badge it and freeze the toggle.
+  const controlled = cfg?.controlled_by_admin ?? false;
 
   const onToggle = async (val: boolean) => {
     if (!cfg) return;
@@ -131,9 +134,18 @@ function ModuleCard({ m }: { m: ModuleSummary }) {
       <CardContent className="space-y-3 p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h3 className="truncate text-sm font-semibold">{m.name}</h3>
               <span className="text-xs text-muted-foreground">{m.version}</span>
+              {controlled && (
+                <Badge
+                  variant="outline"
+                  className="h-5 gap-1 border-destructive/30 bg-destructive/10 px-1.5 py-0 text-[10px] text-destructive"
+                >
+                  <Lock className="h-3 w-3" />
+                  Admin-controlled
+                </Badge>
+              )}
             </div>
             {m.author && (
               <p className="mt-0.5 truncate text-xs text-muted-foreground">by {m.author}</p>
@@ -142,9 +154,11 @@ function ModuleCard({ m }: { m: ModuleSummary }) {
           <Switch
             checked={enabled}
             onCheckedChange={onToggle}
-            disabled={cfg === undefined || update.isPending}
+            disabled={cfg === undefined || update.isPending || controlled}
             aria-label={enabled ? `Disable ${m.name}` : `Enable ${m.name}`}
-            className="cursor-pointer shrink-0"
+            className={
+              controlled ? "cursor-pointer shrink-0 opacity-60" : "cursor-pointer shrink-0"
+            }
           />
         </div>
         {m.description && (

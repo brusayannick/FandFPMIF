@@ -2,6 +2,8 @@ import argparse
 import warnings
 
 from source.agent_simulator import AgentSimulator
+
+
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='Process event log parameters')

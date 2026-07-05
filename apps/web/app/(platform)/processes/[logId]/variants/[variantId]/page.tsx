@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Inbox } from "lucide-react";
 
@@ -8,13 +9,24 @@ import { EmptyState } from "@/components/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { PageContainer, PageTitle } from "@/components/page";
+import { ChartCardSkeleton } from "@/components/skeletons";
 import { useEventLog, useVariant, useVariantCases } from "@/lib/queries";
 import { displayActivities, getActivityRenameMap } from "@/lib/activity-rename";
 import { VariantHeader } from "@/components/processes/variant-detail/header";
 import { SequenceStrip } from "@/components/processes/variant-detail/sequence-strip";
-import { DurationHistogram } from "@/components/processes/variant-detail/duration-histogram";
 import { CaseList } from "@/components/processes/variant-detail/case-list";
 import { AttributeBreakdowns } from "@/components/processes/variant-detail/attribute-breakdowns";
+
+// recharts lives inside DurationHistogram; load it in an async chunk so the
+// variant-detail route's First Load JS stays small. ssr:false because the chart
+// only renders client-side from already-fetched variant data.
+const DurationHistogram = dynamic(
+  () =>
+    import("@/components/processes/variant-detail/duration-histogram").then(
+      (m) => m.DurationHistogram,
+    ),
+  { ssr: false, loading: () => <ChartCardSkeleton /> },
+);
 
 export default function VariantDetailPage() {
   const params = useParams<{ logId: string; variantId: string }>();

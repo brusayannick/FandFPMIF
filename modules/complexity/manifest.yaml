@@ -6,9 +6,12 @@ description: >-
   Measures how complex your process is with entropy-based metrics over its
   variants and activity sequences, plus Lempel-Ziv, affinity, structure, and
   Pentland's task and process complexity. Uses richer XES trace and event
-  attributes automatically when they are present.
+  attributes automatically when they are present. Based on Augusto et al., "The
+  connection between process complexity of event sequences and models discovered
+  by process mining" (2022). DOI: https://doi.org/10.1016/j.ins.2022.03.072
 keywords: ["complexity", "entropy", "variant entropy", "lempel-ziv", "pentland", "structure", "affinity", "epa"]
-author: Augusto et al.
+author: Augusto et al. (2022)
+author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

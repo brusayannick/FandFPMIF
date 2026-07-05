@@ -39,8 +39,10 @@ function deriveCrumbs(
   for (let i = 0; i < parts.length; i++) {
     acc += `/${parts[i]}`;
 
-    // Skip displaying "modules" in breadcrumb
-    if (parts[i] === "modules") {
+    // Skip the intermediate "modules" segment inside the process module view
+    // (…/processes/{id}/modules/{modId}), but keep the top-level /modules
+    // section so it shows in the breadcrumb like every other section.
+    if (parts[i] === "modules" && i > 0) {
       continue;
     }
 
@@ -48,7 +50,7 @@ function deriveCrumbs(
 
     // Use the resource's name (not its UUID) when this segment is an id that
     // follows a known collection.
-    let label = prettify(parts[i]);
+    let label = parts[i] === "modules" ? "Module Settings" : prettify(parts[i]);
     if (parts[i - 1] === "processes" && logNames?.has(parts[i])) {
       label = logNames.get(parts[i])!;
     } else if (parts[i - 1] === "dashboards" && dashboardNames?.has(parts[i])) {

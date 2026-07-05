@@ -20,8 +20,11 @@ import type { EventLogDetail } from "@/lib/api-types";
 import { formatDuration, formatNumber, formatRelative } from "@/lib/format";
 import { displayActivities, getActivityRenameMap } from "@/lib/activity-rename";
 import { cn } from "@/lib/cn";
+import { DEFAULT_VARIANTS_SORT, PROCESS_PAGE_SIZE } from "@/lib/query-keys";
 
-const PAGE_SIZE = 50;
+// Shared with prefetchProcessTabs (client-prefetch.ts): the prefetched first
+// page must hash to the same query key this tab reads on first render.
+const PAGE_SIZE = PROCESS_PAGE_SIZE;
 
 type SortField = "case_count" | "avg_duration_seconds" | "last_seen";
 
@@ -29,6 +32,13 @@ interface SortState {
   field: SortField;
   dir: "asc" | "desc";
 }
+
+// Initial sort derives from the shared constant so it can't drift from the
+// prefetch (`"case_count:desc"` ⇄ `{field, dir}`).
+const [INITIAL_SORT_FIELD, INITIAL_SORT_DIR] = DEFAULT_VARIANTS_SORT.split(":") as [
+  SortField,
+  "asc" | "desc",
+];
 
 const SORT_LABEL: Record<SortField, string> = {
   case_count: "Cases",
@@ -39,7 +49,7 @@ const SORT_LABEL: Record<SortField, string> = {
 export function VariantsTab({ logId, log }: { logId: string; log: EventLogDetail }) {
   const renameMap = useMemo(() => getActivityRenameMap(log), [log]);
   const [page, setPage] = useState(0);
-  const [sort, setSort] = useState<SortState>({ field: "case_count", dir: "desc" });
+  const [sort, setSort] = useState<SortState>({ field: INITIAL_SORT_FIELD, dir: INITIAL_SORT_DIR });
   const [activityQuery, setActivityQuery] = useState("");
   const [minCases, setMinCases] = useState("");
 

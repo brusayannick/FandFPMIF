@@ -1,6 +1,6 @@
 id: concept_drift_explainer
 name: Concept Drift Explainer
-version: 0.1.0
+version: 1.0.0
 category: advanced
 description: >-
   Explains why your process changed. It takes the drift points found by CV4CDD,
@@ -9,6 +9,7 @@ description: >-
   confidential logs.
 keywords: ["explain drift", "drift explanation", "why drift", "drift reason", "root cause drift", "drift cause"]
 author: J. Schaffner
+author_url: https://github.com/janschaffner/concept_drift_explainer
 license: MIT
 default_enabled: true
 # Sends event-log excerpts and uploaded documents to an external LLM – not

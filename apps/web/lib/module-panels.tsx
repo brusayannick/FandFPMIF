@@ -114,6 +114,16 @@ async function loadPanel(moduleId: string): Promise<AnyComponent> {
   }
 }
 
+/**
+ * Fire-and-forget warm-up for a panel bundle (hover/focus intent on module
+ * links). Dedup comes free from `_panelCache`/`_inflight`; failures are
+ * swallowed – the real navigation retries and surfaces the error UI.
+ */
+export function prefetchModulePanel(moduleId: string): void {
+  if (typeof window === "undefined") return;
+  void loadPanel(moduleId).catch(() => {});
+}
+
 /** Async React component that resolves the dynamic bundle on mount. */
 function DynamicModulePanel({ logId, moduleId }: ModulePanelProps) {
   const [Panel, setPanel] = useState<AnyComponent | null>(() => _panelCache.get(moduleId) ?? null);
@@ -158,12 +168,28 @@ export function getModulePanel(
   return DynamicModulePanel;
 }
 
+// The most-seen skeleton in the app: shown while the runtime installs on the
+// first panel visit AND while any panel bundle loads. Shaped like a typical
+// module panel (title, toolbar/tab strip, canvas, stat row) to minimise the
+// layout jump when the real panel lands.
 function PanelSkeleton() {
   return (
     <div className="space-y-4">
-      <Skeleton className="h-8 w-72" />
-      <Skeleton className="h-4 w-96" />
-      <Skeleton className="h-96 w-full" />
+      <div className="space-y-2">
+        <Skeleton className="h-8 w-72 max-w-full" />
+        <Skeleton className="h-4 w-96 max-w-full" />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-9 w-24 rounded-md" />
+        ))}
+      </div>
+      <Skeleton className="h-[28rem] w-full rounded-xl" />
+      <div className="grid gap-4 sm:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-16 w-full rounded-xl" />
+        ))}
+      </div>
     </div>
   );
 }

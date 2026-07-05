@@ -66,13 +66,15 @@ const NAV: NavItem[] = [
   },
   {
     href: "/modules",
-    label: "Modules",
+    label: "Module Settings",
     icon: FileBox,
     match: (p) => p.startsWith("/modules"),
     prefetch: (qc) => prefetchModules(qc),
   },
   {
-    href: "/settings",
+    // Deep-link straight to the default tab – `/settings` is a server
+    // redirect, which would cost a second serial RSC roundtrip per click.
+    href: "/settings/general",
     label: "Settings",
     icon: Cog,
     match: (p) => p.startsWith("/settings"),
@@ -123,7 +125,7 @@ export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
             >
               <Pickaxe className="h-4 w-4" />
             </div>
-            <span className="truncate text-sm font-semibold tracking-tight">MATE Hub</span>
+            <span className="truncate text-sm font-semibold tracking-tight">PM-MATE</span>
           </>
         )}
         <button
@@ -149,6 +151,10 @@ export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
             const link = (
               <Link
                 href={item.href}
+                // Full prefetch (RSC payload incl. the page, not just the
+                // loading boundary) – top-level sections are client shells, so
+                // the payload is tiny and the first click commits instantly.
+                prefetch={true}
                 data-tour={item.href === "/processes" ? "nav-processes" : undefined}
                 aria-current={active ? "page" : undefined}
                 onMouseEnter={() => item.prefetch?.(qc)}

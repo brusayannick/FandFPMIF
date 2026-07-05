@@ -38,14 +38,7 @@ export function ComplexityPanel({ logId }: { logId: string; moduleId: string }) 
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Complexity</h2>
-          <p className="text-xs text-muted-foreground">
-            Variant / sequence entropy, Pentland and structural measures
-            built on the Extended Prefix Automaton. After Rüschel &amp; Langer.
-          </p>
-        </div>
+      <header className="flex flex-wrap items-center justify-end gap-3">
         {enriched_supported ? (
           <Badge variant="secondary" className="gap-1.5">
             <Info className="h-3 w-3" />
@@ -127,7 +120,7 @@ function EntropyTable({ metrics }: { metrics: ComplexityMetrics }) {
               <tr>
                 <th className="py-1.5 pr-4 font-medium">Measure</th>
                 <th className="py-1.5 pr-4 font-medium tabular-nums">Value</th>
-                <th className="py-1.5 font-medium tabular-nums">Normalised</th>
+                <th className="py-1.5 font-medium tabular-nums">Normalised (0–1)</th>
               </tr>
             </thead>
             <tbody>

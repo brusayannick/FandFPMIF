@@ -5,9 +5,12 @@ category: advanced
 description: >-
   Detects when and how your process changed. It encodes the log as a similarity
   image and uses a trained object-detection model to find sudden, gradual,
-  incremental, and recurring drifts.
+  incremental, and recurring drifts. Based on Kraus and van der Aa, "Looking for
+  Change: A Computer Vision Approach for Concept Drift Detection in Process
+  Mining" (2024). DOI: https://doi.org/10.1007/978-3-031-70396-6_16
 keywords: ["concept drift", "drift detection", "drift", "sudden drift", "gradual drift", "recurring drift", "change point"]
-author: A. Kraus and H. van der Aa
+author: A. Kraus and H. van der Aa (2024)
+author_url: https://huggingface.co/datasets/pm-science/cv4cdd_4d
 license: CC-BY-4.0
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
-
 from modules.concept_drift_explainer.agents.drift_agent import (
     _canonical_drift_type,
     _dominant_activity_in_window,

@@ -71,7 +71,7 @@ class TreeNode(BaseModel):
     id: str
     label: str
     value: float | None = None
-    children: list["TreeNode"] = Field(default_factory=list)
+    children: list[TreeNode] = Field(default_factory=list)
 
 
 class TreeData(BaseModel):

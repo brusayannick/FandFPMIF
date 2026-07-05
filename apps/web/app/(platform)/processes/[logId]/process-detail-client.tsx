@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Inbox, Loader2 } from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -21,8 +22,10 @@ import { OcelOverviewPanel } from "@/components/processes/ocel/ocel-overview-pan
 import { OcelObjectsTab } from "@/components/processes/ocel/ocel-objects-tab";
 import { OcelEventsTab } from "@/components/processes/ocel/ocel-events-tab";
 import { OcelRelationshipsTab } from "@/components/processes/ocel/ocel-relationships-tab";
+import { CountUp } from "@/components/count-up";
 import { useEventLog } from "@/lib/queries";
-import { formatDateRange, formatNumber, formatRelative } from "@/lib/format";
+import { prefetchProcessTabs } from "@/lib/client-prefetch";
+import { formatDateRange, formatRelative } from "@/lib/format";
 
 // Case-centric and object-centric (OCEL) logs get fully separate tab sets – the
 // two models never mix.
@@ -45,7 +48,15 @@ function readTab(value: string | null | undefined, allowed: readonly TabId[]): T
 export function ProcessDetailClient({ logId }: { logId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const qc = useQueryClient();
   const { data: log, isLoading, isError, error } = useEventLog(logId);
+
+  // Warm the other tabs' first-page queries once the log is ready, so a tab
+  // click renders from cache instead of a skeleton. prefetchQuery no-ops while
+  // the data is still fresh, so refires (log refetches) are cheap.
+  useEffect(() => {
+    if (log?.status === "ready") prefetchProcessTabs(qc, log);
+  }, [qc, log]);
 
   const setTab = useCallback(
     (next: string) => {
@@ -124,15 +135,15 @@ export function ProcessDetailClient({ logId }: { logId: string }) {
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
           {objectCentric ? (
             <>
-              <span><span className="tabular-nums">{formatNumber(log.object_types_count)}</span> object types</span>
-              <span><span className="tabular-nums">{formatNumber(log.objects_count)}</span> objects</span>
-              <span><span className="tabular-nums">{formatNumber(log.events_count)}</span> events</span>
+              <span><span className="tabular-nums"><CountUp value={log.object_types_count} /></span> object types</span>
+              <span><span className="tabular-nums"><CountUp value={log.objects_count} /></span> objects</span>
+              <span><span className="tabular-nums"><CountUp value={log.events_count} /></span> events</span>
             </>
           ) : (
             <>
-              <span><span className="tabular-nums">{formatNumber(log.cases_count)}</span> cases</span>
-              <span><span className="tabular-nums">{formatNumber(log.events_count)}</span> events</span>
-              <span><span className="tabular-nums">{formatNumber(log.variants_count)}</span> variants</span>
+              <span><span className="tabular-nums"><CountUp value={log.cases_count} /></span> cases</span>
+              <span><span className="tabular-nums"><CountUp value={log.events_count} /></span> events</span>
+              <span><span className="tabular-nums"><CountUp value={log.variants_count} /></span> variants</span>
             </>
           )}
           <span>{formatDateRange(log.date_min, log.date_max)}</span>

@@ -8,12 +8,13 @@ router; this router covers the platform's own module-meta surface.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -99,6 +100,7 @@ class ModuleSummary(BaseModel):
     category: str
     description: str | None = None
     author: str | None = None
+    author_url: str | None = None
     license: str | None = None
     provides: list[str]
     consumes: list[str]
@@ -166,6 +168,7 @@ async def list_modules(
             category=m.category,
             description=m.description,
             author=m.author,
+            author_url=m.author_url,
             license=m.license,
             provides=list(m.provides),
             consumes=list(m.consumes),
@@ -437,7 +440,9 @@ async def put_module_layout(
 
 
 @router.get("/{module_id}/assets/{asset_path:path}")
-async def get_module_asset(module_id: str, asset_path: str, user: CurrentUserDep) -> FileResponse:
+async def get_module_asset(
+    module_id: str, asset_path: str, request: Request, user: CurrentUserDep
+) -> Response:
     """Serve a file from the loaded module's `.dist/` (§5.4).
 
     The frontend dynamic loader fetches `panel.js` / `widget-*.js` from this
@@ -447,6 +452,11 @@ async def get_module_asset(module_id: str, asset_path: str, user: CurrentUserDep
 
     Resolved from the *loaded* module's folder rather than a fixed root so it
     serves defaults (repo `modules/`) and uploads (`uploaded_modules/`) alike.
+
+    Bundles are multi-MB, so answer conditional requests: `private, no-cache`
+    lets the browser store the body but forces an ETag revalidation per use -
+    a dev watch-rebuild or prod upgrade (new mtime/size) is picked up on the
+    next load, while an unchanged bundle costs a ~200B 304 instead of the file.
     """
     loader = get_module_loader()
     loaded = loader.loaded.get(module_id)
@@ -462,10 +472,21 @@ async def get_module_asset(module_id: str, asset_path: str, user: CurrentUserDep
         raise HTTPException(status_code=400, detail="Invalid asset path.") from exc
     if not candidate.is_file():
         raise HTTPException(status_code=404, detail="Asset not found.")
+    # Same mtime-size ETag formula as Starlette's FileResponse (which sets the
+    # header but never answers 304 itself).
+    stat = candidate.stat()
+    etag_base = f"{stat.st_mtime}-{stat.st_size}".encode()
+    etag = f'"{hashlib.md5(etag_base, usedforsecurity=False).hexdigest()}"'
+    cache_headers = {"Cache-Control": "private, no-cache", "ETag": etag}
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match is not None:
+        tags = {t.strip().removeprefix("W/") for t in if_none_match.split(",")}
+        if "*" in tags or etag in tags:
+            return Response(status_code=304, headers=cache_headers)
     # Force application/javascript so the browser executes the file as JS
     # even if the on-disk extension is unusual.
     media_type = "application/javascript" if candidate.suffix == ".js" else None
-    return FileResponse(candidate, media_type=media_type)
+    return FileResponse(candidate, media_type=media_type, headers=cache_headers)
 
 
 class RestoreDefaultsResponse(BaseModel):

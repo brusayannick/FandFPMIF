@@ -14,7 +14,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from mate.api.datasets.envelope import ColumnSpec, ColumnType, DatasetEnvelope, DatasetMeta, table_envelope
+from mate.api.datasets.envelope import (
+    ColumnSpec,
+    ColumnType,
+    DatasetEnvelope,
+    DatasetMeta,
+    table_envelope,
+)
 from mate.api.modules.event_filters import build_filter_where, quote_ident
 
 TRANSFORM_OPS: frozenset[str] = frozenset(

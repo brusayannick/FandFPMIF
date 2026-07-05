@@ -50,9 +50,9 @@ from mate.api.modules.finder import get_finder, module_namespace, reset_finder
 from mate.api.modules.installer import install_module, venv_site_packages
 from mate.api.modules.installs import user_module_ids, user_owns_module
 from mate.api.modules.job_logs import get_job_log_buffer
+from mate.api.modules.job_worker import JobWorker
 from mate.api.modules.object_centric_log_access import ObjectCentricLogAccess
 from mate.api.modules.registry import CapabilityRegistry
-from mate.api.modules.job_worker import JobWorker
 from mate.api.modules.subprocess_host import SubprocessBridge
 from mate.api.sharing import user_can_read_log
 from mate.sdk.context import ModuleContext

@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from typing import Any
 
-
 KPI_SQL = """
 WITH case_spans AS (
     SELECT

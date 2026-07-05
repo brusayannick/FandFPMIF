@@ -29,8 +29,8 @@ export function BottleneckTable({ items, selectedActivity, onSelectActivity }: B
           <TableRow>
             <TableHead className="w-12">#</TableHead>
             <TableHead>Activity</TableHead>
-            <TableHead className="text-right">Frequency</TableHead>
             <TableHead className="text-right">Avg sojourn</TableHead>
+            <TableHead className="text-right">Frequency</TableHead>
             <TableHead className="text-right">P90 sojourn</TableHead>
             <TableHead className="text-right">Share</TableHead>
             <TableHead className="w-24">Distribution</TableHead>
@@ -51,10 +51,10 @@ export function BottleneckTable({ items, selectedActivity, onSelectActivity }: B
                 <TableCell className="font-mono text-xs text-muted-foreground">{item.rank}</TableCell>
                 <TableCell className="font-medium">{item.activity}</TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {formatNumber(item.frequency)}
+                  {formatDuration(item.avg_sojourn_s)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {formatDuration(item.avg_sojourn_s)}
+                  {formatNumber(item.frequency)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {formatDuration(item.p90_sojourn_s)}

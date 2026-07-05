@@ -37,6 +37,25 @@ function firstCollision(list: DashboardItem[], it: DashboardItem): DashboardItem
 }
 
 /**
+ * First-fit placement for a newly added card. Scans rows top-to-bottom and, within
+ * each row, columns left-to-right, returning the highest cell where a `w×h` card
+ * fits without overlapping an existing one. So a plain palette click fills a gap at
+ * the top (e.g. the free space to the right of a half-full first row) instead of
+ * always landing at the bottom, and only drops to a new row once the rows above are
+ * full. Existing cards never move (no compaction).
+ */
+function findTopFit(items: DashboardItem[], w: number, h: number, cols: number): { x: number; y: number } {
+  const width = Math.min(w, cols);
+  const overlaps = (x: number, y: number) =>
+    items.some((it) => x < it.x + it.w && x + width > it.x && y < it.y + it.h && y + h > it.y);
+  for (let y = 0; ; y++) {
+    for (let x = 0; x + width <= cols; x++) {
+      if (!overlaps(x, y)) return { x, y };
+    }
+  }
+}
+
+/**
  * Non-compacting reflow. Places `id` at `(x, y)`, pushes *only* the cards it
  * (transitively) overlaps straight down, and leaves every other card exactly
  * where `snapshot` had it. It's recomputed from the drag-start snapshot on every
@@ -635,7 +654,7 @@ export function DashboardCanvas({
       if (!editing) return;
       const startX = e.clientX;
       const startY = e.clientY;
-      const w = addGeometry(req).w;
+      const { w, h } = addGeometry(req);
       setAddReq(req);
       setAddPointer({ x: startX, y: startY });
       setAddCell(cellWithinGrid(startX, startY, w));
@@ -649,8 +668,13 @@ export function DashboardCanvas({
         cleanup();
         const cell = cellWithinGrid(ev.clientX, ev.clientY, w);
         if (cell) commitAdd(req, cell.x, cell.y);
-        else if (!moved)
-          commitAdd(req, 0, itemsRef.current.reduce((m, it) => Math.max(m, it.y + it.h), 0));
+        else if (!moved) {
+          // No drag + off-grid release = a plain palette click. Place the card as
+          // high as it fits (filling a gap at the top, e.g. right of the first row)
+          // rather than always appending at the bottom.
+          const { x, y } = findTopFit(itemsRef.current, w, h, cols);
+          commitAdd(req, x, y);
+        }
       };
       const cancel = () => cleanup();
       const cleanup = () => {
@@ -671,7 +695,7 @@ export function DashboardCanvas({
       window.addEventListener("pointerup", finish);
       window.addEventListener("pointercancel", cancel);
     },
-    [editing, cellWithinGrid, commitAdd],
+    [editing, cellWithinGrid, commitAdd, cols],
   );
 
   // Publish the starter so the palette (a sibling) can begin the gesture from its

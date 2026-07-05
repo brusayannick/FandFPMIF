@@ -1,19 +1,28 @@
 import pandas as pd
-import numpy as np
-from source.utils import store_preprocessed_data
-from source.agent_types.discover_roles import discover_roles_and_calendars
+
+from source.activity_transition import (
+    compute_activity_transition_dict,
+    compute_activity_transition_dict_global,
+)
 from source.agent_types.discover_resource_calendar import discover_calendar_per_agent
+from source.agent_types.discover_roles import discover_roles_and_calendars
 from source.arrival_distribution import get_best_fitting_distribution
 from source.arrival_times import get_case_arrival_times
-from source.activity_transition import compute_activity_transition_dict, compute_activity_transition_dict_global
-from source.interaction_probabilities import calculate_agent_handover_probabilities_per_activity
 from source.extraneous_delays.config import (
     Configuration as ExtraneousActivityDelaysConfiguration,
+)
+from source.extraneous_delays.config import (
     TimerPlacement,
 )
-from source.extraneous_delays.delay_discoverer import compute_complex_extraneous_activity_delays, compute_naive_extraneous_activity_delays
+from source.extraneous_delays.delay_discoverer import (
+    compute_complex_extraneous_activity_delays,
+    compute_naive_extraneous_activity_delays,
+)
 from source.extraneous_delays.event_log import EventLogIDs
+from source.interaction_probabilities import calculate_agent_handover_probabilities_per_activity
 from source.simulation import BusinessProcessModel, Case
+from source.utils import store_preprocessed_data
+
 
 def discover_simulation_parameters(df_train, df_test, df_val, data_dir, num_cases_to_simulate, num_cases_to_simulate_val, determine_automatically=False, central_orchestration=False, discover_extr_delays=False):
     """

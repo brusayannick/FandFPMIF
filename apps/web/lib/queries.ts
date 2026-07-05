@@ -6,7 +6,10 @@ import { api, apiUpload } from "@/lib/api";
 import {
   queryKeys,
   eventLogsListPath,
+  eventsPath,
   modulesListPath,
+  ocelListPath,
+  variantsPath,
   type OcelListParams,
   type EventsListParams,
   type VariantsListParams,
@@ -59,28 +62,6 @@ function isEventLogListKey(queryKey: readonly unknown[]): boolean {
   );
 }
 
-function eventsPath(logId: string, params: EventsListParams): string {
-  const qs = new URLSearchParams();
-  if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.limit !== undefined) qs.set("limit", String(params.limit));
-  if (params.sort) qs.set("sort", params.sort);
-  if (params.filter && params.filter.length > 0) qs.set("filter", JSON.stringify(params.filter));
-  if (params.q) qs.set("q", params.q);
-  if (params.missing_only) qs.set("missing_only", "true");
-  if (params.case_id) qs.set("case_id", params.case_id);
-  return `/api/v1/event-logs/${logId}/events${qs.toString() ? `?${qs}` : ""}`;
-}
-
-function variantsPath(logId: string, params: VariantsListParams): string {
-  const qs = new URLSearchParams();
-  if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.limit !== undefined) qs.set("limit", String(params.limit));
-  if (params.sort) qs.set("sort", params.sort);
-  if (params.activity_contains) qs.set("activity_contains", params.activity_contains);
-  if (params.min_case_count !== undefined) qs.set("min_case_count", String(params.min_case_count));
-  return `/api/v1/event-logs/${logId}/variants${qs.toString() ? `?${qs}` : ""}`;
-}
-
 export function useEventLogs(params: { q?: string; status?: string } = {}) {
   return useQuery({
     queryKey: [...queryKeys.eventLogs(), params],
@@ -101,22 +82,15 @@ export function useEventLog(id: string | null) {
       if (!data) return false;
       // Poll through both transient states: `importing` (parsing) and
       // `processing` (modules precomputing) both resolve to `ready`/`failed`.
-      return data.status === "importing" || data.status === "processing" ? 1000 : false;
+      // The poll is only a safety net – the SSE bus (jobs-provider.tsx) already
+      // invalidates the ["event-logs"] prefix on log.ready / job.completed, so
+      // a relaxed cadence costs nothing when the stream is healthy.
+      return data.status === "importing" || data.status === "processing" ? 2500 : false;
     },
   });
 }
 
 // ── Object-centric (OCEL) hooks ──────────────────────────────────────────────
-
-function ocelListPath(logId: string, kind: string, params: OcelListParams): string {
-  const qs = new URLSearchParams();
-  if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.limit !== undefined) qs.set("limit", String(params.limit));
-  if (params.object_type) qs.set("object_type", params.object_type);
-  if (params.activity) qs.set("activity", params.activity);
-  if (params.q) qs.set("q", params.q);
-  return `/api/v1/event-logs/${logId}/ocel/${kind}${qs.toString() ? `?${qs}` : ""}`;
-}
 
 export function useOcelOverview(logId: string | null, enabled = true) {
   return useQuery({

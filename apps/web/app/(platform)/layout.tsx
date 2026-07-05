@@ -12,6 +12,7 @@ import { TourOverlay } from "@/components/tour/tour-overlay";
 import { MateAiSidebar } from "@/components/mate-ai/mate-ai-sidebar";
 import { RouteProgress } from "@/components/route-progress";
 import { SessionGuard } from "@/components/session-guard";
+import { AppSplash } from "@/components/app-splash";
 
 export default async function PlatformLayout({
   children,
@@ -46,6 +47,7 @@ export default async function PlatformLayout({
       <JobsDrawer />
       <OnboardingOverlay />
       <TourOverlay />
+      <AppSplash isAdmin={session.user.isAdmin === true} />
     </div>
   );
 }

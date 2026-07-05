@@ -1,5 +1,5 @@
 id: log_evolution
-name: Log evolution
+name: Log Evolution
 version: 1.0.0
 category: advanced
 description: >-
@@ -8,6 +8,7 @@ description: >-
   of every event. Makes growth, backlogs, seasonality, and drift easy to spot.
 keywords: ["log evolution", "over time", "case arrivals", "work in progress", "wip", "dotted chart", "backlog", "seasonality"]
 author: FlowFactory
+author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

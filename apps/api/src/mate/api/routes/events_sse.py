@@ -27,6 +27,7 @@ user's are filtered out - that's how per-user isolation is enforced.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncIterator
 from datetime import datetime
@@ -76,30 +77,47 @@ async def stream_events(
         # `async with` lives inside the generator so the bus subscription is torn
         # down the moment the client disconnects (the generator is closed).
         async with bus.subscribe(topics) as stream:
+            # Keep ONE pending pull alive across idle ticks. `asyncio.wait` with a
+            # timeout does NOT cancel the task when it fires (unlike `wait_for`), so
+            # a quiet interval no longer throws CancelledError into the bus
+            # generator's `queue.get()` - which would close the generator and end
+            # the stream ~2 s after every connect, forcing a client reconnect and
+            # dropping any event published in the gap.
+            nxt = asyncio.ensure_future(anext(stream))
             idle = 0.0
-            while True:
-                # Poll the shutdown flag so the stream exits during uvicorn's
-                # connection drain instead of being force-cancelled at the grace
-                # deadline (which prints a CancelledError ASGI traceback).
-                if is_shutting_down():
-                    return
-                try:
-                    env = await asyncio.wait_for(anext(stream), _SHUTDOWN_POLL_S)
-                except TimeoutError:
-                    idle += _SHUTDOWN_POLL_S
-                    if idle >= _HEARTBEAT_S:
-                        idle = 0.0
-                        yield ": ping\n\n"
-                    continue
-                except StopAsyncIteration:
-                    return
-                idle = 0.0
-                # Filter cross-user events. System-emitted envelopes (no
-                # `user_id` in payload) are always forwarded - they're
-                # operator-level, never user data.
-                env_user = env.payload.get("user_id")
-                if env_user is not None and env_user != user.id:
-                    continue
-                yield _sse(env.to_json())
+            try:
+                while True:
+                    # Poll the shutdown flag so the stream exits during uvicorn's
+                    # connection drain instead of being force-cancelled at the
+                    # grace deadline (which prints a CancelledError ASGI traceback).
+                    if is_shutting_down():
+                        return
+                    done, _ = await asyncio.wait({nxt}, timeout=_SHUTDOWN_POLL_S)
+                    if not done:
+                        idle += _SHUTDOWN_POLL_S
+                        if idle >= _HEARTBEAT_S:
+                            idle = 0.0
+                            yield ": ping\n\n"
+                        continue
+                    try:
+                        env = nxt.result()
+                    except StopAsyncIteration:
+                        return
+                    # Re-arm the pull before yielding so no event is missed.
+                    nxt = asyncio.ensure_future(anext(stream))
+                    idle = 0.0
+                    # Filter cross-user events. System-emitted envelopes (no
+                    # `user_id` in payload) are always forwarded - they're
+                    # operator-level, never user data.
+                    env_user = env.payload.get("user_id")
+                    if env_user is not None and env_user != user.id:
+                        continue
+                    yield _sse(env.to_json())
+            finally:
+                # Cancel the orphaned pull on client disconnect / shutdown so the
+                # bus subscription's queue isn't left with a dangling reader.
+                nxt.cancel()
+                with contextlib.suppress(BaseException):
+                    await nxt
 
     return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)

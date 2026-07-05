@@ -7,6 +7,7 @@ description: >-
   the activities, and the object-centric directly-follows graph (OC-DFG).
 keywords: ["object-centric", "object centric", "ocel", "oc-dfg", "object types", "ocpm"]
 author: FlowFactory
+author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

@@ -1,5 +1,5 @@
 id: complexity_over_time
-name: Complexity over time
+name: Complexity Over Time
 version: 1.0.0
 category: advanced
 description: >-
@@ -8,6 +8,7 @@ description: >-
   process became simpler or more chaotic. Based on paper by Augusto et al.
 keywords: ["complexity over time", "complexity trend", "entropy over time", "complexity timeline", "kpi over time"]
 author: FlowFactory
+author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

@@ -63,16 +63,82 @@ export class ApiError extends Error {
   }
 }
 
-async function browserToken(): Promise<string | undefined> {
-  if (typeof window === "undefined") return undefined;
+// ── Cached session ─────────────────────────────────────────────────────────
+// `getSession()` always does a network roundtrip to `/api/auth/session`, and
+// `attachAuth` awaited it before EVERY api() call – a page mounting six
+// queries paid six extra serial roundtrips before the first real byte left
+// the browser. Cache the session until shortly before its access token
+// expires (`session.expiresAt`), clamped to [5s, 60s] and single-flighted so
+// a burst of concurrent calls shares one fetch. A 401 from the backend
+// invalidates the cache so the next call re-reads (and, server-side, rotates).
+const SESSION_TTL_MIN_MS = 5_000;
+const SESSION_TTL_MAX_MS = 60_000;
+const TOKEN_EXPIRY_MARGIN_MS = 60_000;
+
+// Sentinel: the `/api/auth/session` fetch itself failed (network error, or a
+// browser content blocker refusing the request — seen in Safari with an ad/
+// privacy blocker active). This is NOT the same as "logged out" (a reachable
+// endpoint returning null). Collapsing the two used to force logoutToLogin() →
+// /login → (cookie still valid server-side) → back → an infinite redirect loop,
+// which `signOut()` couldn't even break because its own /api/auth/signout fetch
+// was blocked by the same thing. Callers must treat this as "auth unknown".
+const SESSION_FETCH_FAILED = Symbol("session-fetch-failed");
+type SessionResult = Session | null | typeof SESSION_FETCH_FAILED;
+
+let sessionCache: { session: SessionResult; validUntil: number } | null = null;
+let sessionInflight: Promise<SessionResult> | null = null;
+
+export function invalidateSessionCache(): void {
+  sessionCache = null;
+}
+
+async function fetchSession(): Promise<SessionResult> {
   try {
     const { getSession } = await import("next-auth/react");
-    const session = (await getSession()) as Session | null;
-    if (session?.error === "RefreshAccessTokenError") return undefined;
-    return session?.accessToken;
+    return (await getSession()) as Session | null;
   } catch {
+    return SESSION_FETCH_FAILED;
+  }
+}
+
+async function cachedSession(): Promise<SessionResult> {
+  if (sessionCache && Date.now() < sessionCache.validUntil) return sessionCache.session;
+  if (sessionInflight) return sessionInflight;
+  sessionInflight = fetchSession()
+    .then((session) => {
+      let ttl = SESSION_TTL_MAX_MS;
+      if (session !== SESSION_FETCH_FAILED && session?.expiresAt) {
+        // Never serve a token past (expiry − margin); near expiry this degrades
+        // to 5s re-checks until the jwt callback rotates it server-side.
+        ttl = Math.min(ttl, session.expiresAt * 1000 - TOKEN_EXPIRY_MARGIN_MS - Date.now());
+      }
+      // Missing/broken sessions, and a failed fetch, get the short TTL: don't
+      // hammer during a burst, but recover quickly after sign-in / once the
+      // endpoint is reachable again.
+      if (session === SESSION_FETCH_FAILED || !session || session.error) ttl = SESSION_TTL_MIN_MS;
+      sessionCache = { session, validUntil: Date.now() + Math.max(ttl, SESSION_TTL_MIN_MS) };
+      return session;
+    })
+    .finally(() => {
+      sessionInflight = null;
+    });
+  return sessionInflight;
+}
+
+/** Current access token from the cached session (no per-call roundtrip).
+ * `undefined` = no usable token (signed out, or refresh failed). */
+export async function sessionAccessToken(): Promise<string | undefined> {
+  if (typeof window === "undefined") return undefined;
+  const session = await cachedSession();
+  if (!session || session === SESSION_FETCH_FAILED || session.error === "RefreshAccessTokenError") {
     return undefined;
   }
+  return session.accessToken;
+}
+
+async function browserToken(): Promise<string | undefined> {
+  if (typeof window === "undefined") return undefined;
+  return sessionAccessToken();
 }
 
 // Module-level guard so a burst of concurrent calls that all hit a missing
@@ -100,16 +166,27 @@ export async function logoutToLogin(): Promise<void> {
 }
 
 async function attachAuth(headers: Headers): Promise<void> {
-  const token = await browserToken();
+  if (typeof window === "undefined") return;
+  const session = await cachedSession();
+  if (session === SESSION_FETCH_FAILED) {
+    // Couldn't reach /api/auth/session (network error, or a browser content
+    // blocker). Fire the request untokenized rather than forcing a logout: the
+    // old code collapsed this into "logged out" → logoutToLogin() → /login →
+    // (cookie still valid server-side) → back → an infinite redirect loop
+    // (reproduced in Safari with a content blocker active). A genuine 401 will
+    // surface as an ApiError the caller handles; a real logout still returns a
+    // null session below and redirects normally.
+    return;
+  }
+  const token =
+    session && session.error !== "RefreshAccessTokenError" ? session.accessToken : undefined;
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
     return;
   }
-  // Browser request with no bearer token: the session is gone or its refresh
-  // failed. Sign out and redirect rather than firing a guaranteed-401 request.
-  if (typeof window !== "undefined") {
-    await logoutToLogin();
-  }
+  // Confirmed no usable token (endpoint reachable, session gone or refresh
+  // failed). Sign out and redirect rather than firing a guaranteed-401 request.
+  await logoutToLogin();
 }
 
 export async function api<T = unknown>(
@@ -125,6 +202,8 @@ export async function api<T = unknown>(
   await attachAuth(headers);
   const res = await fetch(`${apiBase()}${path}`, { ...init, headers, cache: "no-store" });
   if (!res.ok) {
+    // Stale/revoked token – drop the cached session so the next call re-reads.
+    if (res.status === 401) invalidateSessionCache();
     let detail: unknown = await res.text();
     try {
       detail = JSON.parse(detail as string);
@@ -179,6 +258,7 @@ export async function apiUpload<T = unknown>(
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve((xhr.status === 204 ? undefined : detail) as T);
       } else {
+        if (xhr.status === 401) invalidateSessionCache();
         reject(new ApiError(xhr.status, detail));
       }
     };
@@ -199,7 +279,9 @@ export async function rawFetch(
   }
   applyAmbientHeaders(headers);
   await attachAuth(headers);
-  return fetch(`${apiBase()}${path}`, { ...init, headers });
+  const res = await fetch(`${apiBase()}${path}`, { ...init, headers });
+  if (res.status === 401) invalidateSessionCache();
+  return res;
 }
 
 /** Build an absolute URL pointing at the backend. Use for `<img src>`, `<a href>`,

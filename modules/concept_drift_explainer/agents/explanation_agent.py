@@ -10,8 +10,6 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
-from typing import List
 
 from langchain_core.language_models import BaseChatModel
 from pydantic.v1 import BaseModel, Field
@@ -46,7 +44,7 @@ class Cause(BaseModel):
 class RefinedCauseList(BaseModel):
     """A list of refined potential causes for the drift."""
 
-    ranked_causes: List[Cause] = Field(
+    ranked_causes: list[Cause] = Field(
         description="A list of refined potential causes for the drift, ordered by importance."
     )
 

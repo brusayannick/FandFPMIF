@@ -1,13 +1,16 @@
 id: agentsimulator
 name: AgentSimulator
-version: 0.1.0
+version: 1.0.0
 category: advanced
 description: >-
   Simulates your process as a team of interacting agents. It learns each
   resource's behaviour, working calendars, and handovers from your log,
   generates realistic synthetic logs, and scores them against a held-out slice
-  of the real data.
-author: Lukas Kirchdorfer et al.
+  of the real data. Based on Kirchdorfer et al., "AgentSimulator: An Agent-based
+  Approach for Data-driven Business Process Simulation" (2024). DOI:
+  https://doi.org/10.1109/ICPM63005.2024.10680660
+author: Lukas Kirchdorfer et al. (2024)
+author_url: https://github.com/lukaskirchdorfer/AgentSimulator
 license: MIT
 
 requirements:

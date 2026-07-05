@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List
 
 import numpy as np
 from langchain_core.language_models import BaseChatModel
@@ -27,7 +26,7 @@ ALPHA = 0.4
 class RerankedIndices(BaseModel):
     """A list of the 1-based integer indices of the most relevant snippets."""
 
-    reranked_indices: List[int] = Field(
+    reranked_indices: list[int] = Field(
         description="A list of the 1-based integer indices of the top snippets, ordered by relevance."
     )
 
@@ -71,7 +70,7 @@ Example:
 """
 
 
-def _format_snippets(snippets: List[ContextSnippet], start_date: datetime) -> str:
+def _format_snippets(snippets: list[ContextSnippet], start_date: datetime) -> str:
     out = ""
     for i, snippet in enumerate(snippets, 1):
         text = snippet["snippet_text"].replace("\n", " ").replace('"', '\\"')

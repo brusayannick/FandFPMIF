@@ -17,11 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException, UploadFile
 from pydantic import BaseModel
@@ -69,7 +68,7 @@ def _drift_key(drift: dict) -> str:
 class AiCheckRequest(BaseModel):
     # Optional so the user can validate an unsaved key typed into the card.
     # Falls back to the saved ``cfg["ai"]["api_key"]`` when omitted.
-    api_key: Optional[str] = None
+    api_key: str | None = None
 
 
 class ExplainRequest(BaseModel):
@@ -92,7 +91,7 @@ class ConceptDriftExplainerModule(Module):
         "low-confidence causes as tentative."
     )
 
-    async def guidance_payload(self, ctx: ModuleContext) -> Optional[dict[str, Any]]:
+    async def guidance_payload(self, ctx: ModuleContext) -> dict[str, Any] | None:
         if not await ctx.cache.exists("explanations"):
             return None
         explanations = await ctx.cache.get("explanations")

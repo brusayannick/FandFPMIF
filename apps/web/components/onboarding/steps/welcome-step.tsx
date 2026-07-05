@@ -38,7 +38,7 @@ export function WelcomeStep() {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-8">
       <div className="space-y-2 text-center">
-        <h1 className="text-3xl font-semibold tracking-tight">Welcome to MATE Hub</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Welcome to PM-MATE</h1>
         <p className="text-sm text-muted-foreground">
           Tell us a bit about your background so we can tailor the experience.
         </p>

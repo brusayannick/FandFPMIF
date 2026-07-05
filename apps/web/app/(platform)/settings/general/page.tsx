@@ -173,7 +173,7 @@ export default function GeneralSettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Locale &amp; imports</CardTitle>
+          <CardTitle className="text-base">Location &amp; imports</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

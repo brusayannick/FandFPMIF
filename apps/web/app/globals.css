@@ -198,6 +198,32 @@
   .animate-heartbeat {
     animation: heartbeat 1.2s ease-in-out infinite;
   }
+  /* Skeleton shimmer sweep – layered over the pulsing bg in
+     components/ui/skeleton.tsx. Transform-only (GPU-friendly); the sweep
+     tint derives from --foreground so it adapts to dark mode, and the
+     reduced-motion rule below freezes it like every other animation. */
+  @keyframes skeleton-shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .skeleton-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--foreground) 6%, transparent),
+      transparent
+    );
+    animation: skeleton-shimmer 1.8s ease-in-out infinite;
+  }
   /* prefers-reduced-motion: framer-motion checks this via the matchMedia API,
      but stripping CSS animations is the belt-and-braces. */
   @media (prefers-reduced-motion: reduce) {

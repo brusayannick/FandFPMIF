@@ -223,7 +223,7 @@ def _matrix_to_model_jpeg(matrix: np.ndarray) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def _resize_for_model(jpeg_bytes: bytes) -> "Any":  # noqa: F821 - tf is imported lazily
+def _resize_for_model(jpeg_bytes: bytes) -> Any:
     """PIL-decode JPEG → TF bilinear resize → uint8 batch tensor (1, 256, 256, 3).
 
     Matches the reference repo exactly:
@@ -409,7 +409,7 @@ def run_detection(
         if progress is not None:
             try:
                 progress(p, msg)
-            except Exception:  # noqa: BLE001 - progress is best-effort
+            except Exception:
                 pass
 
     _emit(0.15, "Windowing the event log")

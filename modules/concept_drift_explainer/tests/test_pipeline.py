@@ -15,8 +15,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
 
 class _FakeIndex:
     def __init__(self):

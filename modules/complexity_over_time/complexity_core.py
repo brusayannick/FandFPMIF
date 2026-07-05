@@ -15,11 +15,11 @@ The enriched-EPA variant lives in :mod:`enriched_core`.
 from __future__ import annotations
 
 import math
+from collections.abc import Hashable
 from statistics import mean
-from typing import Any, Hashable
+from typing import Any
 
 import pandas as pd
-
 
 State = dict[str, Any]
 
@@ -319,7 +319,7 @@ def deviation_from_random(df: pd.DataFrame) -> float | None:
 # ── Simple measures ───────────────────────────────────────────────────────────
 
 def magnitude(df: pd.DataFrame) -> int:
-    return int(len(df))
+    return len(df)
 
 
 def support(df: pd.DataFrame) -> int:

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, FileBox } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileBox } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,9 +67,24 @@ export default function ModulePage() {
           </Button>
           <div className="flex items-center gap-2">
             <PageTitle>{mod.name}</PageTitle>
-            <Badge variant="outline" className="border-0 bg-muted text-[10px] uppercase">
-              {mod.category.replace("_", " ")}
-            </Badge>
+            {mod.author &&
+              (mod.author_url ? (
+                <Badge asChild variant="outline" className="border-0 bg-muted text-[10px]">
+                  <a
+                    href={mod.author_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover:underline"
+                  >
+                    {mod.author}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="border-0 bg-muted text-[10px]">
+                  {mod.author}
+                </Badge>
+              ))}
           </div>
           {mod.description && (
             <p className="max-w-2xl text-sm text-muted-foreground">{mod.description}</p>

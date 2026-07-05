@@ -275,14 +275,6 @@ export function ComplexityOverTimePanel({ logId }: { logId: string; moduleId: st
 
   return (
     <div className="space-y-6">
-      <header className="space-y-1">
-        <h2 className="text-lg font-semibold">Complexity over time</h2>
-        <p className="text-xs text-muted-foreground">
-          Whole cases grouped by start time, sliced along the timeline. KPIs
-          after R&uuml;schel &amp; Langer.
-        </p>
-      </header>
-
       <ControlBar
         mode={mode}
         setMode={setMode}
@@ -407,25 +399,23 @@ function ControlBar(props: ControlBarProps) {
           </>
         )}
 
-        <div className="ml-auto flex flex-wrap items-start gap-4">
-          {selectedKpis.length > 1 && (
-            <Field
-              label="Normalise 0–1"
-              hint="Min-max each metric so different scales line up. Tooltip keeps raw values."
-            >
-              <div className="flex h-9 items-center">
-                <Switch checked={normalize} onCheckedChange={setNormalize} />
-              </div>
-            </Field>
-          )}
-          <Field label="Y-axis metrics">
-            <KpiMultiSelect
-              metricKeys={metricKeys}
-              selected={selectedKpis}
-              onChange={setSelectedKpis}
-            />
+        {selectedKpis.length > 1 && (
+          <Field
+            label="Normalise 0–1"
+            hint="Min-max each metric so different scales line up. Tooltip keeps raw values."
+          >
+            <div className="flex h-9 items-center">
+              <Switch checked={normalize} onCheckedChange={setNormalize} />
+            </div>
           </Field>
-        </div>
+        )}
+        <Field label="Y-axis metrics">
+          <KpiMultiSelect
+            metricKeys={metricKeys}
+            selected={selectedKpis}
+            onChange={setSelectedKpis}
+          />
+        </Field>
       </CardContent>
     </Card>
   );
@@ -515,7 +505,7 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="min-w-[9rem] shrink-0 space-y-1.5">
       <Label className="text-xs text-muted-foreground">{label}</Label>
       {children}
       {hint && <p className="max-w-44 text-[11px] text-muted-foreground">{hint}</p>}

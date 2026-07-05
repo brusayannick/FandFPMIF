@@ -27,7 +27,6 @@ from mate.sdk import Module, ModuleContext, job, on_event, route
 from .complexity_core import compute_basic_metrics
 from .enriched_core import compute_enriched_metrics, is_enriched_supported
 
-
 # ── Cache helpers (mirrors performance / discovery pattern) ──────────────────
 
 def _cache_is_fresh(ctx: ModuleContext, key: str) -> bool:

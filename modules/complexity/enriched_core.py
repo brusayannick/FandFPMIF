@@ -21,7 +21,8 @@ mapped to case_id / activity / timestamp also count toward the check.
 
 from __future__ import annotations
 
-from typing import Any, Hashable
+from collections.abc import Hashable
+from typing import Any
 
 import pandas as pd
 
@@ -45,7 +46,6 @@ from .complexity_core import (
     variant_entropy,
     variety,
 )
-
 
 REQUIRED_TRACE_ATTRS: frozenset[str] = frozenset(
     {"variant", "concept:name", "creator", "variant-index"}

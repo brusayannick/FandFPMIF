@@ -29,6 +29,10 @@ const config: NextConfig = {
       "framer-motion",
     ],
   },
+  // Emit a self-contained build output at .next/standalone so the docker
+  // runtime stage stays small (no node_modules). REQUIRED by the Dockerfile's
+  // `COPY .next/standalone` — without it `make deploy` fails with "not found".
+  output: "standalone",
   outputFileTracingRoot: process.env.OUTPUT_FILE_TRACING_ROOT,
   webpack(config) {
     config.resolve = config.resolve ?? {};

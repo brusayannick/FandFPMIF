@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -28,7 +28,12 @@ import {
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/empty-state";
 import { CardPalette } from "@/components/dashboards/card-palette";
-import { DashboardCanvas, type AddStarter } from "@/components/dashboards/dashboard-canvas";
+import { CanvasZoomControls } from "@/components/dashboards/canvas-zoom-controls";
+import {
+  DashboardCanvas,
+  gridPixelHeight,
+  type AddStarter,
+} from "@/components/dashboards/dashboard-canvas";
 import { ShareDialog } from "@/components/dashboards/share-dialog";
 import { DashboardViewSkeleton } from "./dashboard-view-skeleton";
 import {
@@ -59,6 +64,15 @@ const DEFAULT_COLS = 12;
 // Shared "subtle & snappy" timing for the view's enter/exit transitions.
 const MOTION: Transition = { duration: 0.18, ease: [0.2, 0, 0, 1] };
 
+// Canvas zoom bounds (n8n-style). Buttons step multiplicatively; ctrl/⌘+wheel
+// and trackpad pinch zoom continuously at the cursor.
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 2;
+const ZOOM_STEP = 1.25;
+/** The canvas scroll container's `p-3` padding, in px — part of the
+ * scroll-anchor math when zooming around a point. */
+const CANVAS_PAD = 12;
+
 export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const { data: dashboard, isLoading, isError } = useDashboard(dashboardId);
   const { data: logs } = useEventLogs({ status: "ready" });
@@ -83,6 +97,72 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const isOwner = dashboard?.is_owner ?? true;
   // Snapshot of the last-saved state, to compute the dirty flag.
   const savedRef = useRef<string>("");
+
+  // ── Canvas zoom ──────────────────────────────────────────────────────────
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Scroll anchor for the next zoom commit: the content point under the cursor
+  // (or the viewport center) must stay put across the scale change. Applied in
+  // a layout effect so the corrected scrollTop lands before paint.
+  const zoomAnchorRef = useRef<{ offsetY: number; contentY: number } | null>(null);
+  const applyZoom = (next: number, clientY?: number) => {
+    const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+    const prev = zoomRef.current;
+    if (z === prev) return;
+    const el = scrollRef.current;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      const offsetY = clientY != null ? clientY - rect.top : el.clientHeight / 2;
+      zoomAnchorRef.current = {
+        offsetY,
+        contentY: (el.scrollTop + offsetY - CANVAS_PAD) / prev,
+      };
+    }
+    setZoom(z);
+  };
+  const applyZoomRef = useRef(applyZoom);
+  applyZoomRef.current = applyZoom;
+  useLayoutEffect(() => {
+    const a = zoomAnchorRef.current;
+    const el = scrollRef.current;
+    if (!a || !el) return;
+    zoomAnchorRef.current = null;
+    el.scrollTop = a.contentY * zoom + CANVAS_PAD - a.offsetY;
+  }, [zoom]);
+  // Ctrl/⌘+wheel zooms at the cursor (a trackpad pinch reports as ctrl+wheel).
+  // Native non-passive listener: React registers `onWheel` passively, so only
+  // this can preventDefault the browser's own page zoom. Re-attached once the
+  // canvas actually mounts (the loading skeleton returns early).
+  const canvasReady = !isLoading && !!dashboard;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.002));
+      applyZoomRef.current(zoomRef.current * factor, e.clientY);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [canvasReady]);
+  // Fit the whole board vertically (width always fits), capped at 100%.
+  const fitZoom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const g = GRANULARITY[settings.granularity] ?? GRANULARITY.medium;
+    const h = gridPixelHeight(items, g);
+    if (h <= 0) return;
+    const z = Math.max(MIN_ZOOM, Math.min(1, (el.clientHeight - CANVAS_PAD * 2) / h));
+    if (z === zoomRef.current) {
+      el.scrollTop = 0;
+      return;
+    }
+    zoomAnchorRef.current = { offsetY: CANVAS_PAD, contentY: 0 };
+    setZoom(z);
+  };
 
   // Hydrate local edit state once the dashboard loads (and after each save).
   useEffect(() => {
@@ -335,59 +415,75 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
               )}
             </AnimatePresence>
             <DashboardWidgetScope>
-              <div
-                data-editing={editing}
-                className="dashboard-canvas-bg relative min-h-0 flex-1 overflow-auto p-3"
-              >
-                {items.length === 0 && !editing ? (
-                  <EmptyState
-                    icon={LayoutDashboard}
-                    title="No cards yet"
-                    description={
-                      isOwner
-                        ? "Switch to edit mode to add cards from your modules."
-                        : "The owner hasn't added any cards yet."
-                    }
-                    primaryAction={
-                      isOwner ? (
-                        <Button size="sm" onClick={() => setEditing(true)}>
-                          <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                          Edit dashboard
-                        </Button>
-                      ) : undefined
-                    }
-                  />
-                ) : (
-                  // In edit mode the canvas is always mounted – even empty – so
-                  // it stays a react-grid-layout drop target for the palette.
-                  <DashboardCanvas
-                    items={items}
-                    logId={logId}
-                    editing={editing}
-                    startAddRef={startAddRef}
-                    settings={settings}
-                    onItemsChange={setItems}
+              {/* The zoom controls float over the scroll container (not inside
+                  it) so they stay put while the board scrolls. */}
+              <div className="relative min-h-0 flex-1">
+                <div
+                  ref={scrollRef}
+                  className="dashboard-canvas-bg relative h-full overflow-auto p-3"
+                >
+                  {items.length === 0 && !editing ? (
+                    <EmptyState
+                      icon={LayoutDashboard}
+                      title="No cards yet"
+                      description={
+                        isOwner
+                          ? "Switch to edit mode to add cards from your modules."
+                          : "The owner hasn't added any cards yet."
+                      }
+                      primaryAction={
+                        isOwner ? (
+                          <Button size="sm" onClick={() => setEditing(true)}>
+                            <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                            Edit dashboard
+                          </Button>
+                        ) : undefined
+                      }
+                    />
+                  ) : (
+                    // In edit mode the canvas is always mounted – even empty – so
+                    // it stays a react-grid-layout drop target for the palette.
+                    <DashboardCanvas
+                      items={items}
+                      logId={logId}
+                      editing={editing}
+                      startAddRef={startAddRef}
+                      settings={settings}
+                      zoom={zoom}
+                      onItemsChange={setItems}
+                    />
+                  )}
+                  <AnimatePresence>
+                    {items.length === 0 && editing && (
+                      <motion.div
+                        key="empty-hint"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={motionTransition}
+                        className="pointer-events-none absolute inset-0 flex items-center justify-center p-6"
+                      >
+                        <div className="rounded-lg border border-dashed border-border bg-background/70 px-6 py-4 text-center backdrop-blur-sm">
+                          <p className="text-sm font-medium">Empty board</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Drag a card from the left onto the canvas, or click one to add it.
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+                {(items.length > 0 || editing) && (
+                  <CanvasZoomControls
+                    zoom={zoom}
+                    min={MIN_ZOOM}
+                    max={MAX_ZOOM}
+                    onZoomIn={() => applyZoom(zoomRef.current * ZOOM_STEP)}
+                    onZoomOut={() => applyZoom(zoomRef.current / ZOOM_STEP)}
+                    onReset={() => applyZoom(1)}
+                    onFit={fitZoom}
                   />
                 )}
-                <AnimatePresence>
-                  {items.length === 0 && editing && (
-                    <motion.div
-                      key="empty-hint"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={motionTransition}
-                      className="pointer-events-none absolute inset-0 flex items-center justify-center p-6"
-                    >
-                      <div className="rounded-lg border border-dashed border-border bg-background/70 px-6 py-4 text-center backdrop-blur-sm">
-                        <p className="text-sm font-medium">Empty board</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Drag a card from the left onto the canvas, or click one to add it.
-                        </p>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </div>
             </DashboardWidgetScope>
           </div>

@@ -176,6 +176,17 @@ function buildAddItem(req: AddRequest, i: string, x: number, y: number): Dashboa
 /** Layout/child id of the live placeholder shown while adding from the palette. */
 const ADD_GHOST_ID = "__add_ghost__";
 
+/** RGL's own container height (`containerHeight()`): rows × rowHeight plus the
+ * inter-row gaps plus top+bottom container padding (which defaults to margin).
+ * Exported so the view can compute the fit-to-view zoom without measuring DOM. */
+export function gridPixelHeight(
+  items: readonly { y: number; h: number }[],
+  g: { rowHeight: number; margin: [number, number] },
+): number {
+  const bottom = items.reduce((m, it) => Math.max(m, it.y + it.h), 0);
+  return bottom * g.rowHeight + (bottom + 1) * g.margin[1];
+}
+
 /**
  * The react-grid-layout canvas. In edit mode it accepts adds from the palette
  * (via `startAddRef`), and drag/resize via the card header handle. Geometry
@@ -196,6 +207,7 @@ export function DashboardCanvas({
   editing,
   startAddRef,
   settings,
+  zoom = 1,
   onItemsChange,
 }: {
   items: DashboardItem[];
@@ -205,11 +217,38 @@ export function DashboardCanvas({
    * synchronously from `pointerdown` (see `AddStarter`). */
   startAddRef: { current: AddStarter | null };
   settings: CanvasSettings;
+  /** Canvas zoom factor. The grid renders in layout pixels inside a
+   * `scale(zoom)` layer, so every pointer delta must be divided by this to
+   * land back in layout space (drag, resize, palette add). */
+  zoom?: number;
   onItemsChange: (items: DashboardItem[]) => void;
 }) {
   const grid = GRANULARITY[settings.granularity] ?? GRANULARITY.medium;
   const cols = grid.cols;
   const freeReflow = editing && grid.compactType === null;
+  // Gestures read the zoom through a ref so a mid-gesture zoom change (ctrl+
+  // wheel while dragging) can't leave a stale factor in the closures.
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  // Zoom changes shift every card's layout position (the width the columns are
+  // computed from changes); suppress the per-item transform transition while
+  // the wheel is spinning or the reflow shears against the scale change.
+  const [zooming, setZooming] = useState(false);
+  const zoomSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevZoomRef = useRef(zoom);
+  useEffect(() => {
+    if (prevZoomRef.current === zoom) return;
+    prevZoomRef.current = zoom;
+    setZooming(true);
+    if (zoomSettleRef.current) clearTimeout(zoomSettleRef.current);
+    zoomSettleRef.current = setTimeout(() => setZooming(false), 200);
+  }, [zoom]);
+  useEffect(
+    () => () => {
+      if (zoomSettleRef.current) clearTimeout(zoomSettleRef.current);
+    },
+    [],
+  );
 
   // Suppress RGL's one-time mount slide: WidthProvider first lays the cards out
   // at its 1280px default, then reflows to the measured width, and the CSS
@@ -489,11 +528,13 @@ export function DashboardCanvas({
       const move = (ev: PointerEvent) => {
         const r = resizeRef.current;
         if (!r) return;
+        // Pointer deltas are visual px; the grid steps are layout px (÷ zoom).
+        const z = zoomRef.current;
         const w = Math.max(
           r.minW,
-          Math.min(r.cols - r.x, r.startW + Math.round((ev.clientX - r.pointerX) / r.stepX)),
+          Math.min(r.cols - r.x, r.startW + Math.round((ev.clientX - r.pointerX) / z / r.stepX)),
         );
-        const h = Math.max(r.minH, r.startH + Math.round((ev.clientY - r.pointerY) / r.stepY));
+        const h = Math.max(r.minH, r.startH + Math.round((ev.clientY - r.pointerY) / z / r.stepY));
         const baseline = r.snapshot.map((s) => (s.i === r.id ? { ...s, w, h } : s));
         const nextLayout = reflowFree(baseline, r.id, r.x, r.y);
         liveRef.current = nextLayout;
@@ -554,8 +595,10 @@ export function DashboardCanvas({
     const move = (ev: PointerEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      const left = d.startLeft + (ev.clientX - d.pointerX);
-      const top = d.startTop + (ev.clientY - d.pointerY);
+      // Pointer deltas are visual px; start/step are layout px (÷ zoom).
+      const z = zoomRef.current;
+      const left = d.startLeft + (ev.clientX - d.pointerX) / z;
+      const top = d.startTop + (ev.clientY - d.pointerY) / z;
       const x = Math.max(0, Math.min(d.cols - d.w, Math.round((left - d.padX) / d.stepX)));
       const y = Math.max(0, Math.round((top - d.padY) / d.stepY));
       const nextLayout = reflowFree(d.snapshot, d.id, x, y);
@@ -632,12 +675,18 @@ export function DashboardCanvas({
       // back to the wrapper if the grid node isn't mounted yet.
       const gridEl = wrapEl.querySelector(".react-grid-layout") as HTMLElement | null;
       const rect = gridEl?.getBoundingClientRect() ?? bounds;
+      // clientWidth is layout px (transforms don't affect it); the pointer's
+      // offset within the scaled rect is visual px, so divide it by zoom to get
+      // back into the same layout space before snapping.
       const width = gridEl?.clientWidth || rect.width;
       if (!width) return null;
+      const z = zoomRef.current;
       const [mx, my] = grid.margin;
       const colW = (width - mx * (cols - 1) - mx * 2) / cols;
-      const x = Math.max(0, Math.min(cols - w, Math.round((clientX - rect.left - mx) / (colW + mx))));
-      const y = Math.max(0, Math.round((clientY - rect.top - my) / (grid.rowHeight + my)));
+      const px = (clientX - rect.left) / z;
+      const py = (clientY - rect.top) / z;
+      const x = Math.max(0, Math.min(cols - w, Math.round((px - mx) / (colW + mx))));
+      const y = Math.max(0, Math.round((py - my) / (grid.rowHeight + my)));
       return { x, y };
     },
     [grid, cols],
@@ -707,20 +756,42 @@ export function DashboardCanvas({
     };
   }, [startAdd, startAddRef]);
 
+  // The zoom layer scales the grid down/up around the top-left corner. Width is
+  // widened by 1/zoom so the scaled result still fills the viewport exactly
+  // (WidthProvider remeasures via ResizeObserver); the wrapper gets the scaled
+  // content height so the scroll range matches what's visible (a bare CSS
+  // transform never shrinks the layout box). min-h-full keeps the empty-board
+  // area a full-height drop target either way.
+  const gridH = gridPixelHeight(displayItems, grid);
   return (
-    <div ref={wrapRef} className="min-h-full" onPointerDown={freeReflow ? onPointerDown : undefined}>
-      <GridLayout
-        className={cn("min-h-full", !mounted && "rgl-mounting")}
-        layout={layout}
-        cols={cols}
-        rowHeight={grid.rowHeight}
-        margin={grid.margin}
-        isDraggable={editing && grid.compactType !== null}
-        isResizable={editing && grid.compactType !== null}
-        draggableHandle=".dashboard-drag-handle"
-        onLayoutChange={handleLayoutChange}
-        compactType={grid.compactType}
+    <div
+      ref={wrapRef}
+      className="relative min-h-full"
+      style={{ height: Math.round(gridH * zoom) }}
+      onPointerDown={freeReflow ? onPointerDown : undefined}
+    >
+      <div
+        className="dashboard-zoom-layer"
+        data-editing={editing || undefined}
+        style={{
+          transform: zoom !== 1 ? `scale(${zoom})` : undefined,
+          width: zoom !== 1 ? `${100 / zoom}%` : undefined,
+          minHeight: `${100 / zoom}%`,
+        }}
       >
+        <GridLayout
+          className={cn("min-h-full", !mounted && "rgl-mounting", zooming && "rgl-zooming")}
+          layout={layout}
+          cols={cols}
+          rowHeight={grid.rowHeight}
+          margin={grid.margin}
+          isDraggable={editing && grid.compactType !== null}
+          isResizable={editing && grid.compactType !== null}
+          draggableHandle=".dashboard-drag-handle"
+          onLayoutChange={handleLayoutChange}
+          compactType={grid.compactType}
+          transformScale={zoom}
+        >
         {items.map((it) => {
           const h = cardHandlers.get(it.i);
           return (
@@ -766,12 +837,13 @@ export function DashboardCanvas({
             </div>
           );
         })}
-        {ghostItem && (
-          <div key={ADD_GHOST_ID} data-grid-id={ADD_GHOST_ID} className="pointer-events-none">
-            <div className="h-full w-full rounded-lg border-2 border-dashed border-primary/60 bg-primary/10" />
-          </div>
-        )}
-      </GridLayout>
+          {ghostItem && (
+            <div key={ADD_GHOST_ID} data-grid-id={ADD_GHOST_ID} className="pointer-events-none">
+              <div className="dashboard-add-ghost h-full w-full rounded-lg" />
+            </div>
+          )}
+        </GridLayout>
+      </div>
       {addReq &&
         addPointer &&
         createPortal(

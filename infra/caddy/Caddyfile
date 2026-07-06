@@ -19,10 +19,16 @@
 	# omits text/event-stream: compressing SSE would buffer the live job /
 	# event streams. API JSON usually arrives pre-gzipped (GZipMiddleware);
 	# Caddy passes already-encoded responses through untouched.
-	encode {
-		zstd gzip
+	encode zstd gzip {
+		# One header line per type: Caddy ORs multiple values of the same
+		# response-header field (v2.11 dropped the many-values-on-one-line form).
 		match {
-			header Content-Type application/json* application/javascript* text/html* text/css* image/svg+xml* font/*
+			header Content-Type application/json*
+			header Content-Type application/javascript*
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type image/svg+xml*
+			header Content-Type font/*
 		}
 	}
 

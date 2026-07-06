@@ -31,9 +31,6 @@ modules/*/.dist/
 modules/*/node_modules/
 modules/*/.installed-hash
 
-# CV4CDD vendored source (cloned separately – not committed)
-modules/*/cv4cdd/
-
 # CV4CDD pretrained models are large (~0.5 GB each) and uploaded at runtime via
 # the module's settings page – never committed. The dir itself is kept via a
 # .gitkeep; the per-folder rules live in modules/cv4cdd/model/.gitignore.

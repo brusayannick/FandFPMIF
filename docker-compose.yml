@@ -125,6 +125,11 @@ services:
       # start – the API serves those bundles at /api/v1/modules/{id}/assets/.
       - ./modules:/app/modules
     environment:
+      # Next.js standalone (`node server.js`) binds to $HOSTNAME, which Docker
+      # sets to the container id - so it listens on eth0 only and the loopback
+      # healthcheck below (127.0.0.1) gets ECONNREFUSED → perpetually unhealthy.
+      # Force all-interfaces so both the probe and the proxy (web:3000) work.
+      HOSTNAME: "0.0.0.0"
       INTERNAL_API_URL: http://api:8000
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       # Auth.js v5 – encrypts the session cookie. Rotate per environment.
@@ -146,10 +151,10 @@ services:
       keycloak:
         condition: service_healthy
     healthcheck:
-      # IPv4 loopback explicitly - node may resolve localhost to ::1 while
-      # `next start` listens on 0.0.0.0 (v4). Any response < 500 counts (the
-      # login page answers 200 unauthenticated). Runs on the standalone
-      # runner's own node binary, no curl/wget needed in the image.
+      # IPv4 loopback explicitly - node may resolve localhost to ::1 while the
+      # standalone server binds 0.0.0.0 (v4) via the HOSTNAME override above.
+      # Any response < 500 counts (the login page answers 200 unauthenticated).
+      # Runs on the standalone runner's own node binary, no curl/wget needed.
       test:
         [
           "CMD",

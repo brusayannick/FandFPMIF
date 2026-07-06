@@ -73,7 +73,7 @@ export function DashboardTimeRange({
 
   if (!range || !value || !applied) {
     return (
-      <div className="flex items-center gap-2 border-t border-border bg-card/40 px-3 py-2 text-xs text-muted-foreground">
+      <div className="flex items-center gap-2 border-t border-white/10 bg-card/40 backdrop-blur-md px-3 py-2 text-xs text-muted-foreground">
         <CalendarRange className="h-3.5 w-3.5" />
         No timestamp range available for this log.
       </div>
@@ -107,7 +107,7 @@ export function DashboardTimeRange({
   const step = Math.max(60_000, Math.round((range.max - range.min) / 1000));
 
   return (
-    <div className="flex items-center gap-3 border-t border-border bg-card/40 px-3 py-2.5">
+    <div className="flex items-center gap-3 border-t border-white/10 bg-card/40 backdrop-blur-md px-3 py-2.5">
       <CalendarRange className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="shrink-0 tabular-nums text-xs text-muted-foreground">{fmt(start)}</span>
       <Slider

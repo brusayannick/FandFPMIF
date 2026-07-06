@@ -215,7 +215,7 @@ export function DashboardList() {
               style={stagger(i)}
             >
             <Card
-              className="group relative h-full transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+              className="group relative h-full border-white/10 bg-card/70 backdrop-blur-md transition-all [border-top-color:var(--glass-refraction-top)] supports-[backdrop-filter]:bg-card/60 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
               onMouseEnter={() => prefetchDashboard(qc, d.id)}
             >
               <Link href={`/dashboards/${d.id}`} className="absolute inset-0" aria-label={d.name}>
@@ -287,7 +287,7 @@ export function DashboardList() {
                 style={stagger(i)}
               >
                 <Card
-                  className="group relative h-full transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+                  className="group relative h-full border-white/10 bg-card/70 backdrop-blur-md transition-all [border-top-color:var(--glass-refraction-top)] supports-[backdrop-filter]:bg-card/60 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
                   onMouseEnter={() => prefetchDashboard(qc, d.id)}
                 >
                   <Link

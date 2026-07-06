@@ -65,9 +65,9 @@ export const DashboardCard = memo(function DashboardCard({
   return (
     <div
       className={cn(
-        "dashboard-card-root flex h-full flex-col overflow-hidden rounded-lg bg-card shadow-sm",
+        "dashboard-card-root flex h-full flex-col overflow-hidden rounded-lg bg-card/80 shadow-sm supports-[backdrop-filter]:bg-card/70",
         "transition-[box-shadow,transform,outline-color] duration-150 ease-out",
-        chrome.border && "border border-border",
+        chrome.border && "border border-white/10 [border-top-color:var(--glass-refraction-top)]",
         // Edit mode: cards read as grabbable objects — a faint ring at rest
         // that firms up (with a soft lift) under the pointer, n8n-node style.
         editing && "ring-1 ring-border/60 hover:shadow-md hover:ring-border",
@@ -75,7 +75,7 @@ export const DashboardCard = memo(function DashboardCard({
     >
       <div
         className={cn(
-          "flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-2",
+          "flex shrink-0 items-center gap-1.5 border-b border-white/10 px-3 py-2",
           editing && "dashboard-drag-handle",
         )}
       >

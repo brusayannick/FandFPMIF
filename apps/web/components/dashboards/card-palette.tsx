@@ -140,7 +140,7 @@ export function CardPalette({
             return (
               <section
                 key={group.id}
-                className="overflow-hidden rounded-lg border border-border bg-card/40"
+                className="overflow-hidden rounded-lg border border-white/10 [border-top-color:var(--glass-refraction-top)] bg-card/40 backdrop-blur-md"
               >
                 <button
                   type="button"

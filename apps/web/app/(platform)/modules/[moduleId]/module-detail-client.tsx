@@ -266,7 +266,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
         </div>
       )}
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <div className="flex items-center justify-between gap-4">
             <CardTitle className="text-base flex flex-wrap items-center gap-2">
@@ -309,7 +309,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
       </Card>
 
       {hasAiModels && aiManifest && (
-        <Card>
+        <Card variant="glass">
           <CardHeader>
             <CardTitle className="text-base">AI models</CardTitle>
           </CardHeader>
@@ -427,7 +427,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
         />
       )}
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Configuration</CardTitle>
         </CardHeader>
@@ -471,7 +471,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Logs</CardTitle>
         </CardHeader>

@@ -118,7 +118,7 @@ export default function PrivacySettingsPage() {
 
   return (
     <div className="space-y-4">
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Behaviour tracking</CardTitle>
         </CardHeader>
@@ -150,7 +150,7 @@ export default function PrivacySettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Your data</CardTitle>
         </CardHeader>
@@ -236,7 +236,7 @@ export default function PrivacySettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Anonymous identifier</CardTitle>
         </CardHeader>
@@ -254,7 +254,7 @@ export default function PrivacySettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">What is never captured</CardTitle>
         </CardHeader>

@@ -573,7 +573,7 @@ export function MateAiSidebar() {
       aria-label="MATE AI assistant"
       aria-hidden={!open}
       className={cn(
-        "flex h-full shrink-0 flex-col overflow-hidden border-l border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-in-out",
+        "flex h-full shrink-0 flex-col overflow-hidden border-l border-white/10 [border-top-color:var(--glass-refraction-top)] bg-sidebar/85 text-sidebar-foreground backdrop-blur-xl backdrop-saturate-150 transition-[width] duration-300 ease-in-out supports-[backdrop-filter]:bg-sidebar/70",
         open ? "w-[380px]" : "w-0 border-l-0",
       )}
     >

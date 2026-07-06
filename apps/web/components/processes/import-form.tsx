@@ -492,7 +492,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
       <DropZone file={file} onDrop={onDrop} onClear={() => setFile(null)} />
 
       {file && (
-        <Card>
+        <Card variant="glass">
           <CardContent className="space-y-4">
             <div className="grid gap-2">
               <Label htmlFor="display-name">Display name</Label>
@@ -641,7 +641,7 @@ function UrlImportForm({ onSuccess }: ImportFormProps) {
   };
 
   return (
-    <Card>
+    <Card variant="glass">
       <CardContent className="space-y-4">
         <div className="grid gap-2">
           <Label htmlFor="url-input">
@@ -744,7 +744,7 @@ function WatchImportForm() {
   };
 
   return (
-    <Card>
+    <Card variant="glass">
       <CardContent className="space-y-4">
         <div className="rounded-md border border-dashed border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
           A watched folder scans a location in your storage backend and imports new event-log
@@ -1955,7 +1955,7 @@ function FolderImportForm({ onSuccess }: ImportFormProps) {
   }
 
   return (
-    <Card>
+    <Card variant="glass">
       <CardContent className="space-y-4">
         <div className="grid gap-2">
           <Label htmlFor="folder-name">Folder name</Label>

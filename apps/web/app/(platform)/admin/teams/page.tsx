@@ -237,7 +237,7 @@ function TeamMembersPanel({ teamId }: { teamId: string }) {
   };
 
   return (
-    <Card>
+    <Card variant="glass">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Members</CardTitle>
       </CardHeader>

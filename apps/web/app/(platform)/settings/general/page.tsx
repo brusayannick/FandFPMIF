@@ -55,7 +55,7 @@ export default function GeneralSettingsPage() {
 
   return (
     <div className="space-y-4">
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Appearance</CardTitle>
         </CardHeader>
@@ -81,7 +81,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Product tour</CardTitle>
         </CardHeader>
@@ -102,7 +102,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Notifications</CardTitle>
         </CardHeader>
@@ -119,7 +119,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Process proficiency</CardTitle>
         </CardHeader>
@@ -148,7 +148,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Modules</CardTitle>
         </CardHeader>
@@ -171,7 +171,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Location &amp; imports</CardTitle>
         </CardHeader>
@@ -228,7 +228,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Data &amp; storage</CardTitle>
         </CardHeader>
@@ -237,7 +237,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Jobs</CardTitle>
         </CardHeader>
@@ -249,7 +249,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Telemetry</CardTitle>
         </CardHeader>

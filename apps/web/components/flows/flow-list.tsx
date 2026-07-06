@@ -59,7 +59,7 @@ export function FlowList() {
             >
             <div
               className={cn(
-                "group relative h-full rounded-lg border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md",
+                "group relative h-full rounded-lg border border-white/10 [border-top-color:var(--glass-refraction-top)] bg-card/70 p-4 backdrop-blur-md transition-all supports-[backdrop-filter]:bg-card/60 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md",
               )}
             >
               <Link href={`/flows/${f.id}`} className="block">

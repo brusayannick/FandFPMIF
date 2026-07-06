@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth, signIn, DEMO_MODE } from "@/auth";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { Button } from "@/components/ui/button";
+import { BorderBeam } from "@/components/glass/border-beam";
 import { clearAuthCookies } from "@/lib/clear-session";
 import { DemoAutoSignIn } from "./demo-auto-signin";
 import { RecoveryAutoRetry } from "./recovery-auto-retry";
@@ -40,7 +41,8 @@ export default async function LoginPage({
   }
 
   return (
-    <div className="relative w-full max-w-sm space-y-6 rounded-2xl border border-border bg-card p-8 shadow-sm">
+    <div className="relative z-10 w-full max-w-sm space-y-6 rounded-2xl border border-white/15 [border-top-color:var(--glass-refraction-top)] bg-card/70 p-8 shadow-xl backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-card/60">
+      <BorderBeam className="rounded-2xl" />
       <ThemeToggleButton className="absolute right-4 top-4 h-8 w-8 cursor-pointer text-muted-foreground" />
       <div className="space-y-2 text-center">
         <h1 className="text-2xl font-semibold">Mate</h1>

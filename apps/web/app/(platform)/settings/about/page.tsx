@@ -31,7 +31,7 @@ export default function AboutPage() {
 
   return (
     <div className="space-y-4">
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">About PM-MATE</CardTitle>
         </CardHeader>
@@ -43,7 +43,7 @@ export default function AboutPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Diagnostics</CardTitle>
         </CardHeader>

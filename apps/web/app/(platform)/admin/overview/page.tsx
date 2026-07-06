@@ -472,7 +472,7 @@ function UsageSection({ days }: { days: number }) {
 
 function Kpi({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="rounded-md border border-border bg-card px-3 py-2">
+    <div className="rounded-md border border-white/10 bg-card/70 px-3 py-2 backdrop-blur-md [border-top-color:var(--glass-refraction-top)] supports-[backdrop-filter]:bg-card/60">
       <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="text-xl font-semibold tabular-nums">
         {typeof value === "number" ? <CountUp value={value} /> : value}
@@ -493,7 +493,7 @@ function ChartCard({
   children: React.ReactNode;
 }) {
   return (
-    <Card>
+    <Card variant="glass">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm">
           <Icon className="h-4 w-4" />

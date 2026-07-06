@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { type ComponentProps, useMemo } from "react";
 import { Plus, FileBox } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
+import { DotPattern } from "@/components/glass/dot-pattern";
 import { ModuleCard } from "@/components/processes/module-card";
 import { useModules } from "@/lib/queries";
 import { stagger } from "@/lib/stagger";
@@ -21,6 +23,22 @@ const CATEGORIES: { id: string; label: string }[] = [
   { id: "comparison", label: "Comparison" },
   { id: "other", label: "Other" },
 ];
+
+// Empty/error states sit on a frosted glass card with a faint dot-pattern
+// behind them – the liquid-glass treatment for zero-data surfaces.
+function GlassEmpty(props: React.ComponentProps<typeof EmptyState>) {
+  return (
+    <Card variant="glass" className="relative overflow-hidden py-0">
+      <DotPattern
+        className="text-muted-foreground/50 [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]"
+        dotOpacity={0.15}
+      />
+      <CardContent className="relative px-6">
+        <EmptyState {...props} />
+      </CardContent>
+    </Card>
+  );
+}
 
 export function ModuleGrid({ logId }: { logId: string }) {
   const { data: modules, isLoading, isError } = useModules(logId);

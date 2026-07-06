@@ -120,7 +120,7 @@ export default function AdminExportPage() {
 function MetadataDbCard({ info }: { info: ExportInfo | null }) {
   const [busy, setBusy] = useState(false);
   return (
-    <Card>
+    <Card variant="glass">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Database className="h-4 w-4" />
@@ -230,7 +230,7 @@ function BehaviorExportCard() {
   }
 
   return (
-    <Card>
+    <Card variant="glass">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Network className="h-4 w-4" />

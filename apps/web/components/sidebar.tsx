@@ -106,7 +106,7 @@ export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
   return (
     <aside
       className={cn(
-        "flex h-screen flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-150 ease-out",
+        "flex h-screen flex-col border-r border-white/10 [border-top-color:var(--glass-refraction-top)] bg-sidebar/85 text-sidebar-foreground backdrop-blur-xl backdrop-saturate-150 transition-[width] duration-150 ease-out supports-[backdrop-filter]:bg-sidebar/70",
         collapsed ? "w-14" : "w-56",
       )}
       aria-label="Primary navigation"

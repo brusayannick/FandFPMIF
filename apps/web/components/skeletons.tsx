@@ -20,7 +20,7 @@ export function TableSkeleton({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-xl border border-border bg-card",
+        "overflow-hidden rounded-xl border border-white/10 bg-card/60 backdrop-blur-sm",
         className,
       )}
     >
@@ -64,7 +64,7 @@ export function CardGridSkeleton({
       {Array.from({ length: count }).map((_, i) => (
         <div
           key={i}
-          className="space-y-3 rounded-xl border border-border bg-card p-5"
+          className="space-y-3 rounded-xl border border-white/10 bg-card/60 backdrop-blur-sm p-5"
         >
           <div className="flex items-center gap-3">
             <Skeleton className="h-9 w-9 rounded-lg" />
@@ -97,7 +97,7 @@ export function StatCardsSkeleton({
       {Array.from({ length: count }).map((_, i) => (
         <div
           key={i}
-          className="space-y-3 rounded-xl border border-border bg-card p-5"
+          className="space-y-3 rounded-xl border border-white/10 bg-card/60 backdrop-blur-sm p-5"
         >
           <Skeleton className="h-3 w-24" />
           <Skeleton className="h-7 w-20" />
@@ -112,7 +112,7 @@ export function ChartCardSkeleton({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "space-y-4 rounded-xl border border-border bg-card p-5",
+        "space-y-4 rounded-xl border border-white/10 bg-card/60 backdrop-blur-sm p-5",
         className,
       )}
     >

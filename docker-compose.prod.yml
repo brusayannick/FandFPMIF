@@ -16,7 +16,11 @@
 
 services:
   proxy:
-    image: caddy:2-alpine
+    # Pinned to the 2.11 minor: the bare `caddy:2-alpine` tag silently rolled
+    # to v2.11.3 and its stricter parser crash-looped on the old encode syntax
+    # (fixed in infra/caddy/Caddyfile). Bump this deliberately after checking
+    # the Caddyfile against the new parser: `caddy validate --adapter caddyfile`.
+    image: caddy:2.11-alpine
     container_name: mate-proxy
     restart: unless-stopped
     # Resolve the public hostname to this Caddy container on the internal

@@ -6,6 +6,12 @@ description: >-
   Shows how your log grows and shifts over time: case arrivals versus
   completions, work in progress, the changing activity mix, and a dotted chart
   of every event. Makes growth, backlogs, seasonality, and drift easy to spot.
+about: >-
+  See how your log grows and shifts over time: case arrivals versus completions,
+  work in progress, the changing activity mix, and a dotted chart of every
+  single event. Use it to spot growing backlogs, seasonality, and creeping
+  behaviour changes - or to check whether a process redesign actually changed
+  how work arrives and gets done.
 keywords: ["log evolution", "over time", "case arrivals", "work in progress", "wip", "dotted chart", "backlog", "seasonality"]
 author: FlowFactory
 author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype

@@ -5,6 +5,12 @@ category: foundation
 description: >-
   Measures process speed and bottlenecks: throughput, cycle times, lead time,
   and the 90th-percentile cycle time.
+about: >-
+  Find out where your process loses time: cycle-time and lead-time KPIs,
+  throughput, and the 90th-percentile outliers, plus a ranking of the activities
+  where cases spend the longest. Use it to locate bottlenecks, quantify how slow
+  the slowest cases really are, and overlay timing on the discovered process map
+  to see exactly which hand-offs hurt.
 keywords: ["performance", "bottleneck", "cycle time", "throughput", "lead time", "slow", "kpi", "sojourn", "p90", "waiting time"]
 author: FlowFactory
 author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype

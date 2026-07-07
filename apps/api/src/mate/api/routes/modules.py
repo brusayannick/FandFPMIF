@@ -99,8 +99,10 @@ class ModuleSummary(BaseModel):
     version: str
     category: str
     description: str | None = None
+    about: str | None = None
     author: str | None = None
     author_url: str | None = None
+    paper_url: str | None = None
     license: str | None = None
     provides: list[str]
     consumes: list[str]
@@ -167,8 +169,10 @@ async def list_modules(
             version=m.version,
             category=m.category,
             description=m.description,
+            about=m.about,
             author=m.author,
             author_url=m.author_url,
+            paper_url=m.paper_url,
             license=m.license,
             provides=list(m.provides),
             consumes=list(m.consumes),

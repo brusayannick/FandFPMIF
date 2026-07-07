@@ -33,6 +33,7 @@ import { formatNumber } from "@/lib/format";
 import { getActivityRenameMap } from "@/lib/activity-rename";
 import { cn } from "@/lib/cn";
 import { PROCESS_PAGE_SIZE } from "@/lib/query-keys";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 
 import { EventsTable } from "./events-table";
 
@@ -63,17 +64,21 @@ export function EventsTab({ logId, log }: { logId: string; log: EventLogDetail }
   const isDirty = normalizeFilters(filters) !== normalizeFilters(log.active_filter);
   const hasApplied = (log.active_filter?.length ?? 0) > 0;
 
+  // Debounced: the free-text search fans out to a CAST+ILIKE across every
+  // column on the API - per-keystroke requests would full-scan the log.
+  const debouncedQ = useDebouncedValue(q, 300);
+
   const params = useMemo<EventsListParams>(
     () => ({
       offset: page * limit,
       limit,
       sort: sort || undefined,
       filter: filters.length > 0 ? filters : undefined,
-      q: q.trim() || undefined,
+      q: debouncedQ.trim() || undefined,
       missing_only: missingOnly || undefined,
       case_id: caseIdFilter ?? undefined,
     }),
-    [page, limit, sort, filters, q, missingOnly, caseIdFilter],
+    [page, limit, sort, filters, debouncedQ, missingOnly, caseIdFilter],
   );
 
   const { data, isLoading, isError, error, isFetching } = useEventLogRows(logId, params);

@@ -1,5 +1,6 @@
 "use client";
 
+import { MetricInfoHint } from "../panel/metric-info";
 import { formatMetric, useComplexityV2 } from "../panel/queries";
 import { CardShell, KpiTile } from "./_kit";
 
@@ -29,6 +30,7 @@ export default function ComplexitySuite({ logId }: { logId: string }) {
               label={t.label}
               value={formatMetric(t.key, v[t.key] ?? null, v)}
               hint={t.hint}
+              info={<MetricInfoHint metricKey={t.key} />}
             />
           ))}
         </div>

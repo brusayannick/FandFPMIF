@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
+import { MetricInfoHint } from "./metric-info";
 import {
   formatMetric,
   useComplexityV2,
@@ -81,14 +82,17 @@ function Header({ data }: { data: ComplexityV2Payload }) {
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline" className="tabular-nums">
+        <Badge variant="outline" className="gap-1 tabular-nums">
           {fmtInt(data.n_events)} events
+          <MetricInfoHint metricKey="n_events" />
         </Badge>
-        <Badge variant="outline" className="tabular-nums">
+        <Badge variant="outline" className="gap-1 tabular-nums">
           {fmtInt(data.n_cases)} traces
+          <MetricInfoHint metricKey="n_sequences" />
         </Badge>
-        <Badge variant="outline" className="tabular-nums">
+        <Badge variant="outline" className="gap-1 tabular-nums">
           {fmtInt(data.n_variants)} variants
+          <MetricInfoHint metricKey="n_unique_seq" />
         </Badge>
         {data.enriched_supported ? (
           <Badge variant="secondary" className="gap-1.5">
@@ -158,6 +162,7 @@ function MetricTable({
                         {item.label}
                       </code>
                       <span>{item.name}</span>
+                      <MetricInfoHint metricKey={item.key} />
                     </div>
                     {uniformSource ? null : (
                       <div className="text-[11px] text-muted-foreground">{item.source}</div>
@@ -191,6 +196,7 @@ function TransitionHeatmap({ logId }: { logId: string }) {
         <div className="mb-1 flex items-center gap-2">
           <h3 className="text-sm font-semibold">Probability of action pairs</h3>
           <code className="rounded bg-muted px-1.5 py-0.5 text-[11px]">prob-act-pairs</code>
+          <MetricInfoHint metricKey="prob_act_pairs" />
         </div>
         <p className="mb-3 text-xs text-muted-foreground">
           Row-stochastic directly-follows transition matrix (Grisold et al., 2022).

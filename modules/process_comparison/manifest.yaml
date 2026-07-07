@@ -6,6 +6,12 @@ description: >-
   Compares two or more event logs side by side: an overlaid
   directly-follows-graph diff, variant differences, similarity scores (EMD and
   footprints), and per-activity frequency changes.
+about: >-
+  Put two or more event logs side by side and see exactly what differs: an
+  overlaid process-map diff, variant differences, per-activity frequency
+  changes, and similarity scores (EMD and footprints). Use it to compare sites,
+  systems, or before/after periods and pinpoint where behaviour diverges instead
+  of guessing from separate diagrams.
 keywords: ["compare", "comparison", "diff", "difference", "versus", "overlay", "two logs", "process comparison"]
 author: FlowFactory
 author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype

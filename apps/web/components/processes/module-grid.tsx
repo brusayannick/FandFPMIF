@@ -43,21 +43,40 @@ function GlassEmpty(props: React.ComponentProps<typeof EmptyState>) {
 export function ModuleGrid({ logId }: { logId: string }) {
   const { data: modules, isLoading, isError } = useModules(logId);
   const confidentialOnly = useUi((s) => s.confidentialOnly);
+  const showUnavailable = useUi((s) => s.showUnavailableModules);
+  const showDisabled = useUi((s) => s.showDisabledModules);
 
   const grouped = useMemo(() => {
+    // A module the log doesn't qualify for (manifest `requirements` not met)
+    // stays VISIBLE by default: ModuleCard renders it grayed-out with a tooltip
+    // listing the unmet requirements. Hiding it made users think the module was
+    // gone. `showUnavailableModules` / `showDisabledModules` (UI store; the
+    // MATE AI settings tool flips them) let users opt out / in; the
+    // confidential-mode filter always hides – it's a deliberate presentation
+    // mode, not an applicability gate.
+    const openable = (m: ModuleSummary) =>
+      m.enabled !== false && (m.availability?.status ?? "available") !== "unavailable";
     const out = new Map<string, ModuleSummary[]>();
     for (const c of CATEGORIES) out.set(c.id, []);
     for (const m of modules ?? []) {
       if (confidentialOnly && !m.is_confidential_safe) continue;
-      // Only surface modules that can actually be opened for this log – hide
-      // disabled ones and those the log is incompatible with (unavailable).
-      if (m.enabled === false) continue;
-      if ((m.availability?.status ?? "available") === "unavailable") continue;
+      if (!showDisabled && m.enabled === false) continue;
+      if (
+        !showUnavailable &&
+        m.enabled !== false &&
+        (m.availability?.status ?? "available") === "unavailable"
+      )
+        continue;
       const bucket = out.get(m.category) ?? out.get("other")!;
       bucket.push(m);
     }
+    // Openable modules first within each category; sort is stable, so the
+    // manifest order is preserved inside each half.
+    for (const bucket of out.values()) {
+      bucket.sort((a, b) => Number(openable(b)) - Number(openable(a)));
+    }
     return out;
-  }, [modules, confidentialOnly]);
+  }, [modules, confidentialOnly, showUnavailable, showDisabled]);
 
   const visibleCount = useMemo(
     () => [...grouped.values()].reduce((n, bucket) => n + bucket.length, 0),
@@ -126,11 +145,17 @@ export function ModuleGrid({ logId }: { logId: string }) {
   }
 
   if (visibleCount === 0) {
+    // Incompatible modules are shown grayed-out by default, so an empty grid
+    // means a filter (confidential mode / view settings) removed everything.
     return (
       <EmptyState
         icon={FileBox}
-        title="No available modules"
-        description="None of your installed modules are compatible with this process. Import another module or adjust your installed modules."
+        title={confidentialOnly ? "No confidential-safe modules" : "No modules to show"}
+        description={
+          confidentialOnly
+            ? "Confidential mode is on and none of your installed modules are marked safe for it. Turn off confidential mode or import a confidential-safe module."
+            : "All of your installed modules are disabled or incompatible with this process, and your view settings hide them. Import another module or adjust your installed modules."
+        }
         primaryAction={
           <Button asChild className="cursor-pointer gap-2">
             <Link href="/modules/import">

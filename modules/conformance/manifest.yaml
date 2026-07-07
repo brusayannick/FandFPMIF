@@ -6,9 +6,16 @@ description: >-
   Upload a reference BPMN model and check your event log against it. Computes
   fitness, precision and per-activity deviations with pm4py (token-based replay
   by default, alignments optional) and paints the deviations onto the diagram.
+about: >-
+  Check whether reality follows the rules: upload a reference BPMN model and
+  this module replays every case against it, reporting fitness, precision, and
+  the exact activities where cases deviate. Use it to find non-compliant
+  behaviour, see deviations painted directly onto the diagram, and decide
+  whether the model or the process needs fixing.
 keywords: ["conformance", "conformance checking", "fitness", "precision", "deviation", "token replay", "alignments", "reference model", "bpmn", "compliance"]
 author: FlowFactory
 author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
+paper_url: https://doi.org/10.1016/j.is.2007.07.001
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

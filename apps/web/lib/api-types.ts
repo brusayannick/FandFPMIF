@@ -167,8 +167,12 @@ export interface ModuleSummary {
     | "other"
     | string;
   description: string | null;
+  /** Longer "with this module you can …" text for the About info box. */
+  about: string | null;
   author: string | null;
   author_url: string | null;
+  /** Link to the scientific paper the module implements (DOI URL preferred). */
+  paper_url: string | null;
   license: string | null;
   provides: string[];
   consumes: string[];

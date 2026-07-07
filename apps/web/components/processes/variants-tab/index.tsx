@@ -22,6 +22,7 @@ import { formatDuration, formatNumber, formatRelative } from "@/lib/format";
 import { displayActivities, getActivityRenameMap } from "@/lib/activity-rename";
 import { cn } from "@/lib/cn";
 import { DEFAULT_VARIANTS_SORT, PROCESS_PAGE_SIZE } from "@/lib/query-keys";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 
 // Shared with prefetchProcessTabs (client-prefetch.ts): the prefetched first
 // page must hash to the same query key this tab reads on first render.
@@ -57,15 +58,20 @@ export function VariantsTab({ logId, log }: { logId: string; log: EventLogDetail
   const [activityQuery, setActivityQuery] = useState(() => searchParams.get("activity") ?? "");
   const [minCases, setMinCases] = useState("");
 
+  // Debounced: each param change re-runs the variants aggregation on the API,
+  // so free-text/number keystrokes must not fire per-key requests.
+  const debouncedActivityQuery = useDebouncedValue(activityQuery, 300);
+  const debouncedMinCases = useDebouncedValue(minCases, 300);
+
   const params = useMemo<VariantsListParams>(
     () => ({
       offset: page * PAGE_SIZE,
       limit: PAGE_SIZE,
       sort: `${sort.field}:${sort.dir}`,
-      activity_contains: activityQuery.trim() || undefined,
-      min_case_count: minCases ? Number(minCases) : undefined,
+      activity_contains: debouncedActivityQuery.trim() || undefined,
+      min_case_count: debouncedMinCases ? Number(debouncedMinCases) : undefined,
     }),
-    [page, sort, activityQuery, minCases],
+    [page, sort, debouncedActivityQuery, debouncedMinCases],
   );
 
   const { data, isLoading, isError, error } = useVariants(logId, params);

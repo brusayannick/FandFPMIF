@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
+import { ModuleAboutInfo } from "@/components/modules/module-about";
 import { PageContainer, PageTitle } from "@/components/page";
 import { useEventLog, useModules } from "@/lib/queries";
 import { getModulePanel } from "@/lib/module-panels";
@@ -85,6 +86,16 @@ export default function ModulePage() {
                   {mod.author}
                 </Badge>
               ))}
+            <ModuleAboutInfo
+              name={mod.name}
+              description={mod.description}
+              about={mod.about}
+              author={mod.author}
+              authorUrl={mod.author_url}
+              paperUrl={mod.paper_url}
+              license={mod.license}
+              version={mod.version}
+            />
           </div>
           {mod.description && (
             <p className="max-w-2xl text-sm text-muted-foreground">{mod.description}</p>
@@ -92,7 +103,34 @@ export default function ModulePage() {
         </div>
       </header>
 
-      <ModulePanelSlot logId={logId} moduleId={mod.id} hasFrontend={mod.has_frontend} />
+      {/* Deep links can reach a module the grid renders grayed-out (disabled,
+          or the log doesn't meet its manifest requirements). Mounting the
+          panel would just fail on its first query – explain instead. */}
+      {mod.enabled === false ? (
+        <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
+          <p className="text-sm font-medium">This module is disabled</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Enable it under{" "}
+            <Link href={`/modules/${mod.id}`} className="underline underline-offset-2">
+              Settings → Modules
+            </Link>{" "}
+            to open it.
+          </p>
+        </div>
+      ) : (mod.availability?.status ?? "available") === "unavailable" ? (
+        <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
+          <p className="text-sm font-medium">Not available for this process</p>
+          <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+            {(mod.availability?.reasons ?? ["This process doesn't meet the module's requirements."]).map(
+              (r, i) => (
+                <li key={i}>{r}</li>
+              ),
+            )}
+          </ul>
+        </div>
+      ) : (
+        <ModulePanelSlot logId={logId} moduleId={mod.id} hasFrontend={mod.has_frontend} />
+      )}
     </PageContainer>
   );
 }

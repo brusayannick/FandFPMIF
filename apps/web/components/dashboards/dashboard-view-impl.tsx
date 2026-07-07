@@ -35,7 +35,7 @@ import {
   gridPixelHeight,
   type AddStarter,
 } from "@/components/dashboards/dashboard-canvas";
-import { ShareDialog } from "@/components/dashboards/share-dialog";
+import { NoTeamShareGate, ShareDialog } from "@/components/dashboards/share-dialog";
 import { DashboardViewSkeleton } from "./dashboard-view-skeleton";
 import {
   DashboardFilterProvider,
@@ -46,6 +46,7 @@ import { DashboardFilterBar } from "@/components/dashboards/dashboard-filter-bar
 import { DashboardSettingsDialog } from "@/components/dashboards/dashboard-settings-dialog";
 import { DashboardTimeRange } from "@/components/dashboards/dashboard-time-range";
 import { useEventLogs } from "@/lib/queries";
+import { useNoShareTargets } from "@/lib/sharing-queries";
 import {
   activePresetFilters,
   canvasSettings,
@@ -115,6 +116,10 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   // Shared boards open read-only for the recipient – no edit toolbar, no log
   // picker. The backend also 404s owner-only mutations, so this is just UX.
   const isOwner = dashboard?.is_owner ?? true;
+  // Sharing needs a team: without one the Share button is disabled (not
+  // hidden) with a tooltip explaining why. Only fetched for owners – the
+  // button doesn't exist on shared boards.
+  const noTeam = useNoShareTargets(isOwner);
 
   // ── Autosave ─────────────────────────────────────────────────────────────
   // Edits persist automatically – there is no Save button. `savedRef` holds
@@ -446,15 +451,19 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
             </Button>
           ) : isOwner ? (
             <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setShareOpen(true)}
-              >
-                <Share2 className="mr-1.5 h-3.5 w-3.5" />
-                Share
-              </Button>
+              <NoTeamShareGate noTeam={noTeam}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={noTeam}
+                  aria-disabled={noTeam || undefined}
+                  onClick={() => setShareOpen(true)}
+                >
+                  <Share2 className="mr-1.5 h-3.5 w-3.5" />
+                  Share
+                </Button>
+              </NoTeamShareGate>
               <Button type="button" size="sm" onClick={() => setEditing(true)}>
                 <Pencil className="mr-1.5 h-3.5 w-3.5" />
                 Edit

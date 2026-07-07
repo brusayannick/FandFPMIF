@@ -20,6 +20,7 @@ import {
   ModuleConfigForm,
   type ConfigSchema,
 } from "@/components/modules/module-config-form";
+import { ModuleAboutInfo } from "@/components/modules/module-about";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -147,6 +148,11 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
         version: manifest.version as string,
         category: manifest.category as string,
         description: (manifest.description as string | null) ?? null,
+        about: (manifest.about as string | null) ?? null,
+        author: (manifest.author as string | null) ?? null,
+        author_url: (manifest.author_url as string | null) ?? null,
+        paper_url: (manifest.paper_url as string | null) ?? null,
+        license: (manifest.license as string | null) ?? null,
         provides: (manifest.provides as string[]) ?? [],
         consumes: (manifest.consumes as string[]) ?? [],
       }
@@ -275,6 +281,16 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
                 {m.category.replace("_", " ")}
               </Badge>
               <span className="text-xs font-normal text-muted-foreground">{m.version}</span>
+              <ModuleAboutInfo
+                name={m.name}
+                description={m.description}
+                about={m.about}
+                author={m.author}
+                authorUrl={m.author_url}
+                paperUrl={m.paper_url}
+                license={m.license}
+                version={m.version}
+              />
             </CardTitle>
             <div
               className={

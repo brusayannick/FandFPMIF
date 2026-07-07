@@ -615,44 +615,6 @@ class Dashboard(Base):
     __table_args__ = (Index("ix_dashboards_user_created_at", "user_id", "created_at"),)
 
 
-class Flow(Base):
-    """A node-graph data pipeline ("flow") - the schematic builder, parallel to
-    :class:`Dashboard`. The user wires ``source -> module -> transform -> viz``
-    nodes on a canvas; ``graph_json`` holds the whole graph::
-
-        {"nodes": [{"id": "...", "type": "source|module|transform|viz",
-                    "position": {"x": 0, "y": 0}, "data": {...}}],
-         "edges": [{"id": "...", "source": "...", "target": "...",
-                    "sourceHandle": null, "targetHandle": null}]}
-
-    Bound to one event log (nulled, not cascade-deleted, when the log goes away).
-    A terminal viz node can also be placed on a dashboard as a ``kind:"flow"``
-    card, so one flow can feed many boards."""
-
-    __tablename__ = "flows"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
-    event_log_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("process_logs.id", ondelete="SET NULL")
-    )
-    log_model: Mapped[str] = mapped_column(
-        String(16), default="case_centric", server_default="case_centric", nullable=False
-    )
-    graph_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
-    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
-    )
-
-    __table_args__ = (Index("ix_flows_user_created_at", "user_id", "created_at"),)
-
-
 class Team(Base):
     """A named group of users (a "workspace") used as a dashboard-share target.
 
@@ -727,36 +689,6 @@ class DashboardShare(Base):
         Index("ix_dashboard_shares_dashboard", "dashboard_id"),
         Index("ix_dashboard_shares_target_user", "target_user_id"),
         Index("ix_dashboard_shares_target_team", "target_team_id"),
-    )
-
-
-class FlowShare(Base):
-    """A read grant for one flow to one target (user or team) - the flow analogue
-    of :class:`DashboardShare`. Exactly one of ``target_user_id`` /
-    ``target_team_id`` is set. Read-only: recipients view the flow + its data
-    (owner-resolved via ``user_can_read_log``) but never mutate it."""
-
-    __tablename__ = "flow_shares"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    flow_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("flows.id", ondelete="CASCADE"), nullable=False
-    )
-    target_user_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="CASCADE")
-    )
-    target_team_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("teams.id", ondelete="CASCADE")
-    )
-    created_by: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-
-    __table_args__ = (
-        Index("ix_flow_shares_flow", "flow_id"),
-        Index("ix_flow_shares_target_user", "target_user_id"),
-        Index("ix_flow_shares_target_team", "target_team_id"),
     )
 
 

@@ -11,7 +11,9 @@ export default function SettingsLayout({
       <header className="space-y-1 pb-6">
         <PageTitle>Settings</PageTitle>
         <PageDescription>
-          Local-first preferences. Changes persist to SQLite and apply live.
+          The Settings tab lets you configure and manage the platform&apos;s
+          application, project, and analysis preferences to customize your
+          process mining experience.
         </PageDescription>
       </header>
       <SettingsTabs />

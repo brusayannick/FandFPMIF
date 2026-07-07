@@ -5,9 +5,17 @@ category: foundation
 description: >-
   Discovers a process from object-centric (OCEL) logs, showing the object types,
   the activities, and the object-centric directly-follows graph (OC-DFG).
+about: >-
+  Explore processes where several object types (orders, items, invoices, ...)
+  interact: this module discovers the object-centric directly-follows graph and
+  Petri net straight from your OCEL log. Use it to see which activities touch
+  which object types, how objects flow through the process, and how long each
+  object type's lifecycle takes - without forcing everything into a single case
+  notion.
 keywords: ["object-centric", "object centric", "ocel", "oc-dfg", "object types", "ocpm"]
 author: FlowFactory
 author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
+paper_url: https://doi.org/10.3233/FI-2020-1946
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

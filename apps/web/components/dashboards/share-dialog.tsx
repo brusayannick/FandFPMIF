@@ -14,6 +14,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -27,6 +32,36 @@ import {
   useRemoveShare,
   useShareTargets,
 } from "@/lib/sharing-queries";
+
+/**
+ * Wraps a Share control that is disabled because the user is in no team
+ * (`noTeam` from `useNoShareTargets`). Instead of hiding the control or letting
+ * it open a dialog that can't do anything, the control stays visible but
+ * disabled, and this gate adds the "why" tooltip. Pass the control with its
+ * `disabled={noTeam}` prop set; the span wrapper keeps hover/focus events alive
+ * for the tooltip (a natively disabled button swallows them).
+ */
+export function NoTeamShareGate({
+  noTeam,
+  children,
+}: {
+  noTeam: boolean;
+  children: React.ReactNode;
+}) {
+  if (!noTeam) return <>{children}</>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="inline-flex cursor-not-allowed">
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        Join a team to share. Ask an admin to add you to a team.
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function ShareDialog({
   dashboardId,

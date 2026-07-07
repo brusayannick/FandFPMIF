@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/cn";
 import { formatDuration, formatNumber } from "@/lib/format";
 
+import { InfoHint } from "./info-hint";
 import type { BottleneckItem } from "./queries";
 
 interface BottleneckTableProps {
@@ -18,7 +19,8 @@ export function BottleneckTable({ items, selectedActivity, onSelectActivity }: B
   if (!items.length) {
     return (
       <div className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground">
-        No bottlenecks detected – sojourn times are evenly distributed across activities.
+        No bottlenecks detected – cases spend a similar amount of time at every activity, so no
+        step stands out as unusually slow.
       </div>
     );
   }
@@ -29,11 +31,52 @@ export function BottleneckTable({ items, selectedActivity, onSelectActivity }: B
           <TableRow>
             <TableHead className="w-12">#</TableHead>
             <TableHead>Activity</TableHead>
-            <TableHead className="text-right">Avg sojourn</TableHead>
-            <TableHead className="text-right">Frequency</TableHead>
-            <TableHead className="text-right">P90 sojourn</TableHead>
-            <TableHead className="text-right">Share</TableHead>
-            <TableHead className="w-24">Distribution</TableHead>
+            <TableHead className="text-right">
+              <span className="inline-flex items-center gap-1">
+                Avg time spent
+                <InfoHint label="What does average time spent mean?">
+                  Average time a case spends at this activity — waiting plus processing —
+                  measured from the activity&apos;s event until the case moves on to its next
+                  step.
+                </InfoHint>
+              </span>
+            </TableHead>
+            <TableHead className="text-right">
+              <span className="inline-flex items-center gap-1">
+                Frequency
+                <InfoHint label="What does frequency mean?">
+                  How many times this activity occurred across all cases in the log.
+                </InfoHint>
+              </span>
+            </TableHead>
+            <TableHead className="text-right">
+              <span className="inline-flex items-center gap-1">
+                P90 time spent
+                <InfoHint label="What does P90 time spent mean?">
+                  90% of visits to this activity take less time than this; only the slowest 10%
+                  take longer.
+                </InfoHint>
+              </span>
+            </TableHead>
+            <TableHead className="text-right">
+              <span className="inline-flex items-center gap-1">
+                Share
+                <InfoHint label="What does share mean?">
+                  This activity&apos;s share of the total time spent across all activities in
+                  the process (average time spent × frequency). Big shares are where speeding
+                  up pays off most.
+                </InfoHint>
+              </span>
+            </TableHead>
+            <TableHead className="w-24">
+              <span className="inline-flex items-center gap-1">
+                Distribution
+                <InfoHint label="What does the distribution show?">
+                  The spread of time-spent values at this activity: each bar is a duration
+                  range, taller bars mean more occurrences in that range.
+                </InfoHint>
+              </span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

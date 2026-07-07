@@ -7,6 +7,16 @@
  * deviation, amber-dashed = a model task whose label never appears in the log
  * (the #1 conformance gotcha - a naming mismatch, not a real deviation).
  *
+ * `CONF_COLORS` / `devColor` are the single source of truth for these colours:
+ * the injected canvas CSS *and* the panel legend both read them, so the legend
+ * can never drift from what is actually painted. (They are plain inline values
+ * on purpose - Tailwind only compiles classes it sees in `apps/web`, so utility
+ * classes that exist only in module sources silently produce no CSS.)
+ *
+ * Label matching is EXACT after canonicalisation (trim + collapse whitespace +
+ * case-fold), mirroring the backend. There is deliberately no fuzzy matching:
+ * "Aproval" never matches "Approval".
+ *
  * Everything is view-only: it decorates via diagram-js *markers* (CSS classes)
  * and *overlays* (floating HTML), never via `modeling.*`, so it never marks the
  * model dirty and is excluded from export.
@@ -37,6 +47,35 @@ interface Canvas {
 /** Number of discrete red deviation buckets. Mirrored by the injected CSS. */
 export const DEV_BUCKETS = 5;
 
+/**
+ * Exact colours painted on the canvas, echoed by the panel legend and tables.
+ * Inline values, not Tailwind classes: module sources sit outside the host
+ * app's Tailwind scan, so panel-only utility classes compile to no CSS at all.
+ */
+export const CONF_COLORS = {
+  /** Task in the model that the log replays without deviations. */
+  ok: { fill: "hsl(151 55% 93%)", stroke: "hsl(151 48% 40%)" },
+  /** Model task whose label never occurs in the log (name mismatch / never executed). */
+  unmatched: { fill: "hsl(38 92% 92%)", stroke: "hsl(33 92% 45%)" },
+  /** Deviation-count badge pill. */
+  badge: "hsl(0 72% 42%)",
+  /** "not in log" warning badge pill. */
+  badgeWarn: "hsl(33 90% 42%)",
+  /** Red used by deviation bar charts / severity bars. */
+  chart: "hsl(0 72% 51%)",
+} as const;
+
+/**
+ * Canonical key for activity-label matching: trim, collapse internal
+ * whitespace, case-fold. Matching stays EXACT on this key - whitespace/case
+ * variants unify, but one wrong letter is a different activity ("Aproval"
+ * never matches "Approval"). Mirrors the backend's `_canon_label`; there is
+ * deliberately no fuzzy matching.
+ */
+export function canonLabel(s: string): string {
+  return s.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
 export interface DeviationInfo {
   deviations: number;
   logMoves: number;
@@ -46,6 +85,8 @@ export interface DeviationInfo {
 
 export interface DeviationMaps {
   byActivity: Map<string, DeviationInfo>;
+  /** Fallback keyed by `canonLabel` - exact-after-normalisation, never fuzzy. */
+  byCanonical: Map<string, DeviationInfo>;
   maxDeviation: number;
 }
 
@@ -53,17 +94,27 @@ export function buildDeviationMaps(
   perActivity: PerActivityDeviation[] | undefined,
 ): DeviationMaps {
   const byActivity = new Map<string, DeviationInfo>();
+  const byCanonical = new Map<string, DeviationInfo>();
   let maxDeviation = 0;
   for (const a of perActivity ?? []) {
-    byActivity.set(a.activity, {
+    const info: DeviationInfo = {
       deviations: a.deviations,
       logMoves: a.log_moves,
       modelMoves: a.model_moves,
       matched: a.matched,
-    });
+    };
+    byActivity.set(a.activity, info);
+    // First wins on canonical collisions (rows arrive sorted worst-first).
+    const key = canonLabel(a.activity);
+    if (!byCanonical.has(key)) byCanonical.set(key, info);
     if (a.deviations > maxDeviation) maxDeviation = a.deviations;
   }
-  return { byActivity, maxDeviation };
+  return { byActivity, byCanonical, maxDeviation };
+}
+
+/** Exact lookup first, then trim/case-normalised exact - never fuzzy. */
+function lookupDeviation(maps: DeviationMaps, name: string): DeviationInfo | undefined {
+  return maps.byActivity.get(name) ?? maps.byCanonical.get(canonLabel(name));
 }
 
 function isTask(el: BElement): boolean {
@@ -116,7 +167,7 @@ export function applyConformanceOverlay(
     if (!isTask(el)) continue;
     const name = nameOf(el);
     if (!name) continue;
-    const info = maps.byActivity.get(name);
+    const info = lookupDeviation(maps, name);
     if (info === undefined) continue;
 
     if (!info.matched) {
@@ -124,7 +175,7 @@ export function applyConformanceOverlay(
       if (labels) {
         overlays.add(el.id, "ff-conf", {
           position: { top: -10, right: 12 },
-          html: `<div class="ff-conf-badge ff-conf-badge-warn" title="No matching activity in the log">no log match</div>`,
+          html: `<div class="ff-conf-badge ff-conf-badge-warn" title="In the model but never recorded in the log - likely an activity-name mismatch">not in log</div>`,
         });
       }
       continue;
@@ -144,9 +195,12 @@ export function applyConformanceOverlay(
       const text = alignments
         ? `+${info.logMoves} −${info.modelMoves}`
         : `${info.deviations}`;
+      const title = alignments
+        ? `${info.logMoves} in the log but not allowed by the model (+) · ${info.modelMoves} required by the model but skipped in the log (−)`
+        : `${info.deviations} deviation(s): the recorded process differs from the model at this step`;
       overlays.add(el.id, "ff-conf", {
         position: { top: -10, right: 12 },
-        html: `<div class="ff-conf-badge" title="${info.deviations} deviation(s)">${text}</div>`,
+        html: `<div class="ff-conf-badge" title="${title}">${text}</div>`,
       });
     }
   }
@@ -186,8 +240,9 @@ export function locateActivity(modeler: BpmnModelerLike, query: string): boolean
 
 const STYLE_ID = "ff-conformance-styles";
 
-/** Map a 0..1 deviation ratio to a red fill/stroke pair. */
-function devColor(ratio: number): { fill: string; stroke: string } {
+/** Map a 0..1 deviation ratio to a red fill/stroke pair. Exported so the
+ *  legend can render exactly the same ramp the canvas paints. */
+export function devColor(ratio: number): { fill: string; stroke: string } {
   const r = Math.max(0, Math.min(1, ratio));
   const sat = 70 + r * 25; // 70% → 95%
   const fillL = 95 - r * 30; // 95% → 65% (keep dark labels readable)
@@ -209,12 +264,12 @@ export function injectConformanceStyles(): void {
   }
 
   const css = `
-.djs-element.ff-conf-ok .djs-visual > :nth-child(1){fill:hsl(151 55% 93%)!important;stroke:hsl(151 48% 40%)!important;}
-.djs-element.ff-conf-unmatched .djs-visual > :nth-child(1){fill:hsl(38 92% 92%)!important;stroke:hsl(33 92% 45%)!important;stroke-dasharray:4 3!important;}
+.djs-element.ff-conf-ok .djs-visual > :nth-child(1){fill:${CONF_COLORS.ok.fill}!important;stroke:${CONF_COLORS.ok.stroke}!important;}
+.djs-element.ff-conf-unmatched .djs-visual > :nth-child(1){fill:${CONF_COLORS.unmatched.fill}!important;stroke:${CONF_COLORS.unmatched.stroke}!important;stroke-dasharray:4 3!important;}
 .djs-element.ff-conf-hit .djs-outline{stroke:#2563eb!important;stroke-width:3px!important;stroke-dasharray:none!important;display:block!important;}
 ${devRules.join("\n")}
-.ff-conf-badge{font:600 10px/1.35 ui-sans-serif,system-ui,sans-serif;background:hsl(0 72% 42%);color:#fff;padding:1px 5px;border-radius:6px;white-space:nowrap;pointer-events:none;box-shadow:0 1px 2px rgba(0,0,0,.25);}
-.ff-conf-badge-warn{background:hsl(33 90% 42%);}
+.ff-conf-badge{font:600 10px/1.35 ui-sans-serif,system-ui,sans-serif;background:${CONF_COLORS.badge};color:#fff;padding:1px 5px;border-radius:6px;white-space:nowrap;pointer-events:none;box-shadow:0 1px 2px rgba(0,0,0,.25);}
+.ff-conf-badge-warn{background:${CONF_COLORS.badgeWarn};}
 `;
   const style = document.createElement("style");
   style.id = STYLE_ID;

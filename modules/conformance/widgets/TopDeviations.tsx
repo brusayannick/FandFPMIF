@@ -12,6 +12,7 @@ import {
 
 import { formatNumber } from "@/lib/format";
 
+import { CONF_COLORS } from "../panel/conformance-decorate";
 import { useConformanceResultsAuto } from "../panel/queries";
 import { CardShell } from "./_kit";
 
@@ -58,7 +59,8 @@ export default function TopDeviations({
             formatter={(v: number) => [formatNumber(v), "Deviations"]}
             contentStyle={{ fontSize: 12 }}
           />
-          <Bar dataKey="deviations" className="fill-red-500/80" radius={[0, 3, 3, 0]} />
+          {/* Inline fill: `fill-red-500/80` is not compiled for module sources. */}
+          <Bar dataKey="deviations" fill={CONF_COLORS.chart} fillOpacity={0.8} radius={[0, 3, 3, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </CardShell>

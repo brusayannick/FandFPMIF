@@ -254,10 +254,19 @@ class Manifest(BaseModel):
     version: str
     category: ModuleCategory
     description: str | None = None
+    # Optional longer "what you can do with this module" text, shown in the
+    # platform's "About this module" info box on the module detail page.
+    # 2-4 sentences, user-facing, plain language. Falls back to `description`
+    # when omitted.
+    about: str | None = None
     author: str | None = None
     # Optional link for the author badge in the UI - the cited paper, upstream
     # repo, or homepage. Omitting it keeps the badge non-clickable.
     author_url: str | None = None
+    # Optional link to the scientific paper the module implements (DOI URL
+    # preferred). Rendered as a "Paper" link in the module info box - distinct
+    # from `author_url`, which usually points at the upstream repo/homepage.
+    paper_url: str | None = None
     license: str | None = None
 
     requirements: Requirements = Field(default_factory=Requirements)

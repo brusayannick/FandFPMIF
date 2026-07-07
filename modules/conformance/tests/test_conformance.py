@@ -122,6 +122,44 @@ def test_label_mismatch_is_flagged() -> None:
     assert "approve_request" in lr["in_log_not_model"]
 
 
+def test_whitespace_case_variants_match_exactly() -> None:
+    # Label matching is exact AFTER canonicalisation: trim + collapse whitespace
+    # + casefold. "  APPROVE " in the log must bind to the model's "approve" and
+    # replay cleanly - no deviations, no label-report noise.
+    renamed = _sample_log(_CLEAN_VARIANTS)
+    renamed["activity"] = renamed["activity"].replace({"approve": "  APPROVE "})
+    pq = _to_parquet(renamed)
+    try:
+        out = _conformance_worker(pq, str(_FIXTURE), "token_replay", 1.0)
+    finally:
+        os.remove(pq)
+
+    lr = out["label_report"]
+    assert "approve" in lr["matched"]
+    assert lr["in_model_not_log"] == []
+    assert lr["in_log_not_model"] == []
+    assert out["kpis"]["log_fitness"] == 1.0
+    assert out["kpis"]["total_deviations"] == 0
+
+
+def test_one_letter_typo_never_matches() -> None:
+    # No fuzzy matching, ever: "aprove" (one letter off "approve") is a DIFFERENT
+    # activity. It must be flagged as a label mismatch and deviate on replay.
+    renamed = _sample_log(_CLEAN_VARIANTS)
+    renamed["activity"] = renamed["activity"].replace({"approve": "aprove"})
+    pq = _to_parquet(renamed)
+    try:
+        out = _conformance_worker(pq, str(_FIXTURE), "token_replay", 1.0)
+    finally:
+        os.remove(pq)
+
+    lr = out["label_report"]
+    assert "approve" in lr["in_model_not_log"]
+    assert "aprove" in lr["in_log_not_model"]
+    assert out["kpis"]["log_fitness"] < 1.0
+    assert out["kpis"]["total_deviations"] > 0
+
+
 def test_core_worker_leaves_token_precision_to_host() -> None:
     # The core worker no longer computes token precision (it's the OOM-prone pass,
     # now run in its own crash-isolated offload by the host). It returns the event

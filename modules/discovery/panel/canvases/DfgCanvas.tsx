@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   MarkerType,
   useEdgesState,
@@ -17,15 +17,18 @@ import { temporalLayout } from "../layout/temporal";
 import { temporalPhasesLayout } from "../layout/temporal-phases";
 import { temporalSwimlaneLayout } from "../layout/temporal-swimlane";
 import { happyPathTowerLayout } from "../layout/happy-path-tower";
+import { dominantFlowLayout } from "../layout/dominant-flow";
 import { mapEdgeType, truncate } from "../layout/direction";
 import { ActivityNode, type ActivityNodeData } from "../nodes/activity-node";
 import { ElkSplineEdge } from "../edges/elk-spline-edge";
+import { DfgNodeMenu, type DfgNodeMenuTarget } from "../dfg-node-menu";
 import type { DfgData } from "../types";
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
 import { CanvasLayoutSkeleton } from "@/components/visualizations/canvases/shared/canvas-skeleton";
 import { computeDfgVisibility } from "../dfg-filter";
 import {
   useDfgSettings,
+  useDiscoveryScope,
   useGeneralSettings,
   useNodePositions,
   usePersistNodePositions,
@@ -33,6 +36,13 @@ import {
 
 const nodeTypes = { activity: ActivityNode } as const;
 const edgeTypes = { "elk-spline": ElkSplineEdge } as const;
+
+/** Duration of the node-position morph when a re-layout replaces an existing one. */
+const LAYOUT_ANIMATION_MS = 420;
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
 
 interface DfgCanvasProps {
   data: DfgData;
@@ -65,6 +75,7 @@ export function DfgCanvas({
   overlay,
   shellClassName,
 }: DfgCanvasProps) {
+  const { logId } = useDiscoveryScope();
   const general = useGeneralSettings();
   const [dfg] = useDfgSettings();
   const positions = useNodePositions("dfg");
@@ -73,6 +84,18 @@ export function DfgCanvas({
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [laid, setLaid] = useState(false);
+  // Bumped when a layout-mode switch finishes animating → CanvasShell re-fits
+  // the viewport to the new geometry (stale-bbox fits are what you'd get from
+  // keying on the mode directly, since positions land after the animation).
+  const [fitNonce, setFitNonce] = useState(0);
+  const [menu, setMenu] = useState<DfgNodeMenuTarget | null>(null);
+
+  // Latest committed nodes – animation start positions, without wiring the
+  // node state into the layout effect's dependencies.
+  const nodesRef = useRef<Node[]>([]);
+  nodesRef.current = nodes;
+  const animRef = useRef(0);
+  const lastModeRef = useRef<typeof dfg.layoutMode | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,7 +127,13 @@ export function DfgCanvas({
       },
     }));
 
-    const edgeType = mapEdgeType(general.edgeRouting === "spline" ? "spline" : general.edgeRouting);
+    const isFlow = dfg.layoutMode === "flow-vertical" || dfg.layoutMode === "flow-horizontal";
+    // Flow layouts render along ELK's routed bend points (orthogonal channels,
+    // rounded corners) via the elk-spline edge; the other layouts keep the
+    // user-selected xyflow curve style.
+    const edgeType = isFlow
+      ? ("elk-spline" as const)
+      : mapEdgeType(general.edgeRouting === "spline" ? "spline" : general.edgeRouting);
 
     const dfgEdges: Edge[] = visibleEdges.map((e) => {
       const ratio = e.frequency / Math.max(maxEdgeFreq, 1);
@@ -152,9 +181,11 @@ export function DfgCanvas({
 
     // TB needs more vertical breathing room (edge labels sit on the vertical
     // segments and there's no horizontal travel to absorb them); LR is the
-    // opposite. So spacing is direction-aware.
-    const isVertical =
-      general.layoutDirection === "TB" || general.layoutDirection === "BT";
+    // opposite. So spacing is direction-aware. Flow layouts fix their own
+    // direction and ignore the general layout-direction setting.
+    const isVertical = isFlow
+      ? dfg.layoutMode === "flow-vertical"
+      : general.layoutDirection === "TB" || general.layoutDirection === "BT";
 
     // Within-layer tie-breaker. Prefer real temporal order (mean_trace_position
     // from the discovery serializer v3+): activities that occur earlier in
@@ -175,23 +206,86 @@ export function DfgCanvas({
       ? { width: 220, height: 60 }
       : { width: 200, height: 64 };
 
-    if (dfg.layoutMode === "temporal" && hasTemporal) {
-      const result = temporalLayout(activityNodes, dfgEdges, {
-        direction: general.layoutDirection,
-        nodeSize,
-        rankByNode: (id) => positionByActivity.get(id),
-      });
+    const modeChanged = lastModeRef.current !== null && lastModeRef.current !== dfg.layoutMode;
+    lastModeRef.current = dfg.layoutMode;
+
+    /** Merge persisted (dragged) positions, then commit – animating the node
+     *  movement when this re-layout replaces an already-rendered one, so a
+     *  layout switch morphs instead of snapping. */
+    const apply = (result: { nodes: Node<ActivityNodeData>[]; edges: Edge[] }) => {
+      if (cancelled) return;
       const merged = result.nodes.map((n) => {
         const p = positions[n.id];
         return p ? { ...n, position: p } : n;
       });
-      setNodes(merged);
-      setEdges(result.edges);
-      setLaid(true);
-      return;
-    }
 
-    if (
+      window.cancelAnimationFrame(animRef.current);
+      setEdges(result.edges);
+
+      const prev = new Map(nodesRef.current.map((n) => [n.id, n.position] as const));
+      const moves = merged.some((n) => {
+        const p = prev.get(n.id);
+        return p && (Math.abs(p.x - n.position.x) > 0.5 || Math.abs(p.y - n.position.y) > 0.5);
+      });
+
+      const finish = () => {
+        setNodes(merged);
+        setLaid(true);
+        if (modeChanged) setFitNonce((v) => v + 1);
+      };
+
+      if (!laid || !moves) {
+        finish();
+        return;
+      }
+
+      const from = merged.map((n) => prev.get(n.id) ?? n.position);
+      const start = performance.now();
+      const step = (now: number) => {
+        if (cancelled) return;
+        const t = Math.min(1, (now - start) / LAYOUT_ANIMATION_MS);
+        if (t >= 1) {
+          finish();
+          return;
+        }
+        const k = easeInOutCubic(t);
+        setNodes(
+          merged.map((n, i) => ({
+            ...n,
+            position: {
+              x: from[i]!.x + (n.position.x - from[i]!.x) * k,
+              y: from[i]!.y + (n.position.y - from[i]!.y) * k,
+            },
+          })),
+        );
+        animRef.current = window.requestAnimationFrame(step);
+      };
+      animRef.current = window.requestAnimationFrame(step);
+    };
+
+    if (isFlow) {
+      // Celonis-style layered flow (ELK, async): dominant path straightened
+      // into the central spine, orthogonal-ish routing.
+      const edgeFreqMap = new Map<string, number>();
+      for (const e of visibleEdges) edgeFreqMap.set(`${e.source}\u0000${e.target}`, e.frequency);
+      void dominantFlowLayout(activityNodes, dfgEdges, {
+        direction: dfg.layoutMode === "flow-vertical" ? "DOWN" : "RIGHT",
+        nodeSize,
+        edgeFrequency: (s, t) => edgeFreqMap.get(`${s}\u0000${t}`) ?? 0,
+        frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
+        startActivityIds: startSet,
+        endActivityIds: endSet,
+        rankByNode: (id) => positionByActivity.get(id),
+      }).then(apply);
+    } else if (dfg.layoutMode === "temporal" && hasTemporal) {
+      apply(
+        temporalLayout(activityNodes, dfgEdges, {
+          direction: general.layoutDirection,
+          nodeSize,
+          rankByNode: (id) => positionByActivity.get(id),
+        }),
+      );
+    } else if (
       (dfg.layoutMode === "temporal-phases-2" || dfg.layoutMode === "temporal-phases-3") &&
       hasTemporal
     ) {
@@ -200,81 +294,55 @@ export function DfgCanvas({
         "temporal-phases-3": { phaseCount: 7, phaseGapMultiplier: 2 },
       } as const;
       const { phaseCount, phaseGapMultiplier } = phaseConfig[dfg.layoutMode];
-      const result = temporalPhasesLayout(activityNodes, dfgEdges, {
-        direction: general.layoutDirection,
-        nodeSize,
-        phaseCount,
-        phaseGapMultiplier,
-        rankByNode: (id) => positionByActivity.get(id),
-        frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
-      });
-      const merged = result.nodes.map((n) => {
-        const p = positions[n.id];
-        return p ? { ...n, position: p } : n;
-      });
-      setNodes(merged);
-      setEdges(result.edges);
-      setLaid(true);
-      return;
-    }
-
-    if (dfg.layoutMode === "temporal-swimlane" && hasTemporal) {
-      const result = temporalSwimlaneLayout(activityNodes, dfgEdges, {
-        direction: general.layoutDirection,
-        nodeSize,
-        rankByNode: (id) => positionByActivity.get(id),
-        startCountByNode: (id) => data.start_activities[id] ?? 0,
-        endCountByNode: (id) => data.end_activities[id] ?? 0,
-        frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
-      });
-      const merged = result.nodes.map((n) => {
-        const p = positions[n.id];
-        return p ? { ...n, position: p } : n;
-      });
-      setNodes(merged);
-      setEdges(result.edges);
-      setLaid(true);
-      return;
-    }
-
-    if (dfg.layoutMode === "happy-path-tower") {
+      apply(
+        temporalPhasesLayout(activityNodes, dfgEdges, {
+          direction: general.layoutDirection,
+          nodeSize,
+          phaseCount,
+          phaseGapMultiplier,
+          rankByNode: (id) => positionByActivity.get(id),
+          frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
+        }),
+      );
+    } else if (dfg.layoutMode === "temporal-swimlane" && hasTemporal) {
+      apply(
+        temporalSwimlaneLayout(activityNodes, dfgEdges, {
+          direction: general.layoutDirection,
+          nodeSize,
+          rankByNode: (id) => positionByActivity.get(id),
+          startCountByNode: (id) => data.start_activities[id] ?? 0,
+          endCountByNode: (id) => data.end_activities[id] ?? 0,
+          frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
+        }),
+      );
+    } else if (dfg.layoutMode === "happy-path-tower") {
       const edgeFreqMap = new Map<string, number>();
       for (const e of visibleEdges) edgeFreqMap.set(`${e.source}__${e.target}`, e.frequency);
-      const result = happyPathTowerLayout(activityNodes, dfgEdges, {
-        direction: general.layoutDirection,
-        nodeSize,
-        rankByNode: (id) => positionByActivity.get(id),
-        edgeFrequency: (src, tgt) => edgeFreqMap.get(`${src}__${tgt}`) ?? 0,
-        frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
-        startActivityIds: startSet,
-        endActivityIds: endSet,
-      });
-      const merged = result.nodes.map((n) => {
-        const p = positions[n.id];
-        return p ? { ...n, position: p } : n;
-      });
-      setNodes(merged);
-      setEdges(result.edges);
-      setLaid(true);
-      return;
+      apply(
+        happyPathTowerLayout(activityNodes, dfgEdges, {
+          direction: general.layoutDirection,
+          nodeSize,
+          rankByNode: (id) => positionByActivity.get(id),
+          edgeFrequency: (src, tgt) => edgeFreqMap.get(`${src}__${tgt}`) ?? 0,
+          frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
+          startActivityIds: startSet,
+          endActivityIds: endSet,
+        }),
+      );
+    } else {
+      // Fallback: temporal-family mode without rank data → plain temporal (no ranks).
+      apply(
+        temporalLayout(activityNodes, dfgEdges, {
+          direction: general.layoutDirection,
+          nodeSize,
+          rankByNode: () => undefined,
+        }),
+      );
     }
-
-    // Fallback: temporal with hasTemporal=false → plain temporal (no ranks)
-    const fallbackResult = temporalLayout(activityNodes, dfgEdges, {
-      direction: general.layoutDirection,
-      nodeSize,
-      rankByNode: () => undefined,
-    });
-    const fallbackMerged = fallbackResult.nodes.map((n) => {
-      const p = positions[n.id];
-      return p ? { ...n, position: p } : n;
-    });
-    setNodes(fallbackMerged);
-    setEdges(fallbackResult.edges);
-    setLaid(true);
 
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(animRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -303,14 +371,36 @@ export function DfgCanvas({
   );
 
   const onNodeClick = useCallback<NodeMouseHandler>(
-    (_, node) => onSelect?.({ kind: "node", id: node.id }),
+    (_, node) => {
+      setMenu(null);
+      onSelect?.({ kind: "node", id: node.id });
+    },
     [onSelect],
   );
   const onEdgeClick = useCallback<EdgeMouseHandler>(
-    (_, edge) => onSelect?.({ kind: "edge", id: edge.id }),
+    (_, edge) => {
+      setMenu(null);
+      onSelect?.({ kind: "edge", id: edge.id });
+    },
     [onSelect],
   );
-  const onPaneClick = useCallback(() => onSelect?.(null), [onSelect]);
+  const onPaneClick = useCallback(() => {
+    setMenu(null);
+    onSelect?.(null);
+  }, [onSelect]);
+
+  // Right-click on an activity node → cross-view jump menu (performance,
+  // variants). preventDefault suppresses the browser context menu.
+  const onNodeContextMenu = useCallback<NodeMouseHandler>((event, node) => {
+    event.preventDefault();
+    const label = (node.data as ActivityNodeData | undefined)?.label;
+    setMenu({
+      activityId: node.id,
+      label: typeof label === "string" && label.length > 0 ? label : node.id,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }, []);
 
   // Multi-selection via rubber-band: clear the single-node details panel.
   const onSelectionChange = useCallback(
@@ -337,14 +427,22 @@ export function DfgCanvas({
       edges={decoratedEdges}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
-      fitViewKey={`${data.kind}-${data.activities.length}`}
+      fitViewKey={`${data.kind}-${data.activities.length}-${fitNonce}`}
       miniMap={general.showMinimap}
       showGrid={general.showGrid}
-      overlay={overlay}
+      overlay={
+        <>
+          {menu ? (
+            <DfgNodeMenu target={menu} logId={logId} onClose={() => setMenu(null)} />
+          ) : null}
+          {overlay}
+        </>
+      }
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeDragStop={onNodeDragStop}
       onNodeClick={onNodeClick}
+      onNodeContextMenu={onNodeContextMenu}
       onEdgeClick={onEdgeClick}
       onPaneClick={onPaneClick}
       onSelectionChange={onSelectionChange}

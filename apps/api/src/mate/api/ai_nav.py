@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mate.api.ai_config import AiConfigPayload
 from mate.api.ai_guidance import GuidanceError, structured_completion
+from mate.api.schemas.common import utc_isoformat
 
 log = structlog.get_logger(__name__)
 
@@ -330,8 +331,8 @@ async def list_user_processes(session: AsyncSession, user_id: str) -> list[Proce
                 variants_count=r.variants_count,
                 objects_count=r.objects_count,
                 object_types_count=r.object_types_count,
-                date_min=r.date_min.isoformat() if r.date_min else None,
-                date_max=r.date_max.isoformat() if r.date_max else None,
+                date_min=utc_isoformat(r.date_min) if r.date_min else None,
+                date_max=utc_isoformat(r.date_max) if r.date_max else None,
             )
         )
     return out

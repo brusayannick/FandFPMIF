@@ -37,7 +37,6 @@ const FADE_MS = 500;
 const BASE_ROUTES = [
   "/processes",
   "/dashboards",
-  "/flows",
   "/modules",
   "/settings/general",
   "/settings/privacy",

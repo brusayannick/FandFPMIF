@@ -61,8 +61,8 @@ import {
   type DashboardItem,
   type LogModel,
 } from "@/lib/dashboard-queries";
-import { useSharedWithMe } from "@/lib/sharing-queries";
-import { ShareDialog } from "@/components/dashboards/share-dialog";
+import { useNoShareTargets, useSharedWithMe } from "@/lib/sharing-queries";
+import { NoTeamShareGate, ShareDialog } from "@/components/dashboards/share-dialog";
 
 const MODEL_OPTIONS: {
   value: LogModel;
@@ -89,6 +89,9 @@ export function DashboardList() {
   const qc = useQueryClient();
   const { data: dashboards, isLoading } = useDashboards();
   const { data: sharedWithMe } = useSharedWithMe();
+  // No team → per-card Share buttons render disabled with a "join a team"
+  // tooltip instead of opening a dialog that can't share with anyone.
+  const noTeam = useNoShareTargets();
   const create = useCreateDashboard();
   const del = useDeleteDashboard();
   const importDash = useImportDashboard();
@@ -215,7 +218,7 @@ export function DashboardList() {
               style={stagger(i)}
             >
             <Card
-              className="group relative h-full transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+              className="group relative h-full border-white/10 bg-card/70 backdrop-blur-md transition-all [border-top-color:var(--glass-refraction-top)] supports-[backdrop-filter]:bg-card/60 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
               onMouseEnter={() => prefetchDashboard(qc, d.id)}
             >
               <Link href={`/dashboards/${d.id}`} className="absolute inset-0" aria-label={d.name}>
@@ -225,19 +228,23 @@ export function DashboardList() {
                 <div className="flex items-start justify-between gap-2">
                   <CardTitle className="truncate text-base">{d.name}</CardTitle>
                   <div className="relative z-10 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Share ${d.name}`}
-                      className="h-7 w-7 text-muted-foreground hover:text-primary"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setShareTarget({ id: d.id, name: d.name });
-                      }}
-                    >
-                      <Share2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <NoTeamShareGate noTeam={noTeam}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Share ${d.name}`}
+                        disabled={noTeam}
+                        aria-disabled={noTeam || undefined}
+                        className="h-7 w-7 text-muted-foreground hover:text-primary"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setShareTarget({ id: d.id, name: d.name });
+                        }}
+                      >
+                        <Share2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </NoTeamShareGate>
                     <Button
                       type="button"
                       variant="ghost"
@@ -287,7 +294,7 @@ export function DashboardList() {
                 style={stagger(i)}
               >
                 <Card
-                  className="group relative h-full transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+                  className="group relative h-full border-white/10 bg-card/70 backdrop-blur-md transition-all [border-top-color:var(--glass-refraction-top)] supports-[backdrop-filter]:bg-card/60 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
                   onMouseEnter={() => prefetchDashboard(qc, d.id)}
                 >
                   <Link

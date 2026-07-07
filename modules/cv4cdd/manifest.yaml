@@ -8,9 +8,16 @@ description: >-
   incremental, and recurring drifts. Based on Kraus and van der Aa, "Looking for
   Change: A Computer Vision Approach for Concept Drift Detection in Process
   Mining" (2024). DOI: https://doi.org/10.1007/978-3-031-70396-6_16
+about: >-
+  Find out when your process changed: this module encodes the log as a
+  similarity image and runs a trained object-detection model over it to locate
+  sudden, gradual, incremental, and recurring drifts. Use it to pin down the
+  time window of each change, distinguish one-off shifts from recurring
+  patterns, and pick the right periods to compare before and after.
 keywords: ["concept drift", "drift detection", "drift", "sudden drift", "gradual drift", "recurring drift", "change point"]
 author: A. Kraus and H. van der Aa (2024)
 author_url: https://huggingface.co/datasets/pm-science/cv4cdd_4d
+paper_url: https://doi.org/10.1007/978-3-031-70396-6_16
 license: CC-BY-4.0
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

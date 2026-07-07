@@ -3,8 +3,8 @@
  *
  * Each `VizSpec` declares which dataset shape(s) it accepts, its field-mapping
  * (Power-BI-style column binding), optional non-field options (card
- * `config_schema` dialect), default sizing, and the React component. Reused by
- * dashboard generic-viz cards now, and by flow viz nodes in Phase 3.
+ * `config_schema` dialect), default sizing, and the React component. Rendered
+ * by dashboard generic-viz cards.
  */
 
 import type { ColumnType, DatasetShape, VizSpec } from "./types";

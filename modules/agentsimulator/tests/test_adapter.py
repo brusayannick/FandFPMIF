@@ -100,14 +100,42 @@ def test_build_input_csv_missing_start_dropped_missing_end_filled(tmp_path):
     assert stats["events"] == len(df) - 1
 
 
-def test_build_input_csv_without_end_column(tmp_path):
-    # Most real logs (Helpdesk, BPIC, SEPSIS) have a single timestamp.
+def test_build_input_csv_without_end_column_derives_gap_durations(tmp_path):
+    # Most real logs (Helpdesk, BPIC, SEPSIS) have a single timestamp. With
+    # `end = start` everywhere the simulator would learn all-zero durations and
+    # emit instantaneous cases (the sim cycle-time distribution collapses to a
+    # spike at 0), so the adapter derives each event's end from the case's next
+    # event start. Case-level spans are preserved exactly.
     df = _canonical_log(n_cases=5).drop(columns=["end_timestamp"])
     out = tmp_path / "input.csv"
     stats = adapter.build_input_csv(df, out)
     assert stats["events"] == len(df)
+
     written = pd.read_csv(out)
-    assert (written["start_time"] == written["end_time"]).all()  # end fell back to start
+    start = pd.to_datetime(written["start_time"])
+    end = pd.to_datetime(written["end_time"])
+
+    last = written.groupby("case_id").tail(1).index
+    mid = written.index.difference(last)
+    # Non-final events end when the next event starts (2h spacing in fixture)…
+    assert (end[mid] - start[mid] == pd.Timedelta(hours=2)).all()
+    # …the final event of a case stays zero-duration…
+    assert (end[last] == start[last]).all()
+    # …so the case span (first start → last end) equals the original
+    # first→last timestamp span (4 events, 2h apart = 6h).
+    span = end.groupby(written["case_id"]).max() - start.groupby(written["case_id"]).min()
+    assert (span == pd.Timedelta(hours=6)).all()
+
+
+def test_build_input_csv_real_end_timestamps_untouched(tmp_path):
+    # A log with genuine durations must NOT get the gap-fallback rewrite.
+    df = _canonical_log(n_cases=4)  # end_timestamp = start + 1h everywhere
+    out = tmp_path / "input.csv"
+    adapter.build_input_csv(df, out)
+    written = pd.read_csv(out)
+    start = pd.to_datetime(written["start_time"])
+    end = pd.to_datetime(written["end_time"])
+    assert (end - start == pd.Timedelta(hours=1)).all()
 
 
 def test_compute_summaries_shapes():
@@ -330,3 +358,65 @@ def test_result_is_current_rejects_none_and_non_dict():
     assert _result_is_current(None) is False
     assert _result_is_current("nope") is False
     assert _result_is_current(["list"]) is False
+
+
+# ── regression: per-run download index (subprocess query-param passthrough) ─
+
+
+def test_parse_log_index_reads_subprocess_passthrough_params():
+    from modules.agentsimulator.module import (  # pyright: ignore[reportPrivateUsage]
+        _parse_log_index,
+    )
+
+    # The only query params a subprocess route forwards are the stub's own
+    # `args` / `kwargs`; the panel sends the run index as `?args=<i>`.
+    assert _parse_log_index({}) == 0
+    assert _parse_log_index({"args": None, "kwargs": None}) == 0
+    assert _parse_log_index({"args": "3", "kwargs": None}) == 3
+    assert _parse_log_index({"args": None, "kwargs": "2"}) == 2
+    assert _parse_log_index({"args": 4}) == 4
+    assert _parse_log_index({"args": "junk"}) == 0  # unparsable → default run
+    assert _parse_log_index({"args": "99"}) == 9  # clamped to num_simulations max
+    assert _parse_log_index({"args": "-4"}) == 0
+
+
+# ── regression: determine_automatically distance (log-distance-measures drop) ─
+
+
+def _val_shaped_log(n_cases: int = 12, span_h: int = 6) -> pd.DataFrame:
+    """Frames shaped like the auto-mode trials: `df_val` / trial simulated logs
+    (case_id + start_timestamp/end_timestamp), each case spanning ``span_h``."""
+    base = pd.Timestamp("2022-01-03 09:00:00+00:00")
+    rows: list[dict[str, object]] = []
+    for c in range(n_cases):
+        s = base + pd.Timedelta(hours=c)
+        for i, a in enumerate(("a", "b")):
+            t = s + pd.Timedelta(hours=span_h * i)
+            rows.append(
+                {"case_id": c, "activity_name": a, "start_timestamp": t, "end_timestamp": t}
+            )
+    return pd.DataFrame(rows)
+
+
+def test_cycle_time_distribution_distance_ranks_like_the_dropped_package():
+    """`determine_automatically` crashed with ModuleNotFoundError because
+    log-distance-measures is deliberately not installed; the local numpy/scipy
+    EMD replacement must produce sane, rankable distances."""
+    from modules.agentsimulator.source.validation_distance import (
+        cycle_time_distribution_distance,
+    )
+
+    real = _val_shaped_log(span_h=6)
+    same = _val_shaped_log(span_h=6)
+    near = _val_shaped_log(span_h=8)
+    far = _val_shaped_log(span_h=30)
+
+    assert cycle_time_distribution_distance(real, same) == 0.0
+    d_near = cycle_time_distribution_distance(real, near)
+    d_far = cycle_time_distribution_distance(real, far)
+    assert 0.0 < d_near < d_far
+    assert d_far == pytest.approx(24.0, abs=1e-6)  # 30h vs 6h ⇒ 24 one-hour bins
+
+    # A degenerate (empty) trial simulation can never win the ranking.
+    assert cycle_time_distribution_distance(real, pd.DataFrame()) == float("inf")
+    assert cycle_time_distribution_distance(pd.DataFrame(), real) == float("inf")

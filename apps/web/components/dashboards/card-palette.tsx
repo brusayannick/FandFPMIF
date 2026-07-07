@@ -6,6 +6,7 @@ import { Boxes, ChevronDown, Search } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cardIcon } from "@/components/dashboards/card-icon";
 import type { AddRequest } from "@/components/dashboards/dashboard-canvas";
 import {
@@ -16,9 +17,16 @@ import {
   type LogModel,
 } from "@/lib/dashboard-queries";
 
+const MODEL_LABELS: Record<LogModel, string> = {
+  case_centric: "case-centric",
+  object_centric: "object-centric (OCEL)",
+};
+
 /** A palette row: a module-authored widget card, or a module dataset rendered
- * through the generic-viz layer. */
-type Entry =
+ * through the generic-viz layer. `applicable` is false when the entry's
+ * `log_models` don't include the board's model – it is then shown grayed-out
+ * (not hidden) with a tooltip explaining why it can't be placed. */
+type Entry = (
   | { type: "widget"; key: string; title: string; description: string | null; icon: string | null; card: DashboardCard }
   | {
       type: "viz";
@@ -28,7 +36,8 @@ type Entry =
       icon: string | null;
       shape: DatasetCatalogEntry["shape"];
       dataset: DatasetCatalogEntry;
-    };
+    }
+) & { applicable: boolean; logModels: LogModel[] };
 
 /**
  * Left-rail palette of everything the user's installed modules expose - both
@@ -70,7 +79,7 @@ export function CardPalette({
     };
 
     for (const c of cards ?? []) {
-      if (!c.log_models.includes(logModel) || !matches(c.title, c.module_name, c.description)) continue;
+      if (!matches(c.title, c.module_name, c.description)) continue;
       ensure(c.module_id, c.module_name).entries.push({
         type: "widget",
         key: `w:${c.module_id}:${c.widget_id}`,
@@ -78,10 +87,12 @@ export function CardPalette({
         description: c.description,
         icon: c.icon,
         card: c,
+        applicable: c.log_models.includes(logModel),
+        logModels: c.log_models,
       });
     }
     for (const d of datasets ?? []) {
-      if (!d.log_models.includes(logModel) || !matches(d.title, d.module_name, d.description)) continue;
+      if (!matches(d.title, d.module_name, d.description)) continue;
       ensure(d.module_id, d.module_name).entries.push({
         type: "viz",
         key: `d:${d.module_id}:${d.dataset_id}`,
@@ -90,7 +101,14 @@ export function CardPalette({
         icon: d.icon,
         shape: d.shape,
         dataset: d,
+        applicable: d.log_models.includes(logModel),
+        logModels: d.log_models,
       });
+    }
+    // Placeable entries first inside each module group; the sort is stable, so
+    // the catalog's declared order is kept within each half.
+    for (const g of byModule.values()) {
+      g.entries.sort((a, b) => Number(b.applicable) - Number(a.applicable));
     }
     return [...byModule.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [cards, datasets, query, logModel]);
@@ -140,7 +158,7 @@ export function CardPalette({
             return (
               <section
                 key={group.id}
-                className="overflow-hidden rounded-lg border border-border bg-card/40"
+                className="overflow-hidden rounded-lg border border-white/10 [border-top-color:var(--glass-refraction-top)] bg-card/40 backdrop-blur-md"
               >
                 <button
                   type="button"
@@ -167,21 +185,29 @@ export function CardPalette({
                   <div className="space-y-1 p-1.5">
                     {group.entries.map((entry) => {
                       const Icon = cardIcon(entry.icon);
-                      return (
+                      const row = (
                         <div
                           key={entry.key}
                           // Pointer-drag (not HTML5 DnD, which the prod proxy
                           // strips): press to start, the canvas tracks the cursor
                           // and drops. `touch-none` stops the scroll-area from
-                          // hijacking the gesture on touch.
-                          onPointerDown={(e) => {
-                            if (e.button !== 0) return;
-                            e.preventDefault();
-                            onStartAdd(requestFor(entry), e);
-                          }}
+                          // hijacking the gesture on touch. Inapplicable entries
+                          // (wrong log model for this board) don't start a drag.
+                          onPointerDown={
+                            entry.applicable
+                              ? (e) => {
+                                  if (e.button !== 0) return;
+                                  e.preventDefault();
+                                  onStartAdd(requestFor(entry), e);
+                                }
+                              : undefined
+                          }
+                          aria-disabled={!entry.applicable || undefined}
                           className={cn(
                             "group flex w-full touch-none items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-left",
-                            "cursor-grab transition-all duration-150 hover:border-border hover:bg-card active:scale-[0.98] active:cursor-grabbing",
+                            entry.applicable
+                              ? "cursor-grab transition-all duration-150 hover:border-border hover:bg-card active:scale-[0.98] active:cursor-grabbing"
+                              : "cursor-not-allowed opacity-50",
                           )}
                         >
                           <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
@@ -203,6 +229,17 @@ export function CardPalette({
                             )}
                           </span>
                         </div>
+                      );
+                      if (entry.applicable) return row;
+                      const needs = entry.logModels.map((m) => MODEL_LABELS[m]).join(" or ");
+                      return (
+                        <Tooltip key={entry.key}>
+                          <TooltipTrigger asChild>{row}</TooltipTrigger>
+                          <TooltipContent side="right" className="max-w-xs">
+                            Needs a {needs} log — this dashboard is bound to a{" "}
+                            {MODEL_LABELS[logModel]} log.
+                          </TooltipContent>
+                        </Tooltip>
                       );
                     })}
                   </div>

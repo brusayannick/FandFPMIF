@@ -6,9 +6,16 @@ description: >-
   Turns your event log into a process model and shows it as a directly-follows
   graph, Petri net (Alpha or Inductive miner), process tree, heuristics net, or
   BPMN diagram.
+about: >-
+  See how your process actually runs: this module mines your event log into a
+  process map and lets you switch between a directly-follows graph, Petri net,
+  process tree, heuristics net, or BPMN diagram. Use it to understand the real
+  flow of work, find the most frequent activities and paths, and get a model you
+  can export or use as a reference for conformance checking.
 keywords: ["process model", "discover", "discovery", "dfg", "petri net", "bpmn", "process tree", "model", "variants", "paths"]
 author: van der Aalst
 author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
+paper_url: https://doi.org/10.1109/TKDE.2004.47
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

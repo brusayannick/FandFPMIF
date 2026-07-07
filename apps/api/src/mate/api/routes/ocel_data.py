@@ -22,6 +22,7 @@ from mate.api.modules.object_centric_log_access import (
     ObjectCentricLogAccess,
     _quote_ident,
 )
+from mate.api.schemas.common import utc_isoformat
 from mate.api.schemas.ocel_data import (
     OcelEventsPage,
     OcelObjectsPage,
@@ -45,7 +46,9 @@ def _row_dict(values: tuple, columns: list[str]) -> dict[str, Any]:
         if val is None:
             out[col] = None
         elif isinstance(val, datetime):
-            out[col] = val.isoformat()
+            # Stored naive UTC (ingest normalizes) - attach the offset so the
+            # client parses the true instant instead of local wall-clock.
+            out[col] = utc_isoformat(val)
         elif isinstance(val, float) and math.isnan(val):
             out[col] = None
         else:

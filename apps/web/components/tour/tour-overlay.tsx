@@ -100,6 +100,7 @@ function TourRunner() {
   const next = useTour((s) => s.next);
   const prev = useTour((s) => s.prev);
   const stop = useTour((s) => s.stop);
+  const auto = useTour((s) => s.auto);
 
   const router = useProgressRouter();
   const pathname = usePathname();
@@ -108,7 +109,7 @@ function TourRunner() {
   const updateOnboarding = useUpdateOnboarding();
 
   const demoLogId = useMemo(() => pickDemoLog(logs), [logs]);
-  const steps = useMemo(() => buildTourSteps(demoLogId), [demoLogId]);
+  const steps = useMemo(() => buildTourSteps(demoLogId, { auto }), [demoLogId, auto]);
 
   const step: TourStep | undefined = steps[stepIndex];
   const isLast = stepIndex >= steps.length - 1;

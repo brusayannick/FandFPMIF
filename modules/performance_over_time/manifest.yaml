@@ -7,6 +7,12 @@ description: >-
   time slices and computes the performance module's KPIs (cycle times,
   throughput) on each one, then plots the trend so you can see when the
   process sped up or slowed down.
+about: >-
+  Track whether your process is getting faster or slower: this module splits the
+  log into time slices, computes the performance KPIs (cycle times, throughput,
+  lead time) on each slice, and plots the trend. Use it to verify that an
+  improvement initiative actually moved the numbers, or to catch a gradual
+  slowdown before it becomes a backlog.
 keywords: ["performance", "over time", "trend", "cycle time", "throughput", "drift", "kpi", "time series"]
 author: FlowFactory
 author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype

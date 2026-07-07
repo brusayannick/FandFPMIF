@@ -46,6 +46,7 @@ from mate.api.db.models import (
 from mate.api.db.session import SessionDep
 from mate.api.ingest.storage import log_paths
 from mate.api.jobs.runtime import get_job_runtime
+from mate.api.schemas.common import UtcDateTime
 from mate.api.storage import s3 as storage_s3
 from mate.api.storage import sync as storage_sync
 from mate.api.storage.config import get_storage_settings
@@ -944,10 +945,10 @@ class AdminLogRow(BaseModel):
     events_count: int | None
     cases_count: int | None
     objects_count: int | None
-    date_min: datetime | None
-    date_max: datetime | None
-    created_at: datetime
-    imported_at: datetime | None
+    date_min: UtcDateTime | None
+    date_max: UtcDateTime | None
+    created_at: UtcDateTime
+    imported_at: UtcDateTime | None
     folder_id: str | None
 
 

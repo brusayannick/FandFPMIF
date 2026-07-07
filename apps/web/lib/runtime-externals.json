@@ -10,6 +10,7 @@
   "radix-ui",
   "d3-hierarchy",
   "elkjs/lib/elk.bundled.js",
+  "next/navigation",
   "@/components/ui/alert-dialog",
   "@/components/ui/badge",
   "@/components/ui/button",

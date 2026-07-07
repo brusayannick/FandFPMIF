@@ -47,13 +47,14 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
 
   const card = (
     <Card
+      variant="glass"
       data-tour={`module-${module.id}`}
       className={cn(
         // Tile-style card: drop the default outer py/gap so CardContent's
         // p-4 fully owns the card's padding.
         "group relative flex h-full flex-col gap-0 py-0 transition-all",
-        isAvailable && "cursor-pointer hover:-translate-y-0.5 hover:shadow-md",
-        isDegraded && "cursor-pointer hover:shadow-md",
+        isAvailable && "cursor-pointer hover:-translate-y-0.5 hover:shadow-[var(--shadow-glass-md)]",
+        isDegraded && "cursor-pointer hover:shadow-[var(--shadow-glass-md)]",
         (isUnavailable || isDisabled || isJobRunning) && "cursor-not-allowed opacity-60",
       )}
       aria-disabled={isUnavailable || isDisabled || isJobRunning}

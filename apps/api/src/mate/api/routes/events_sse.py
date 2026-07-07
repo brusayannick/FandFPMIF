@@ -38,6 +38,7 @@ from fastapi.responses import StreamingResponse
 
 from mate.api.auth import CurrentUserDep
 from mate.api.events import get_event_bus
+from mate.api.schemas.common import utc_isoformat
 from mate.api.shutdown import is_shutting_down
 
 router = APIRouter(tags=["events"])
@@ -57,7 +58,8 @@ _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 def _json_default(value: Any) -> Any:
     if isinstance(value, datetime):
-        return value.isoformat()
+        # Naive datetimes are UTC platform-wide; serialize with the offset.
+        return utc_isoformat(value)
     return str(value)
 
 

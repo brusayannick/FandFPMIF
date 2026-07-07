@@ -45,6 +45,7 @@ from mate.api.ingest.storage import LogPaths, log_paths
 from mate.api.ingest.xes import parse_xes
 from mate.api.ingest.xml_parser import parse_xml
 from mate.api.jobs.runtime import JobHandle, JobRuntime
+from mate.api.schemas.common import utc_isoformat
 from mate.api.schemas.event_logs import (
     CsvColumnMapping,
     JsonColumnMapping,
@@ -479,9 +480,10 @@ def _to_iso(value: Any) -> str | None:
     if isinstance(value, pd.Timestamp):
         if pd.isna(value):
             return None
-        return value.isoformat()
+        # Normalized to naive UTC at parse - keep the offset in the JSON form.
+        return utc_isoformat(value)
     if isinstance(value, datetime):
-        return value.isoformat()
+        return utc_isoformat(value)
     return str(value)
 
 

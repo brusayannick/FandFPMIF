@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/popover";
 import { useWidget } from "@/lib/module-widgets";
 import { CardConfigForm } from "@/components/dashboards/card-config-form";
-import { FlowCardBody, GenericVizBody, VizSettings } from "@/components/dashboards/generic-viz-card";
+import { GenericVizBody, VizSettings } from "@/components/dashboards/generic-viz-card";
 import {
   DEFAULT_CARD_CHROME,
   type CardChrome,
@@ -56,18 +56,16 @@ export const DashboardCard = memo(function DashboardCard({
   onRemove: () => void;
 }) {
   const isViz = item.kind === "viz";
-  const isFlow = item.kind === "flow";
-  const title =
-    item.title || (isViz ? "Visualization" : isFlow ? "Flow visualization" : item.widget_id) || "Card";
+  const title = item.title || (isViz ? "Visualization" : item.widget_id) || "Card";
   // Don't let RGL begin a drag when the user interacts with header controls.
   const stopDrag = (e: React.MouseEvent | React.PointerEvent) => e.stopPropagation();
 
   return (
     <div
       className={cn(
-        "dashboard-card-root flex h-full flex-col overflow-hidden rounded-lg bg-card shadow-sm",
+        "dashboard-card-root flex h-full flex-col overflow-hidden rounded-lg bg-card/80 shadow-sm supports-[backdrop-filter]:bg-card/70",
         "transition-[box-shadow,transform,outline-color] duration-150 ease-out",
-        chrome.border && "border border-border",
+        chrome.border && "border border-white/10 [border-top-color:var(--glass-refraction-top)]",
         // Edit mode: cards read as grabbable objects — a faint ring at rest
         // that firms up (with a soft lift) under the pointer, n8n-node style.
         editing && "ring-1 ring-border/60 hover:shadow-md hover:ring-border",
@@ -75,7 +73,7 @@ export const DashboardCard = memo(function DashboardCard({
     >
       <div
         className={cn(
-          "flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-2",
+          "flex shrink-0 items-center gap-1.5 border-b border-white/10 px-3 py-2",
           editing && "dashboard-drag-handle",
         )}
       >
@@ -108,11 +106,7 @@ export const DashboardCard = memo(function DashboardCard({
                 <PopoverHeader>
                   <PopoverTitle>Card settings</PopoverTitle>
                 </PopoverHeader>
-                {isFlow ? (
-                  <p className="text-[11px] text-muted-foreground">
-                    This card mirrors a Builder flow node. Edit its visualization in the Builder.
-                  </p>
-                ) : isViz ? (
+                {isViz ? (
                   <VizSettings item={item} logId={logId} onChange={onUpdate} />
                 ) : (
                   <CardConfigForm item={item} schema={schema} onChange={onUpdate} />
@@ -135,9 +129,7 @@ export const DashboardCard = memo(function DashboardCard({
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3 animate-in fade-in-0 duration-300">
-        {isFlow ? (
-          <FlowCardBody item={item} />
-        ) : isViz ? (
+        {isViz ? (
           <GenericVizBody item={item} logId={logId} />
         ) : (
           <WidgetBody item={item} logId={logId} />

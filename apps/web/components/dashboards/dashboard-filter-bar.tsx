@@ -67,7 +67,7 @@ export function DashboardFilterBar({
   }, [columns, activeFields, search]);
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-card/40 px-3 py-2">
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-white/10 bg-card/40 px-3 py-2 backdrop-blur-md">
       <Filter className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 
       {filters.length === 0 && !editingField && (

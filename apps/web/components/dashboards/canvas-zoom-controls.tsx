@@ -27,7 +27,7 @@ export function CanvasZoomControls({
   onFit: () => void;
 }) {
   return (
-    <div className="absolute bottom-3 left-3 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-card/95 p-0.5 shadow-md backdrop-blur-sm">
+    <div className="absolute bottom-3 left-3 z-10 flex items-center gap-0.5 rounded-lg border border-white/10 [border-top-color:var(--glass-refraction-top)] bg-card/80 p-0.5 shadow-lg backdrop-blur-xl backdrop-saturate-150">
       <Button
         type="button"
         variant="ghost"

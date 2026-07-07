@@ -321,7 +321,7 @@ export default function AdminStoragePage() {
         </div>
       ) : form == null ? null : (
         <>
-          <Card>
+          <Card variant="glass">
             <CardHeader>
               <CardTitle className="text-base">Storage backend</CardTitle>
             </CardHeader>
@@ -367,7 +367,7 @@ export default function AdminStoragePage() {
           </Card>
 
           {form.mode === "s3" && (
-            <Card>
+            <Card variant="glass">
               <CardHeader>
                 <CardTitle className="text-base">S3 connection</CardTitle>
               </CardHeader>
@@ -479,7 +479,7 @@ export default function AdminStoragePage() {
           </div>
 
           {config?.mode === "s3" && (
-            <Card>
+            <Card variant="glass">
               <CardHeader>
                 <CardTitle className="flex items-center justify-between text-base">
                   Storage overview
@@ -521,7 +521,7 @@ export default function AdminStoragePage() {
           )}
 
           {config?.mode === "s3" && cacheForm && (
-            <Card>
+            <Card variant="glass">
               <CardHeader>
                 <CardTitle className="text-base">Local cache budget</CardTitle>
               </CardHeader>
@@ -584,7 +584,7 @@ export default function AdminStoragePage() {
           )}
 
           {config?.mode === "s3" && (
-            <Card>
+            <Card variant="glass">
               <CardHeader>
                 <CardTitle className="text-base">Data migration</CardTitle>
               </CardHeader>

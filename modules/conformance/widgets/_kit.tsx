@@ -25,9 +25,23 @@ export function CardShell({
   return <div className="h-full">{children}</div>;
 }
 
-export function KpiTile({ label, value }: { label: string; value: string }) {
+export function KpiTile({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: string;
+  /** Native tooltip explaining what the number means. */
+  title?: string;
+}) {
   return (
-    <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+    <div
+      className="rounded-md border border-border/60 bg-muted/20 px-3 py-2"
+      // Inline cursor: `cursor-help` is not compiled for module sources.
+      style={title ? { cursor: "help" } : undefined}
+      title={title}
+    >
       <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-0.5 truncate text-lg font-semibold tabular-nums tracking-tight">
         {value}

@@ -7,6 +7,13 @@ description: >-
   and trace distance (including edit distance and structural variety), plus the
   directly-follows transition-probability matrix. Based on Langer's thesis on
   business process complexity.
+about: >-
+  Get the full complexity picture of your process in one run: 28 metrics
+  covering size, variation, entropy, and how far your cases drift apart
+  (edit distance, structural variety), plus the transition-probability matrix
+  between activities. Use it to benchmark processes against each other, find
+  out whether complexity comes from many variants or from long unpredictable
+  traces, and identify the transitions that make behaviour hard to predict.
 author: E. Langer
 author_url: https://github.com/MrWaitomo/WWU_processcomplexity
 license: MIT

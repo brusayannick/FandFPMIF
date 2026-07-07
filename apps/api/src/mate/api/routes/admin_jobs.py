@@ -17,7 +17,6 @@ See ``apps/web/app/(platform)/admin/jobs`` for the UI.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Annotated, Any
 
 import structlog
@@ -30,6 +29,7 @@ from mate.api.db.models import EventLog, Job, User
 from mate.api.db.session import SessionDep
 from mate.api.jobs.runtime import get_job_runtime
 from mate.api.modules.job_logs import get_job_log_buffer
+from mate.api.schemas.common import UtcDateTime
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/admin/jobs", tags=["admin"])
@@ -59,9 +59,9 @@ class AdminJobRow(BaseModel):
     eta_seconds: float | None
     priority: int
     parent_job_id: str | None
-    created_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
+    created_at: UtcDateTime
+    started_at: UtcDateTime | None
+    finished_at: UtcDateTime | None
     owner_id: str
     owner_email: str | None
     owner_username: str | None

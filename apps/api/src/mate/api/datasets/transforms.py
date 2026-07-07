@@ -6,7 +6,6 @@ upstream rows registered as a DuckDB relation, reusing the Events-tab filter SQL
 builders so the editor preview and the materialised dataset never diverge.
 
 Supported ops (v1): ``filter``, ``select``, ``sort``, ``limit``, ``aggregate``.
-The flow engine (Phase 3) reuses :func:`apply_transforms` for transform nodes.
 """
 
 from __future__ import annotations
@@ -83,6 +82,23 @@ def _columns_from_df(df: Any) -> list[ColumnSpec]:
             )
         )
     return cols
+
+
+def _json_records(df: Any) -> list[dict[str, Any]]:
+    """``df.to_json(orient="records")`` with UTC offsets on datetime columns.
+
+    Event-log datetimes are stored naive UTC; ``date_format="iso"`` would emit
+    them without an offset, which browsers parse as *local* wall-clock. Localize
+    naive datetime columns to UTC first so the JSON carries ``Z`` like every
+    other datetime the API serves.
+    """
+    import pandas as pd
+
+    for col in df.columns:
+        dtype = df[col].dtype
+        if pd.api.types.is_datetime64_any_dtype(dtype) and getattr(dtype, "tz", None) is None:
+            df[col] = df[col].dt.tz_localize("UTC")
+    return json.loads(df.to_json(orient="records", date_format="iso") or "[]")
 
 
 def _step_sql(step: dict[str, Any], columns: set[str]) -> tuple[str, list[Any]]:
@@ -237,7 +253,7 @@ def apply_transforms(env: DatasetEnvelope, transforms: list[dict[str, Any]]) -> 
         con.close()
 
     columns = _columns_from_df(df)
-    rows = json.loads(df.to_json(orient="records", date_format="iso") or "[]")
+    rows = _json_records(df)
     return table_envelope(
         columns,
         rows,
@@ -275,7 +291,7 @@ def join_envelopes(
     finally:
         con.close()
     columns = _columns_from_df(out)
-    rows = json.loads(out.to_json(orient="records", date_format="iso") or "[]")
+    rows = _json_records(out)
     return table_envelope(
         columns, rows, meta=DatasetMeta(rowCount=len(rows), note=None if rows else "No rows after join.")
     )

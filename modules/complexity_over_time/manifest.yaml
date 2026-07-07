@@ -6,9 +6,16 @@ description: >-
   Tracks how your process complexity changes over time. It splits the log into
   time slices, scores each one, and plots the trend so you can see when the
   process became simpler or more chaotic. Based on paper by Augusto et al.
+about: >-
+  Watch process complexity as a trend instead of a snapshot: the log is split
+  into time slices and each slice is scored, so you can see exactly when your
+  process became simpler or more chaotic. Use it to verify that a redesign or
+  automation rollout actually simplified day-to-day work, and to catch creeping
+  complexity (new variants, workarounds) before it hurts performance.
 keywords: ["complexity over time", "complexity trend", "entropy over time", "complexity timeline", "kpi over time"]
 author: FlowFactory
 author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
+paper_url: https://doi.org/10.1016/j.ins.2022.03.072
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

@@ -33,6 +33,11 @@ export interface LayeredOptions {
    * reverse edges that violate the hint, so feedback edges stay back-edges.
    */
   nodeOrderHint?: (nodeId: string) => number;
+  /**
+   * Per-edge ELK layout options, e.g. straightness / direction priorities for
+   * a dominant-path spine. Return `undefined` for edges without overrides.
+   */
+  edgeOptions?: (edge: Edge) => ElkOptions | undefined;
 }
 
 const elk = new ELK();
@@ -123,11 +128,15 @@ export async function elkLayout<TNodeData extends Record<string, unknown>, TEdge
     };
   });
 
-  const elkEdges: ElkExtendedEdge[] = edges.map((edge) => ({
-    id: edge.id,
-    sources: [edge.source],
-    targets: [edge.target],
-  }));
+  const elkEdges: ElkExtendedEdge[] = edges.map((edge) => {
+    const edgeLayoutOptions = opts.edgeOptions?.(edge);
+    return {
+      id: edge.id,
+      sources: [edge.source],
+      targets: [edge.target],
+      ...(edgeLayoutOptions ? { layoutOptions: edgeLayoutOptions } : {}),
+    };
+  });
 
   const root: ElkNode = {
     id: "root",

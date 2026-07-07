@@ -25,7 +25,11 @@ export default function ConformanceScore({ logId }: { logId: string }) {
           <KpiTile label="Fitness" value={pct(k.log_fitness)} />
           <KpiTile label="Precision" value={pct(k.precision)} />
           <KpiTile label="Conforming" value={`${k.perc_fit_traces.toFixed(1)}%`} />
-          <KpiTile label="Deviations" value={String(k.total_deviations)} />
+          <KpiTile
+            label="Deviations"
+            value={String(k.total_deviations)}
+            title="Steps where the recorded process differs from the reference model — either an activity happened that the model doesn't allow, or a required activity was skipped."
+          />
         </div>
       ) : null}
     </CardShell>

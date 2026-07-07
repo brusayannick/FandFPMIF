@@ -20,6 +20,11 @@ are bounded upstream by ``_guard_alignments_size``.
 
 ``multi_processing=False`` is mandatory for alignments: the worker is already on
 a pool core, and pm4py's own multiprocessing inside a pool child deadlocks.
+
+Label matching between the log and the model is **exact after canonicalisation**
+(trim + collapse whitespace + casefold, ``_canonicalize_log_labels``). There is
+deliberately no fuzzy/similarity matching: a one-letter difference is a
+different activity and shows up as a deviation / label mismatch.
 """
 
 from __future__ import annotations
@@ -40,7 +45,40 @@ def _rename_pm4py(df: Any) -> Any:
     )
 
 
+def _canon_label(value: Any) -> str:
+    """Canonical key for activity-label matching: trim, collapse internal
+    whitespace, casefold. Matching stays EXACT on this key - whitespace/case
+    variants unify, but one wrong letter is a different activity ("Aproval"
+    never matches "Approval"). Deliberately no fuzzy/similarity matching."""
+    return " ".join(str(value).split()).casefold()
+
+
+def _canonicalize_log_labels(df: Any, net: Any) -> Any:
+    """Rewrite log activities that are whitespace/case variants of a model label
+    to the model's exact spelling, so the replay, the label report and the
+    diagram heatmap all agree on one string. Anything else - typos included -
+    is left untouched and surfaces explicitly as a deviation / label mismatch."""
+    model_exact = {str(t.label) for t in net.transitions if t.label is not None}
+    canon_to_model: dict[str, str] = {}
+    for lbl in sorted(model_exact):  # sorted → deterministic pick on collisions
+        canon_to_model.setdefault(_canon_label(lbl), lbl)
+    rename: dict[Any, str] = {}
+    for a in df["concept:name"].unique():
+        s = str(a)
+        if s in model_exact:
+            continue  # already the model's exact spelling
+        target = canon_to_model.get(_canon_label(s))
+        if target is not None and target != s:
+            rename[a] = target
+    if rename:
+        df["concept:name"] = df["concept:name"].replace(rename)
+    return df
+
+
 def _label_report(net: Any, log_labels: set[str]) -> dict[str, Any]:
+    """Exact set comparison of model vs log labels. The log side has already
+    been canonicalised (`_canonicalize_log_labels`), so whitespace/case
+    variants count as matched while any other difference is reported."""
     model_labels = {t.label for t in net.transitions if t.label is not None}
     return {
         "in_model_not_log": sorted(model_labels - log_labels),
@@ -130,6 +168,10 @@ def _conformance_worker(
     bpmn_graph = pm4py.read_bpmn(bpmn_path)
     net, im, fm = pm4py.convert_to_petri_net(bpmn_graph)
 
+    # Unify whitespace/case variants with the model spelling (exact-only, no
+    # fuzzy matching) BEFORE replaying, so replay and report agree.
+    df = _canonicalize_log_labels(df, net)
+
     name_to_label = {t.name: t.label for t in net.transitions}
     log_labels = {str(a) for a in df["concept:name"].unique()}
     label_report = _label_report(net, log_labels)
@@ -188,5 +230,8 @@ def _precision_token_worker(events_path: str, bpmn_path: str) -> float:
     df = _rename_pm4py(pd.read_parquet(events_path))
     bpmn_graph = pm4py.read_bpmn(bpmn_path)
     net, im, fm = pm4py.convert_to_petri_net(bpmn_graph)
+    # Same exact-after-canonicalisation label unification as the core worker,
+    # so precision is measured on the identical label space.
+    df = _canonicalize_log_labels(df, net)
     log = pm4py.convert_to_event_log(df)
     return float(pm4py.precision_token_based_replay(log, net, im, fm))

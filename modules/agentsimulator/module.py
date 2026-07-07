@@ -11,7 +11,9 @@ class only orchestrates: load log → run → score fidelity → cache for the p
 
 Note on `**_kw`: in subprocess mode the host forwards the route stub's
 ``*args/**kwargs`` to the handler as ``args=None, kwargs=None`` (the worker can't
-see the real signature). Every handler swallows them.
+see the real signature). Every handler swallows them; `/simulated-log` also
+*reads* them - `?args=<i>` is the only query-param channel into a subprocess
+route, and it carries the requested run index (see `_parse_log_index`).
 """
 
 from __future__ import annotations
@@ -51,6 +53,27 @@ def _result_is_current(cached: Any) -> bool:
     return all(k in cached for k in _REQUIRED_RESULT_KEYS)
 
 
+def _parse_log_index(kw: dict[str, Any]) -> int:
+    """Requested simulated-log index from a subprocess route's query params.
+
+    A subprocess route stub's FastAPI signature is derived from the stub's own
+    ``(ctx, *args, **kwargs)``, so the only query params that reach the handler
+    are the two literal passthroughs ``args`` and ``kwargs``. The panel sends
+    the index as ``?args=<i>`` (``kwargs`` accepted as an alias). Defaults to 0,
+    clamped to the manifest's ``num_simulations`` ceiling (10). Pure (no ctx)
+    so it's unit-testable.
+    """
+    for key in ("args", "kwargs"):
+        v = kw.get(key)
+        if v is None:
+            continue
+        try:
+            return max(0, min(9, int(str(v).strip())))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
 class AgentSimulatorModule(Module):
     id = "agentsimulator"
 
@@ -69,12 +92,25 @@ class AgentSimulatorModule(Module):
 
     @route.get("/simulated-log")
     async def simulated_log(self, ctx: ModuleContext, **_kw: Any) -> dict[str, Any]:
-        """One representative simulated log as CSV text (download button)."""
-        csv = await ctx.cache.get("download_csv")
+        """One simulated log as CSV text (per-run download buttons).
+
+        The run index arrives as ``?args=<i>`` (see `_parse_log_index`). Index 0
+        falls back to the legacy single `download_csv` key so caches written
+        before per-run downloads still serve their one log.
+        """
+        idx = _parse_log_index(_kw)
+        csv = await ctx.cache.get(f"download_csv_{idx}")
+        if not csv and idx == 0:
+            csv = await ctx.cache.get("download_csv")
         if not csv:
             return {"status": "empty"}
         suffix = (ctx.log_id or "log")[:8]
-        return {"status": "ready", "filename": f"agentsim_simulated_{suffix}.csv", "csv": csv}
+        return {
+            "status": "ready",
+            "index": idx,
+            "filename": f"agentsim_simulated_{suffix}_run{idx + 1}.csv",
+            "csv": csv,
+        }
 
     # ── the simulation run ─────────────────────────────────────────────────
 
@@ -153,9 +189,26 @@ class AgentSimulatorModule(Module):
             "metrics": fidelity,
             **summaries,
         }
+        # Every simulated run is downloadable (`/simulated-log?args=<i>`). Write
+        # the CSVs *before* the result so the panel never lists a download that
+        # isn't in the cache yet. `download_csv` (= run 0) predates per-run
+        # downloads and stays for old caches/panels.
+        downloads: list[dict[str, Any]] = []
+        for i, sim_df in enumerate(sim_dfs):
+            csv_i = await asyncio.to_thread(adapter.to_download_csv, sim_df)
+            await ctx.cache.set(f"download_csv_{i}", csv_i)
+            if i == 0:
+                await ctx.cache.set("download_csv", csv_i)
+            act_col = "activity_name" if "activity_name" in sim_df.columns else "activity"
+            downloads.append(
+                {
+                    "index": i,
+                    "cases": int(sim_df["case_id"].nunique()),
+                    "events": int((sim_df[act_col].astype(str) != "zzz_end").sum()),
+                }
+            )
+        result["downloads"] = downloads
         await ctx.cache.set("result", result)
-        download_csv = await asyncio.to_thread(adapter.to_download_csv, sim_dfs[0])
-        await ctx.cache.set("download_csv", download_csv)
 
         try:
             await ctx.bus.emit(

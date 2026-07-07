@@ -82,6 +82,97 @@ def _read_arrow_cached(path: Path) -> Any:
     return table
 
 
+# Column-spec inference cache. `column_specs()` is on the hot path of every
+# Events-tab request (list/patch/filter-values/time-bounds/data-quality) and
+# used to re-read the *whole* Parquet file just to sample 2000 rows. The base
+# (override-free) specs only change when the file changes, so they are cached
+# by `(path, mtime_ns, size)`; per-request override labels/order are applied
+# to copies. Rewrites go through tmp+os.replace, which changes the key.
+_SPEC_CACHE: collections.OrderedDict[tuple[str, int, int], list[ColumnSpec]] = (
+    collections.OrderedDict()
+)
+_SPEC_CACHE_LOCK = threading.Lock()
+_SPEC_CACHE_MAX = 64
+_SPEC_SAMPLE_ROWS = 2000
+
+
+def file_identity(path: Path) -> tuple[str, int, int] | None:
+    """Stable identity of a Parquet file for mtime-guarded caches (None if unstat-able)."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (str(path), st.st_mtime_ns, st.st_size)
+
+
+def _read_head_pandas(path: Path, n: int) -> Any:
+    """First `n` rows of a Parquet file as pandas, without decoding the full file."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    pf = pq.ParquetFile(path)
+    batches = []
+    got = 0
+    for batch in pf.iter_batches(batch_size=min(n, 2048)):
+        batches.append(batch)
+        got += batch.num_rows
+        if got >= n:
+            break
+    if batches:
+        table = pa.Table.from_batches(batches, schema=pf.schema_arrow).slice(0, n)
+    else:
+        table = pf.schema_arrow.empty_table()
+    return table.to_pandas()
+
+
+def _infer_base_specs(path: Path) -> list[ColumnSpec]:
+    """Inference behind `column_specs()` (no overrides applied), cached per file."""
+    key = file_identity(path)
+    if key is not None:
+        with _SPEC_CACHE_LOCK:
+            hit = _SPEC_CACHE.get(key)
+            if hit is not None:
+                _SPEC_CACHE.move_to_end(key)
+                return hit
+
+    head = _read_head_pandas(path, _SPEC_SAMPLE_ROWS)
+    specs: list[ColumnSpec] = []
+    for col in head.columns:
+        series = head[col]
+        role: ColumnRole = CANONICAL_ROLES.get(col, "custom")
+        col_type = _infer_column_type(series)
+        enum_values: list[str] | None = None
+        if col_type == "string":
+            distinct = series.dropna().astype(str).unique().tolist()
+            if 0 < len(distinct) <= ENUM_DETECT_THRESHOLD:
+                # Lifecycle is the only column we treat as a closed
+                # vocabulary. For other low-cardinality strings we
+                # still surface the common values for UX suggestions
+                # but accept arbitrary input.
+                enum_values = sorted(distinct)
+                if role == "lifecycle":
+                    col_type = "enum"
+        specs.append(
+            ColumnSpec(
+                name=col,
+                label=_label_for(col, None),
+                role=role,
+                type=col_type,
+                nullable=True,
+                required=col in REQUIRED_COLUMNS,
+                enum_values=enum_values,
+            )
+        )
+
+    if key is not None:
+        with _SPEC_CACHE_LOCK:
+            _SPEC_CACHE[key] = specs
+            _SPEC_CACHE.move_to_end(key)
+            while len(_SPEC_CACHE) > _SPEC_CACHE_MAX:
+                _SPEC_CACHE.popitem(last=False)
+    return specs
+
+
 class EventLogAccess:
     """Async-context-manager view of a single log.
 
@@ -286,40 +377,19 @@ class EventLogAccess:
         per-column override JSON from `EventLog.column_overrides` can rename
         labels and reorder columns - the editor still treats the canonical
         `name` as authoritative.
+
+        Inference reads only the first `_SPEC_SAMPLE_ROWS` rows and is cached
+        per file identity; overrides are applied to copies per call.
         """
 
         def _inspect() -> list[ColumnSpec]:
-            import pandas as pd
-
-            head = pd.read_parquet(self._paths.events).head(2000)
-            specs: list[ColumnSpec] = []
-            for col in head.columns:
-                series = head[col]
-                role: ColumnRole = CANONICAL_ROLES.get(col, "custom")
-                col_type = _infer_column_type(series)
-                enum_values: list[str] | None = None
-                if col_type == "string":
-                    distinct = series.dropna().astype(str).unique().tolist()
-                    if 0 < len(distinct) <= ENUM_DETECT_THRESHOLD:
-                        # Lifecycle is the only column we treat as a closed
-                        # vocabulary. For other low-cardinality strings we
-                        # still surface the common values for UX suggestions
-                        # but accept arbitrary input.
-                        enum_values = sorted(distinct)
-                        if role == "lifecycle":
-                            col_type = "enum"
-                specs.append(
-                    ColumnSpec(
-                        name=col,
-                        label=_label_for(col, overrides),
-                        role=role,
-                        type=col_type,
-                        nullable=True,
-                        required=col in REQUIRED_COLUMNS,
-                        enum_values=enum_values,
-                    )
-                )
-            return _apply_column_order(specs, overrides)
+            base = _infer_base_specs(self._paths.events)
+            specs = [s.model_copy(deep=True) for s in base]
+            if overrides:
+                for spec in specs:
+                    spec.label = _label_for(spec.name, overrides)
+                specs = _apply_column_order(specs, overrides)
+            return specs
 
         return await asyncio.to_thread(_inspect)
 

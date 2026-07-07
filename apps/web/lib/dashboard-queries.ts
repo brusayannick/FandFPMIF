@@ -33,7 +33,7 @@ export interface DashboardItem {
   i: string;
   /** Discriminates the card type. Absent on legacy items (they predate the
    * field) ⇒ treated as "widget". */
-  kind?: "widget" | "viz" | "flow";
+  kind?: "widget" | "viz";
   /** widget cards: present when kind is "widget" (or legacy). */
   module_id?: string;
   widget_id?: string;
@@ -41,9 +41,6 @@ export interface DashboardItem {
   dataset_ref?: DatasetRef | null;
   viz_id?: string | null;
   mapping?: Record<string, unknown>;
-  /** flow cards: a flow's terminal viz node (viz config lives on the node). */
-  flow_id?: string | null;
-  node_id?: string | null;
   title?: string | null;
   x: number;
   y: number;
@@ -344,8 +341,23 @@ export function useUpdateDashboard(id: string) {
   return useMutation({
     mutationFn: (patch: DashboardPatch) =>
       api<DashboardDetail>(`/api/v1/dashboards/${id}`, { method: "PATCH", json: patch }),
+    onMutate: async (patch) => {
+      await qc.cancelQueries({ queryKey: dashboardKeys.detail(id) });
+      const prev = qc.getQueryData<DashboardDetail>(dashboardKeys.detail(id));
+      if (prev) {
+        qc.setQueryData<DashboardDetail>(dashboardKeys.detail(id), { ...prev, ...patch });
+      }
+      return { prev };
+    },
+    onError: (_e, _patch, ctx) => {
+      if (ctx?.prev) qc.setQueryData(dashboardKeys.detail(id), ctx.prev);
+    },
     onSuccess: (data) => {
+      // The PATCH returns the authoritative row – write it through so the
+      // detail cache reconciles without waiting for the refetch.
       qc.setQueryData(dashboardKeys.detail(id), data);
+    },
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: dashboardKeys.all() });
     },
   });

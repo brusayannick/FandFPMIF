@@ -19,20 +19,37 @@ export interface TourStep {
 
 /**
  * Build the step list, adapting to whether the user already has a ready event
- * log. The first leg (import flow) always runs. The discovery leg — the core of
- * the tour — only runs when there's a `demoLogId` to spotlight live; otherwise
- * the closing step explains that discovery unlocks once a log finishes
- * importing. This keeps the "live, end-to-end" tour robust for brand-new users
- * (who have no ready data yet) without faking a process map.
+ * log. The tour deliberately does NOT re-teach the import form — the setup
+ * wizard owns the hands-on upload (it embeds the very same `ImportForm`); the
+ * tour only points at where importing lives in the real UI, so the two
+ * first-run experiences complement instead of repeating each other. The
+ * discovery leg — the core of the tour — only runs when there's a `demoLogId`
+ * to spotlight live; otherwise the closing step explains that discovery
+ * unlocks once a log finishes importing. This keeps the "live, end-to-end"
+ * tour robust for brand-new users (who have no ready data yet) without faking
+ * a process map.
+ *
+ * `auto` = launched straight off the setup wizard's Finish: the opener
+ * acknowledges setup instead of greeting the user a second time.
  */
-export function buildTourSteps(demoLogId: string | null): TourStep[] {
+export function buildTourSteps(
+  demoLogId: string | null,
+  opts?: { auto?: boolean },
+): TourStep[] {
   const steps: TourStep[] = [
-    {
-      id: "welcome",
-      route: "/processes",
-      title: "Welcome to Mate",
-      body: "Mate turns raw event logs into living process maps. Two minutes on the platform's core: process discovery.",
-    },
+    opts?.auto
+      ? {
+          id: "welcome",
+          route: "/processes",
+          title: "Setup complete — now the live tour",
+          body: "Two minutes in the real UI: where your data lives and how process discovery — the platform's core — works. Skip anytime; replay later from Settings → About.",
+        }
+      : {
+          id: "welcome",
+          route: "/processes",
+          title: "Welcome to Mate",
+          body: "Mate turns raw event logs into living process maps. Two minutes on the platform's core: process discovery.",
+        },
     {
       id: "nav-processes",
       route: "/processes",
@@ -47,15 +64,7 @@ export function buildTourSteps(demoLogId: string | null): TourStep[] {
       selector: '[data-tour="import-log"]',
       placement: "bottom",
       title: "Bring in your data",
-      body: "Import a log from a file (XES / CSV), a URL, a folder, or a watched source. Mate auto-detects cases, activities and timestamps.",
-    },
-    {
-      id: "import-form",
-      route: "/processes/import",
-      selector: '[data-tour="import-form"]',
-      placement: "top",
-      title: "Map once, mine forever",
-      body: "Pick a source and confirm the column mapping. The log is stored as Parquet so modules query it in milliseconds. (We'll skip the upload for the tour.)",
+      body: "New data lands here — upload a file, pull from a URL, or connect a watched folder that imports new logs automatically.",
     },
   ];
 
@@ -116,8 +125,8 @@ export function buildTourSteps(demoLogId: string | null): TourStep[] {
     id: "done",
     title: demoLogId ? "You've seen the core" : "Import a log to start mining",
     body: demoLogId
-      ? "That's process discovery. Every other module builds on this map. Replay this tour anytime from Settings → General."
-      : "Once your first log finishes importing, open it and the Discovery panel draws your process map. Replay this tour from Settings → General.",
+      ? "That's process discovery. Every other module builds on this map. Replay this tour anytime from Settings → About."
+      : "Once your first log finishes importing, open it and the Discovery panel draws your process map. Replay this tour from Settings → About.",
   });
 
   return steps;

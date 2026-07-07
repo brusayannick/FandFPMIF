@@ -1,17 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Compass, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { toastError } from "@/lib/toast";
+import { useTour } from "@/lib/stores/tour";
 
 export default function AboutPage() {
   const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);
+  const startTour = useTour((s) => s.start);
 
   const onCopyDiagnostics = async () => {
     setCopying(true);
@@ -31,7 +33,7 @@ export default function AboutPage() {
 
   return (
     <div className="space-y-4">
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">About PM-MATE</CardTitle>
         </CardHeader>
@@ -43,7 +45,28 @@ export default function AboutPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
+        <CardHeader>
+          <CardTitle className="text-base">Product tour</CardTitle>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between gap-4">
+          <p className="text-xs text-muted-foreground">
+            Replay the interactive walkthrough of process discovery — the
+            platform&apos;s core feature. It guides you from importing a log to
+            reading your mined process map.
+          </p>
+          <Button
+            variant="outline"
+            className="shrink-0 cursor-pointer gap-2"
+            onClick={() => startTour()}
+          >
+            <Compass className="h-4 w-4" />
+            Restart product tour
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Diagnostics</CardTitle>
         </CardHeader>

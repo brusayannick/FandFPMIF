@@ -25,10 +25,24 @@ export function CardShell({
   return <div className="h-full">{children}</div>;
 }
 
-export function KpiTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
+export function KpiTile({
+  label,
+  value,
+  hint,
+  info,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  /** Optional ⓘ hover explanation rendered next to the label. */
+  info?: ReactNode;
+}) {
   return (
     <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+        <span className="truncate">{label}</span>
+        {info}
+      </div>
       <div className="mt-0.5 truncate text-lg font-semibold tabular-nums tracking-tight">
         {value}
       </div>

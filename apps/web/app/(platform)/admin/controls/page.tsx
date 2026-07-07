@@ -497,7 +497,7 @@ function Cv4cddModelManager({ item }: { item: ControlItem }) {
   const models = modelsQ.data?.models ?? [];
 
   return (
-    <Card>
+    <Card variant="glass">
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">

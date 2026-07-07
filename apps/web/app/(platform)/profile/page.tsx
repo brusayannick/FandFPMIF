@@ -22,7 +22,7 @@ export default function ProfilePage() {
 
   return (
     <PageContainer className="space-y-4">
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Profile</CardTitle>
         </CardHeader>
@@ -60,7 +60,7 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card variant="glass">
         <CardHeader>
           <CardTitle className="text-base">Session</CardTitle>
         </CardHeader>

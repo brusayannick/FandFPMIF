@@ -8,11 +8,11 @@ export payload is a straight passthrough.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from mate.api.schemas.common import UtcDateTime
 from mate.api.schemas.event_logs import LogModel
 
 # Canvas grid granularity - how finely cards snap and how much they're spaced.
@@ -75,7 +75,7 @@ class DashboardItem(BaseModel):
     and keep working, so no migration is needed."""
 
     i: str  # stable client id for this placement
-    kind: Literal["widget", "viz", "flow"] = "widget"
+    kind: Literal["widget", "viz"] = "widget"
     # widget cards: both required when kind == "widget".
     module_id: str | None = None
     widget_id: str | None = None
@@ -86,11 +86,6 @@ class DashboardItem(BaseModel):
     viz_id: str | None = None
     # Field-mapping: viz field key -> column id (or list). Opaque to the backend.
     mapping: dict[str, Any] = Field(default_factory=dict)
-    # flow cards: render a flow's terminal viz node. The viz config (viz_id,
-    # mapping, options) lives on the flow node itself, so only the reference is
-    # stored here.
-    flow_id: str | None = None
-    node_id: str | None = None
     title: str | None = None
     x: int = Field(default=0, ge=0, le=59)
     y: int = 0
@@ -108,9 +103,6 @@ class DashboardItem(BaseModel):
         elif self.kind == "viz":
             if self.dataset_ref is None:
                 raise ValueError("A viz card requires dataset_ref.")
-        elif self.kind == "flow":
-            if not self.flow_id or not self.node_id:
-                raise ValueError("A flow card requires flow_id and node_id.")
         return self
 
 
@@ -125,7 +117,7 @@ class DashboardSummary(BaseModel):
     event_log_id: str | None = None
     log_model: LogModel = "case_centric"
     card_count: int = 0
-    updated_at: datetime
+    updated_at: UtcDateTime
 
 
 class DashboardDetail(BaseModel):
@@ -136,8 +128,8 @@ class DashboardDetail(BaseModel):
     log_model: LogModel = "case_centric"
     items: list[DashboardItem] = Field(default_factory=list)
     settings: CanvasSettings = Field(default_factory=CanvasSettings)
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
     # False when the board was opened via a share - the UI then renders it
     # read-only (no edit toolbar, no save). The owner-only mutation routes also
     # 404 for a non-owner, so this is defence-in-depth, not the only gate.

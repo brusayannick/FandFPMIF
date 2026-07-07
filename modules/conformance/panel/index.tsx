@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Bar,
@@ -15,7 +15,13 @@ import { Play, Sparkles, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,12 +37,17 @@ import { formatNumber } from "@/lib/format";
 import { subscribeJob } from "@/lib/ws";
 
 import { ConformanceBpmnCanvas } from "./canvases/ConformanceBpmnCanvas";
-import { buildDeviationMaps } from "./conformance-decorate";
+import { buildDeviationMaps, CONF_COLORS, DEV_BUCKETS, devColor } from "./conformance-decorate";
 import { DeviationTable } from "./deviation-table";
 import { LabelReportBanner } from "./label-report";
 import { ModelManager } from "./model-manager";
 import { confKeys, useConformanceResults, useRunConformance } from "./queries";
 import type { Technique } from "./types";
+
+/** One shared definition of "deviation" (KPI tooltip + breakdown subtitle). */
+const DEVIATION_EXPLAINER =
+  "Steps where the recorded process differs from the reference model — either an " +
+  "activity happened that the model doesn't allow, or a required activity was skipped.";
 
 export default function ConformancePanel({ logId }: { logId: string; moduleId: string }) {
   const qc = useQueryClient();
@@ -154,7 +165,12 @@ export default function ConformancePanel({ logId }: { logId: string; moduleId: s
               hint={data.precision_skipped ?? undefined}
             />
             <KpiTile label="Conforming traces" value={pct01(kpis?.perc_fit_traces)} />
-            <KpiTile label="Deviations" value={formatNumber(kpis?.total_deviations ?? 0)} tone="danger" />
+            <KpiTile
+              label="Deviations"
+              value={formatNumber(kpis?.total_deviations ?? 0)}
+              tone="danger"
+              title={DEVIATION_EXPLAINER}
+            />
           </div>
 
           <Card>
@@ -188,7 +204,11 @@ export default function ConformancePanel({ logId }: { logId: string; moduleId: s
                   <Skeleton className="h-full w-full" />
                 )}
               </div>
-              <Legend />
+              <Legend
+                heatmap={decor.heatmap}
+                labels={decor.labels}
+                alignments={technique === "alignments"}
+              />
             </CardContent>
           </Card>
 
@@ -225,7 +245,12 @@ export default function ConformancePanel({ logId }: { logId: string; moduleId: s
                         formatter={(v: number) => [formatNumber(v), "Deviations"]}
                         contentStyle={{ fontSize: 12 }}
                       />
-                      <Bar dataKey="deviations" className="fill-red-500/80" radius={[0, 3, 3, 0]} />
+                      <Bar
+                        dataKey="deviations"
+                        fill={CONF_COLORS.chart}
+                        fillOpacity={0.8}
+                        radius={[0, 3, 3, 0]}
+                      />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -236,6 +261,7 @@ export default function ConformancePanel({ logId }: { logId: string; moduleId: s
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Deviation breakdown</CardTitle>
+              <CardDescription className="text-xs">{DEVIATION_EXPLAINER}</CardDescription>
             </CardHeader>
             <CardContent>
               <DeviationTable
@@ -271,19 +297,29 @@ function KpiTile({
   value,
   tone,
   hint,
+  title,
 }: {
   label: string;
   value: string;
   tone?: "primary" | "danger";
   hint?: string;
+  /** Native tooltip explaining what the number means. */
+  title?: string;
 }) {
   return (
-    <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+    <div
+      className="rounded-md border border-border/60 bg-muted/20 px-3 py-2"
+      // Inline cursor: `cursor-help` is not compiled for module sources.
+      style={title ? { cursor: "help" } : undefined}
+      title={title}
+    >
       <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
       <div
         className={
           "mt-0.5 truncate text-lg font-semibold tabular-nums tracking-tight" +
-          (tone === "primary" ? " text-primary" : tone === "danger" ? " text-red-600 dark:text-red-500" : "")
+          // `text-destructive` (theme token) - raw palette classes like
+          // `text-red-600` are not compiled for module sources.
+          (tone === "primary" ? " text-primary" : tone === "danger" ? " text-destructive" : "")
         }
       >
         {value}
@@ -318,29 +354,91 @@ function ToggleSwitch({
   );
 }
 
-function Legend() {
+/**
+ * Legend mirroring exactly what the canvas paints: same colours (via
+ * `CONF_COLORS` / `devColor`, the source of truth for the injected canvas CSS),
+ * same discrete red buckets, and only the entries whose toggle is on. Swatch
+ * colours are inline styles - Tailwind palette classes used only in module
+ * sources are never compiled, so classed swatches render empty.
+ */
+function Legend({
+  heatmap,
+  labels,
+  alignments,
+}: {
+  heatmap: boolean;
+  labels: boolean;
+  alignments: boolean;
+}) {
+  if (!heatmap && !labels) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-      <LegendSwatch className="bg-emerald-500/30 border-emerald-500/60" label="Conforming" />
-      <span className="inline-flex items-center gap-1.5">
-        <span
-          className="h-3 w-8 rounded-sm border border-red-500/70 bg-gradient-to-r from-red-500/15 to-red-600/90"
-          aria-hidden
-        />
-        Deviating — deeper red = more deviations
-      </span>
-      <LegendSwatch
-        className="border-dashed border-amber-500/70 bg-amber-500/20"
-        label="Model task not found in log"
-      />
+      {heatmap ? (
+        <>
+          <LegendSwatch
+            style={{ background: CONF_COLORS.ok.fill, borderColor: CONF_COLORS.ok.stroke }}
+            label="Conforming — in the model and replayed without deviations"
+          />
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="inline-flex h-3 w-10 overflow-hidden rounded-sm border"
+              style={{ borderColor: devColor(1).stroke }}
+              aria-hidden
+            >
+              {Array.from({ length: DEV_BUCKETS }, (_, i) => (
+                <span
+                  key={i}
+                  className="h-full flex-1"
+                  style={{ background: devColor((i + 1) / DEV_BUCKETS).fill }}
+                />
+              ))}
+            </span>
+            Deviating — the log breaks from the model here (darker = more deviations)
+          </span>
+          <LegendSwatch
+            dashed
+            style={{
+              background: CONF_COLORS.unmatched.fill,
+              borderColor: CONF_COLORS.unmatched.stroke,
+            }}
+            label="In the model but never in the log — check the activity name"
+          />
+        </>
+      ) : null}
+      {labels ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="rounded-md px-1 py-px text-[10px] font-semibold leading-none text-white"
+            style={{ background: CONF_COLORS.badge }}
+            aria-hidden
+          >
+            {alignments ? "+2 −1" : "12"}
+          </span>
+          {alignments
+            ? "+n happened in the log but not allowed by the model · −n required by the model but skipped in the log"
+            : "Deviation count at this step"}
+        </span>
+      ) : null}
     </div>
   );
 }
 
-function LegendSwatch({ className, label }: { className: string; label: string }) {
+function LegendSwatch({
+  style,
+  label,
+  dashed,
+}: {
+  style: CSSProperties;
+  label: string;
+  dashed?: boolean;
+}) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className={`h-3 w-4 rounded-sm border ${className}`} aria-hidden />
+      <span
+        className="h-3 w-4 rounded-sm border"
+        style={{ ...style, ...(dashed ? { borderStyle: "dashed" } : null) }}
+        aria-hidden
+      />
       {label}
     </span>
   );

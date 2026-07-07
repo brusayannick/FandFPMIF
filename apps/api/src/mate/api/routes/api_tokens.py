@@ -22,6 +22,7 @@ from mate.api.db.session import SessionDep
 from mate.api.mcp.consent import MCP_EGRESS_CONSENT_KEY
 from mate.api.mcp.governance import get_mint_policy, may_mint
 from mate.api.mcp.scopes import ALL_SCOPES, SCOPE_DESCRIPTIONS, sanitize_scopes
+from mate.api.schemas.common import utc_isoformat
 
 router = APIRouter(prefix="/api-tokens", tags=["api-tokens"])
 
@@ -88,9 +89,9 @@ def _to_info(row: ApiToken) -> TokenInfo:
         name=row.name,
         token_prefix=row.token_prefix,
         scopes=list(row.scopes or []),
-        created_at=row.created_at.isoformat(),
-        last_used_at=row.last_used_at.isoformat() if row.last_used_at else None,
-        expires_at=row.expires_at.isoformat() if row.expires_at else None,
+        created_at=utc_isoformat(row.created_at),
+        last_used_at=utc_isoformat(row.last_used_at) if row.last_used_at else None,
+        expires_at=utc_isoformat(row.expires_at) if row.expires_at else None,
         revoked=row.revoked,
     )
 

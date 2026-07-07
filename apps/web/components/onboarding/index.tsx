@@ -79,7 +79,8 @@ export function OnboardingOverlay() {
       router.push(`/processes?focus=${uploadedLogId}`);
     }
     // Chain straight into the interactive product tour the first time the wizard
-    // is finished (skippable, and replayable later from Settings / the topbar).
+    // is finished (skippable, and replayable later from Settings → About). Gated
+    // on the per-user flag so it can never re-trigger on a later session.
     if (!onboardingQuery.data?.tour_completed) startTour({ auto: true });
   };
 

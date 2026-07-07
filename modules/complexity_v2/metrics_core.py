@@ -22,6 +22,20 @@ The ``prob-act-pairs`` metric (Grisold et al., 2022) is a transition
 *matrix*, not a scalar - :func:`transition_probability_matrix` returns it for
 the panel's heatmap, mirroring the thesis appendix D.
 
+Performance notes (the suite must finish on 100k+-event, 1000+-variant logs):
+
+* The log is sorted **once**; every sequence-derived metric (variants,
+  directly-follows edges, order variation, deviation-from-random, LZ,
+  transition matrix, inter-event gaps) reads the shared :class:`_Prep`
+  arrays instead of re-sorting / re-grouping per metric.
+* ``affinity`` is exact but vectorised: variants are grouped by their
+  directly-follows pattern set and the pairwise Jaccard sum becomes a
+  blocked float32 matmul over the pattern-incidence matrix (documented
+  top-frequency truncation only beyond :data:`_AFFINITY_MAX_PATTERNS`).
+* Pairwise Levenshtein uses Myers' bit-parallel algorithm (O(len/w) words
+  per DP column instead of a full Python DP row), with a documented
+  word-op budget that shrinks the variant selection for extreme logs.
+
 Everything is pure-function and self-contained: the module never imports from
 ``apps/*`` or a sibling module.
 """
@@ -30,8 +44,8 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from collections.abc import Hashable
-from statistics import mean
+from collections.abc import Hashable, Sequence
+from itertools import pairwise
 from typing import Any
 
 import numpy as np
@@ -279,6 +293,78 @@ METRIC_DEFS: list[dict[str, str]] = [
 CATEGORY_ORDER: list[str] = ["Entropy", "Enriched Entropy", "Size", "Variation", "Distance"]
 
 
+# ── Shared single-pass preparation ────────────────────────────────────────────
+#
+# Every sequence-derived metric used to re-sort the full log and re-group it
+# with a per-case Python loop (7 sorts + 5 groupby loops per compute_all run).
+# `_Prep` does it once: one stable timestamp sort, integer-coded activities
+# and cases, and a case-contiguous view whose within-case order equals the
+# global timestamp order - exactly what `sort_values("timestamp",
+# kind="mergesort").groupby("case_id", sort=False)` produced before.
+
+
+class _Prep:
+    __slots__ = (
+        "act_labels",
+        "bounds",
+        "counts",
+        "grp_act",
+        "grp_case",
+        "grp_ts_i8",
+        "n_cases",
+        "n_events",
+        "seqs",
+        "stream_act",
+        "stream_case",
+    )
+
+    def __init__(self, df: pd.DataFrame) -> None:
+        work = df.sort_values("timestamp", kind="mergesort")  # NaT sorts last
+
+        acts = work["activity"].astype(str).to_numpy()
+        self.act_labels, stream_act = np.unique(acts, return_inverse=True)
+        self.stream_act = stream_act.astype(np.int64, copy=False)
+        self.stream_case = pd.factorize(work["case_id"].to_numpy())[0]
+
+        ts = pd.to_datetime(work["timestamp"], errors="coerce", utc=True)
+        ts_i8 = ts.to_numpy(dtype="datetime64[ns]").view("int64")
+
+        self.n_events = len(work)
+        self.n_cases = int(self.stream_case.max()) + 1 if self.n_events else 0
+
+        # Case-contiguous view, within-case order = global timestamp order.
+        order = np.argsort(self.stream_case, kind="stable")
+        self.grp_act = self.stream_act[order]
+        self.grp_case = self.stream_case[order]
+        self.grp_ts_i8 = ts_i8[order]
+        if self.n_events:
+            change = np.flatnonzero(self.grp_case[1:] != self.grp_case[:-1]) + 1
+            self.bounds = np.concatenate(([0], change, [self.n_events]))
+        else:
+            self.bounds = np.array([0], dtype=np.int64)
+
+        self.seqs: list[tuple[int, ...]] = [
+            tuple(self.grp_act[s:e].tolist()) for s, e in pairwise(self.bounds)
+        ]
+        self.counts: Counter[tuple[int, ...]] = Counter(self.seqs)
+
+    def transitions(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Directly-follows pairs: (src_codes, dst_codes, grouped-row index of dst)."""
+        if self.n_events < 2:
+            empty = np.array([], dtype=np.int64)
+            return empty, empty, empty
+        same = self.grp_case[1:] == self.grp_case[:-1]
+        idx = np.flatnonzero(same) + 1
+        return self.grp_act[idx - 1], self.grp_act[idx], idx
+
+    def label_seq(self, seq: tuple[int, ...]) -> tuple[str, ...]:
+        return tuple(str(self.act_labels[c]) for c in seq)
+
+
+def _get_prep(df: pd.DataFrame, prep: _Prep | None = None) -> _Prep:
+    return prep if prep is not None else _Prep(df)
+
+
 # ── EPA construction (faithful to the thesis reference implementation) ─────────
 
 
@@ -286,17 +372,18 @@ def build_epa(
     df: pd.DataFrame,
     *,
     key_fn: Any = None,
+    prep: _Prep | None = None,
 ) -> tuple[dict[int, State], dict[int, list[int]]]:
     """Build the Extended Prefix Automaton in global timestamp order.
 
     ``key_fn`` decides what makes two events follow the *same* successor edge.
     Default is the activity label; the enriched variant also keys on the
-    selected event/trace attributes.
+    selected event/trace attributes. The default path runs over pre-coded
+    integer arrays (one shared sort) instead of ``itertuples``.
     """
     if key_fn is None:
-
-        def key_fn(row: Any) -> Hashable:
-            return row.activity
+        p = _get_prep(df, prep)
+        return _build_epa_coded(p.stream_case, p.stream_act, p.act_labels)
 
     df_sorted = df.sort_values("timestamp", kind="mergesort")
 
@@ -338,12 +425,55 @@ def build_epa(
         states[curr_id]["n_events"] += 1
         last_state[case_id] = curr_id
 
+    return states, _c_index_of(states, next_id)
+
+
+def _build_epa_coded(
+    case_codes: np.ndarray, act_codes: np.ndarray, act_labels: np.ndarray
+) -> tuple[dict[int, State], dict[int, list[int]]]:
+    """Array fast path of :func:`build_epa` - identical automaton, int edge keys."""
+    states: dict[int, State] = {
+        0: {"c": 0, "j": 0, "children": {}, "n_events": 0, "activity": None}
+    }
+    last_state: dict[int, int] = {}
+    c_counter = 1
+    next_id = 1
+
+    for case_id, act in zip(case_codes.tolist(), act_codes.tolist(), strict=True):
+        pred_id = last_state.get(case_id, 0)
+        pred = states[pred_id]
+        children = pred["children"]
+
+        curr_id = children.get(act)
+        if curr_id is None:
+            if children:
+                c_counter += 1
+                curr_c = c_counter
+            else:
+                curr_c = pred["c"] if pred_id != 0 else c_counter
+
+            states[next_id] = {
+                "c": curr_c,
+                "j": pred["j"] + 1,
+                "children": {},
+                "n_events": 0,
+                "activity": str(act_labels[act]),
+            }
+            children[act] = next_id
+            curr_id = next_id
+            next_id += 1
+
+        states[curr_id]["n_events"] += 1
+        last_state[case_id] = curr_id
+
+    return states, _c_index_of(states, next_id)
+
+
+def _c_index_of(states: dict[int, State], next_id: int) -> dict[int, list[int]]:
     c_index: dict[int, list[int]] = {}
     for sid in range(1, next_id):
-        c = states[sid]["c"]
-        c_index.setdefault(c, []).append(sid)
-
-    return states, c_index
+        c_index.setdefault(states[sid]["c"], []).append(sid)
+    return c_index
 
 
 def _boltzmann(total: float, partition_sizes: list[float]) -> tuple[float, float]:
@@ -392,74 +522,162 @@ def n_ties(states: dict[int, State]) -> int:
 # ── Lempel-Ziv complexity ─────────────────────────────────────────────────────
 
 
-def lempel_ziv_complexity(df: pd.DataFrame) -> int:
-    activities = df.sort_values("timestamp", kind="mergesort")["activity"].tolist()
-    if not activities:
-        return 0
-    vocab = {a: i for i, a in enumerate(sorted({str(a) for a in activities}))}
-    seq = tuple(vocab[str(a)] for a in activities)
+def _lz76_phrases(codes: Sequence[int]) -> int:
+    """LZ76 phrase count via an incremental trie - O(n) total instead of the
+    O(n·k) tuple-slice hashing of the previous ``seq[i:i+k] in seen`` scan.
 
-    n = len(seq)
-    seen: set[tuple[int, ...]] = set()
-    complexity = 0
+    Identical parse: every phrase extends an already-seen phrase by one
+    symbol, so the seen-set is exactly a trie; walking it consumes each
+    symbol once.
+    """
+    n = len(codes)
+    if n == 0:
+        return 0
+    root: dict[int, Any] = {}
+    phrases = 0
     i = 0
     while i < n:
-        k = 1
-        while i + k <= n and seq[i : i + k] in seen:
-            k += 1
-        seen.add(seq[i : i + k])
-        complexity += 1
-        i += k
-    return complexity
+        node = root
+        j = i
+        while j < n:
+            nxt = node.get(codes[j])
+            if nxt is None:
+                node[codes[j]] = {}
+                break
+            node = nxt
+            j += 1
+        phrases += 1
+        i = j + 1
+    return phrases
+
+
+def lempel_ziv_complexity(df: pd.DataFrame, *, prep: _Prep | None = None) -> int:
+    p = _get_prep(df, prep)
+    return _lz76_phrases(p.stream_act.tolist())
 
 
 # ── Variant / DF-pattern helpers ──────────────────────────────────────────────
 
 
-def variant_counts(df: pd.DataFrame) -> dict[tuple[str, ...], int]:
-    counts: dict[tuple[str, ...], int] = {}
-    for _, group in df.sort_values("timestamp", kind="mergesort").groupby("case_id", sort=False):
-        acts = tuple(str(a) for a in group["activity"].tolist())
-        counts[acts] = counts.get(acts, 0) + 1
-    return counts
+def variant_counts(df: pd.DataFrame, *, prep: _Prep | None = None) -> dict[tuple[str, ...], int]:
+    p = _get_prep(df, prep)
+    out: dict[tuple[str, ...], int] = {}
+    for seq, c in p.counts.items():
+        out[p.label_seq(seq)] = c
+    return out
 
 
-def _df_patterns(counts: dict[tuple[str, ...], int]) -> dict[tuple[str, ...], set[tuple[str, str]]]:
-    return {acts: {(acts[i - 1], acts[i]) for i in range(1, len(acts))} for acts in counts}
+def _df_patterns(
+    counts: dict[tuple[Hashable, ...], int],
+) -> dict[tuple[Hashable, ...], set[tuple[Hashable, Hashable]]]:
+    return {acts: set(pairwise(acts)) for acts in counts}
 
 
-def _df_edges_and_vertices(df: pd.DataFrame, counts: dict[tuple[str, ...], int]) -> tuple[int, int]:
+def _df_edges_and_vertices(
+    df: pd.DataFrame,
+    counts: dict[tuple[Hashable, ...], int] | None = None,
+    *,
+    prep: _Prep | None = None,
+) -> tuple[int, int]:
     """Distinct directly-follows edges (e) and distinct activities (v)."""
-    v = int(df["activity"].nunique())
-    edges: set[tuple[str, str]] = set()
-    for pat in _df_patterns(counts).values():
-        edges |= pat
-    return len(edges), v
+    p = _get_prep(df, prep)
+    v = len(p.act_labels)
+    src, dst, _ = p.transitions()
+    if src.size == 0:
+        return 0, v
+    e = int(np.unique(src * np.int64(max(v, 1)) + dst).size)
+    return e, v
 
 
 # ── Distance - affinity / structure / deviation from random ───────────────────
 
+# Exact affinity only depends on each variant's directly-follows pattern
+# *set*, so variants with identical patterns collapse into one group and the
+# pairwise Jaccard sum becomes a blocked float32 matmul over the groupxedge
+# incidence matrix. Beyond the caps below the least-frequent pattern groups
+# are dropped and the metric is computed over the retained trace population -
+# a documented approximation for logs where the exact U² sum is intractable.
+_AFFINITY_MAX_PATTERNS = 4000
+# Bound on the dense groupxedge incidence matrix (float32 cells ≈ 200 MB).
+_AFFINITY_MAX_CELLS = 50_000_000
+_AFFINITY_BLOCK_ROWS = 1024
 
-def affinity(counts: dict[tuple[str, ...], int]) -> float | None:
+
+def affinity(counts: dict[tuple[Hashable, ...], int]) -> float | None:
+    """Average affinity (Günther 2009): mean over ordered case pairs of the
+    Jaccard similarity of their DF pattern sets.
+
+    Vectorised but numerically identical to the naive O(V²) double loop:
+    ``m = Σ_{g,h} J(g,h)·C_g·C_h  (nonempty pattern groups)
+         + Σ_{empty-pattern variants} c²  -  N``
+    and ``affinity = m / (N·(N-1))`` - same-variant pairs contribute
+    ``c·(c-1)`` and empty-vs-empty cross-variant pairs contribute 0, exactly
+    as before.
+    """
     total_cases = sum(counts.values())
     if total_cases < 2:
         return None
-    patterns = _df_patterns(counts)
-    variants = list(counts.keys())
 
-    m_affinity = 0.0
-    for i, v1 in enumerate(variants):
-        for j, v2 in enumerate(variants):
-            if i != j:
-                overlap = len(patterns[v1] & patterns[v2])
-                union = len(patterns[v1] | patterns[v2])
-                if union > 0:
-                    m_affinity += (overlap / union) * counts[v1] * counts[v2]
-            else:
-                c = counts[v1]
-                m_affinity += c * (c - 1)
+    pattern_counts: dict[frozenset, int] = {}
+    empty_sq = 0.0
+    empty_total = 0
+    for acts, c in counts.items():
+        if len(acts) > 1:
+            pat = frozenset(pairwise(acts))
+            pattern_counts[pat] = pattern_counts.get(pat, 0) + c
+        else:
+            empty_sq += float(c) * float(c)
+            empty_total += c
 
-    denom = total_cases * (total_cases - 1)
+    # Deterministic order: by weight desc, then pattern size (tie-break only).
+    patterns = sorted(pattern_counts.items(), key=lambda kv: (-kv[1], len(kv[0])))
+    if len(patterns) > _AFFINITY_MAX_PATTERNS:
+        patterns = patterns[:_AFFINITY_MAX_PATTERNS]
+    while patterns:
+        edge_freq: Counter = Counter(e for pat, _ in patterns for e in pat)
+        n_shared = sum(1 for n in edge_freq.values() if n >= 2)
+        if len(patterns) * max(n_shared, 1) <= _AFFINITY_MAX_CELLS:
+            break
+        patterns = patterns[: max(len(patterns) // 2, 1)]
+
+    included_cases = float(sum(c for _, c in patterns)) + float(empty_total)
+    if included_cases < 2:
+        return None
+
+    m_nonempty = 0.0
+    if patterns:
+        # Only edges shared by ≥2 patterns can contribute *cross*-pattern
+        # overlap; union sizes still use each pattern's full edge count. The
+        # diagonal (a pattern vs itself) is exactly J=1 and is set
+        # analytically because dropped single-pattern edges would otherwise
+        # undercount self-overlap. Edges are sorted for run-to-run
+        # determinism of the float summation order.
+        edge_freq = Counter(e for pat, _ in patterns for e in pat)
+        edge_idx = {e: i for i, e in enumerate(sorted(e for e, n in edge_freq.items() if n >= 2))}
+        u = len(patterns)
+        sizes = np.array([float(len(pat)) for pat, _ in patterns])
+        weights = np.array([float(c) for _, c in patterns])
+
+        # Diagonal contribution: J_gg = 1 → Σ_g C_g².
+        m_nonempty = float(np.sum(weights * weights))
+
+        if edge_idx:
+            m_mat = np.zeros((u, len(edge_idx)), dtype=np.float32)
+            for i, (pat, _) in enumerate(patterns):
+                cols = [edge_idx[e] for e in pat if e in edge_idx]
+                if cols:
+                    m_mat[i, cols] = 1.0
+            for s in range(0, u, _AFFINITY_BLOCK_ROWS):
+                blk = m_mat[s : s + _AFFINITY_BLOCK_ROWS]
+                overlap = (blk @ m_mat.T).astype(np.float64)
+                union = sizes[s : s + _AFFINITY_BLOCK_ROWS, None] + sizes[None, :] - overlap
+                jac = overlap / union  # patterns are nonempty → union ≥ 1
+                rows = np.arange(s, min(s + _AFFINITY_BLOCK_ROWS, u))
+                jac[rows - s, rows] = 0.0  # diagonal handled analytically
+                m_nonempty += float(weights[s : s + _AFFINITY_BLOCK_ROWS] @ jac @ weights)
+
+    m_affinity = m_nonempty + empty_sq - included_cases
+    denom = included_cases * (included_cases - 1)
     return m_affinity / denom if denom else None
 
 
@@ -469,88 +687,93 @@ def structure(e: int, v: int) -> float | None:
     return 1.0 - e / (v * v)
 
 
-def deviation_from_random(df: pd.DataFrame) -> float | None:
-    activities = df["activity"].astype(str).unique().tolist()
-    v = len(activities)
+def deviation_from_random(df: pd.DataFrame, *, prep: _Prep | None = None) -> float | None:
+    p = _get_prep(df, prep)
+    v = len(p.act_labels)
     if v == 0:
         return None
-    idx = {a: i for i, a in enumerate(activities)}
-    net = [[0] * v for _ in range(v)]
-    n_trans = 0
-    for _, group in df.sort_values("timestamp", kind="mergesort").groupby("case_id", sort=False):
-        acts = [str(a) for a in group["activity"].tolist()]
-        for i in range(1, len(acts)):
-            net[idx[acts[i - 1]]][idx[acts[i]]] += 1
-            n_trans += 1
+    src, dst, _ = p.transitions()
+    n_trans = int(src.size)
     if n_trans == 0:
         return None
+    net = np.bincount(src * np.int64(v) + dst, minlength=v * v).astype(np.float64)
     a_mean = n_trans / (v * v)
-    dev = math.sqrt(sum(((c - a_mean) / n_trans) ** 2 for row in net for c in row))
+    dev = math.sqrt(float(np.sum(((net - a_mean) / n_trans) ** 2)))
     return 1.0 - dev
 
 
 # ── Variation - order / activity variation ────────────────────────────────────
 
 
-def order_variation(df: pd.DataFrame) -> float | None:
+def order_variation(df: pd.DataFrame, *, prep: _Prep | None = None) -> float | None:
     """Activity-type transitions (consecutive events whose type changes)
     divided by the total number of events (Lindberg et al., 2016)."""
-    total_events = len(df)
-    if total_events == 0:
+    p = _get_prep(df, prep)
+    if p.n_events == 0:
         return None
-    changes = 0
-    for _, group in df.sort_values("timestamp", kind="mergesort").groupby("case_id", sort=False):
-        acts = [str(a) for a in group["activity"].tolist()]
-        for i in range(1, len(acts)):
-            if acts[i] != acts[i - 1]:
-                changes += 1
-    return changes / total_events
+    src, dst, _ = p.transitions()
+    changes = int(np.count_nonzero(src != dst))
+    return changes / p.n_events
 
 
-def activity_variation(df: pd.DataFrame) -> float | None:
+def activity_variation(df: pd.DataFrame, *, prep: _Prep | None = None) -> float | None:
     """Shannon entropy (natural log) over the activity-occurrence shares
     (Lindberg et al., 2016)."""
-    total = len(df)
-    if total == 0:
+    p = _get_prep(df, prep)
+    if p.n_events == 0:
         return None
-    counts = Counter(str(a) for a in df["activity"].tolist())
-    h = 0.0
-    for n in counts.values():
-        p = n / total
-        if p > 0:
-            h -= p * math.log(p)
-    return h
+    freq = np.bincount(p.stream_act, minlength=len(p.act_labels)).astype(np.float64)
+    probs = freq[freq > 0] / p.n_events
+    return float(-np.sum(probs * np.log(probs)))
 
 
 # ── Size - sequence-length stats & avg time diff ──────────────────────────────
 
 
-def seq_len_stats(df: pd.DataFrame) -> dict[str, float]:
-    lengths = df.groupby("case_id").size().tolist()
-    if not lengths:
+def seq_len_stats(df: pd.DataFrame, *, prep: _Prep | None = None) -> dict[str, float]:
+    p = _get_prep(df, prep)
+    lengths = np.diff(p.bounds)
+    if lengths.size == 0:
         return {"min": 0.0, "avg": 0.0, "max": 0.0}
-    return {"min": float(min(lengths)), "avg": float(mean(lengths)), "max": float(max(lengths))}
+    return {
+        "min": float(lengths.min()),
+        "avg": float(lengths.mean()),
+        "max": float(lengths.max()),
+    }
 
 
-def avg_time_diff(df: pd.DataFrame) -> float | None:
+_I8_NAT = np.int64(np.datetime64("NaT", "ns").view("int64"))
+
+
+def avg_time_diff(df: pd.DataFrame, *, prep: _Prep | None = None) -> float | None:
     """Mean (over traces) of each trace's mean inter-event gap, in seconds.
 
     The "average" counterpart of Günther's time granularity, which uses the
-    per-trace *minimum* gap (thesis §2.4.3)."""
-    per_case_mean: list[float] = []
-    work = df.copy()
-    work["timestamp"] = pd.to_datetime(work["timestamp"], errors="coerce", utc=True)
-    for _, group in work.sort_values("timestamp", kind="mergesort").groupby("case_id", sort=False):
-        diffs = group["timestamp"].diff().dropna().dt.total_seconds()
-        if not diffs.empty:
-            per_case_mean.append(float(diffs.mean()))
-    return float(mean(per_case_mean)) if per_case_mean else None
+    per-trace *minimum* gap (thesis §2.4.3). NaT timestamps are skipped
+    instead of poisoning the mean."""
+    p = _get_prep(df, prep)
+    _, _, idx = p.transitions()
+    if idx.size == 0:
+        return None
+    cur = p.grp_ts_i8[idx]
+    prev = p.grp_ts_i8[idx - 1]
+    valid = (cur != _I8_NAT) & (prev != _I8_NAT)
+    if not np.any(valid):
+        return None
+    secs = (cur[valid] - prev[valid]).astype(np.float64) / 1e9
+    cases = p.grp_case[idx][valid]
+    sums = np.bincount(cases, weights=secs, minlength=p.n_cases)
+    cnts = np.bincount(cases, minlength=p.n_cases)
+    per_case_mean = sums[cnts > 0] / cnts[cnts > 0]
+    return float(per_case_mean.mean()) if per_case_mean.size else None
 
 
 # ── Distance - Levenshtein matrix → avg edit distance & structural variety ────
 
 
-def _levenshtein(a: tuple[str, ...], b: tuple[str, ...]) -> int:
+def _levenshtein(a: tuple[Hashable, ...], b: tuple[Hashable, ...]) -> int:
+    """Reference dynamic-programming Levenshtein. Kept as the correctness
+    oracle for :func:`_myers_distance`; not used on the hot path."""
     if a == b:
         return 0
     la, lb = len(a), len(b)
@@ -572,27 +795,112 @@ def _levenshtein(a: tuple[str, ...], b: tuple[str, ...]) -> int:
     return prev[la]
 
 
+def _myers_masks(seq: Sequence[Hashable]) -> dict[Hashable, int]:
+    """Per-symbol position bitmasks for ``seq`` (Myers' PEq table)."""
+    pm: dict[Hashable, int] = {}
+    bit = 1
+    for c in seq:
+        pm[c] = pm.get(c, 0) | bit
+        bit <<= 1
+    return pm
+
+
+def _myers_distance(pm: dict[Hashable, int], m: int, text: Sequence[Hashable]) -> int:
+    """Levenshtein distance via Myers' bit-parallel algorithm (1999).
+
+    ``pm``/``m`` describe the pattern (precomputed via :func:`_myers_masks`);
+    each text symbol costs O(⌈m/64⌉) bigint words instead of a full Python DP
+    row - ~two orders of magnitude faster for long traces. Verified against
+    :func:`_levenshtein` in the module tests.
+    """
+    if m == 0:
+        return len(text)
+    mask = (1 << m) - 1
+    top = 1 << (m - 1)
+    vp = mask
+    vn = 0
+    score = m
+    for c in text:
+        eq = pm.get(c, 0)
+        xv = eq | vn
+        xh = (((eq & vp) + vp) ^ vp) | eq
+        ph = vn | (~(xh | vp) & mask)
+        mh = vp & xh
+        if ph & top:
+            score += 1
+        elif mh & top:
+            score -= 1
+        ph = ((ph << 1) | 1) & mask
+        mh = (mh << 1) & mask
+        vp = (mh | (~(xv | ph) & mask)) & mask
+        vn = ph & xv
+    return score
+
+
+# Even bit-parallel Levenshtein is O(pairs · len · ⌈len/64⌉) word-ops; the
+# selection shrinks (most-frequent variants kept) until the estimate fits.
+_LEV_WORD_OP_BUDGET = 300_000_000
+
+
+def _lev_word_ops(lens: list[int]) -> float:
+    """Estimated Myers word-ops for the full pairwise matrix over ``lens``."""
+    if len(lens) < 2:
+        return 0.0
+    arr = np.asarray(lens, dtype=np.float64)
+    total = float(arr.sum())
+    return (total * total - float(np.sum(arr * arr))) / 2.0 / 64.0
+
+
 def _select_variants(
-    counts: dict[tuple[str, ...], int], max_variants: int
-) -> tuple[list[tuple[str, ...]], list[int], bool]:
+    counts: dict[tuple[Hashable, ...], int], max_variants: int
+) -> tuple[list[tuple[Hashable, ...]], list[int], bool]:
     """Top-``max_variants`` variants by case frequency. Returns (variants,
     counts, downsampled?). Levenshtein over distinct variants is far cheaper
     than over all traces while capturing the dominant behaviour; the thesis
-    likewise downsamples large logs for its distance metrics."""
+    likewise downsamples large logs for its distance metrics. A secondary,
+    documented word-op budget guards logs with extremely long traces."""
+    # Stable sort by frequency only - count ties keep their first-appearance
+    # order, matching the historical selection exactly.
     ordered = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
     downsampled = len(ordered) > max_variants
     ordered = ordered[:max_variants]
+
+    lens = [len(v) for v, _ in ordered]
+    while len(ordered) > 2 and _lev_word_ops(lens) > _LEV_WORD_OP_BUDGET:
+        keep = min(len(ordered) - 1, max(2, int(len(ordered) * 0.8)))
+        ordered = ordered[:keep]
+        lens = lens[:keep]
+        downsampled = True
+
     variants = [v for v, _ in ordered]
     weights = [c for _, c in ordered]
     return variants, weights, downsampled
 
 
-def _levenshtein_matrix(variants: list[tuple[str, ...]]) -> np.ndarray:
+def _levenshtein_matrix(variants: list[tuple[Hashable, ...]]) -> np.ndarray:
     u = len(variants)
     d = np.zeros((u, u), dtype=float)
+    if u < 2:
+        return d
+    # Recode symbols as small ints (cheaper dict hits) and precompute each
+    # variant's Myers mask table once; each pair is then O(shorter side).
+    vocab: dict[Hashable, int] = {}
+    coded: list[tuple[int, ...]] = []
+    for v in variants:
+        coded.append(tuple(vocab.setdefault(a, len(vocab)) for a in v))
+    masks = [_myers_masks(s) for s in coded]
+    lens = [len(s) for s in coded]
+
     for i in range(u):
+        si, mi, pmi = coded[i], lens[i], masks[i]
         for j in range(i + 1, u):
-            dist = float(_levenshtein(variants[i], variants[j]))
+            sj, mj = coded[j], lens[j]
+            if si == sj:
+                continue
+            if mi >= mj:
+                dist = float(_myers_distance(pmi, mi, sj))
+            else:
+                dist = float(_myers_distance(masks[j], mj, si))
             d[i, j] = dist
             d[j, i] = dist
     return d
@@ -629,23 +937,34 @@ def structural_variety_from_matrix(d: np.ndarray) -> float | None:
 # ── prob-act-pairs - transition probability matrix (Grisold et al., 2022) ─────
 
 
-def transition_probability_matrix(df: pd.DataFrame, top_k: int = 25) -> dict[str, Any]:
+def transition_probability_matrix(
+    df: pd.DataFrame, top_k: int = 25, *, prep: _Prep | None = None
+) -> dict[str, Any]:
     """Row-stochastic direct-follows transition matrix restricted to the
     ``top_k`` most frequent activities (for the panel heatmap)."""
-    freq = Counter(str(a) for a in df["activity"].tolist())
-    if not freq:
+    p = _get_prep(df, prep)
+    if p.n_events == 0:
         return {"activities": [], "matrix": [], "truncated": False}
-    activities = [a for a, _ in freq.most_common(top_k)]
-    truncated = len(freq) > len(activities)
-    idx = {a: i for i, a in enumerate(activities)}
+
+    freq = np.bincount(p.stream_act, minlength=len(p.act_labels))
+    order = np.argsort(-freq, kind="stable")[: min(top_k, len(p.act_labels))]
+    activities = [str(p.act_labels[i]) for i in order]
+    truncated = len(p.act_labels) > len(activities)
+
     k = len(activities)
+    remap = np.full(len(p.act_labels), -1, dtype=np.int64)
+    remap[order] = np.arange(k)
+
+    src, dst, _ = p.transitions()
     counts = np.zeros((k, k), dtype=float)
-    for _, group in df.sort_values("timestamp", kind="mergesort").groupby("case_id", sort=False):
-        acts = [str(a) for a in group["activity"].tolist()]
-        for i in range(1, len(acts)):
-            a, b = acts[i - 1], acts[i]
-            if a in idx and b in idx:
-                counts[idx[a], idx[b]] += 1
+    if src.size:
+        s = remap[src]
+        t = remap[dst]
+        keep = (s >= 0) & (t >= 0)
+        if np.any(keep):
+            flat = np.bincount(s[keep] * k + t[keep], minlength=k * k)
+            counts = flat.reshape(k, k).astype(float)
+
     row_sums = counts.sum(axis=1, keepdims=True)
     with np.errstate(invalid="ignore", divide="ignore"):
         probs = np.divide(counts, row_sums, out=np.zeros_like(counts), where=row_sums > 0)
@@ -788,14 +1107,15 @@ def compute_all(
     if df.empty or df["case_id"].nunique() == 0:
         return {"empty": True}
 
-    counts = variant_counts(df)
-    n_events = len(df)
-    n_cases = int(df["case_id"].nunique())
+    prep = _Prep(df)
+    counts = prep.counts
+    n_events = prep.n_events
+    n_cases = prep.n_cases
     n_variants = len(counts)
-    e_edges, v_vertices = _df_edges_and_vertices(df, counts)
+    e_edges, v_vertices = _df_edges_and_vertices(df, counts, prep=prep)
 
     # Entropy (plain EPA).
-    states, c_index = build_epa(df)
+    states, c_index = build_epa(df, prep=prep)
     var_e, nvar_e = variant_entropy(states, c_index)
     seq_e, nseq_e = sequence_entropy(states, c_index)
 
@@ -813,7 +1133,7 @@ def compute_all(
     )
 
     # Size.
-    lens = seq_len_stats(df)
+    lens = seq_len_stats(df, prep=prep)
 
     # Variation - number of acyclic paths (guard the exponential overflow the
     # thesis itself notes for large logs; keep the log10 for display).
@@ -826,11 +1146,15 @@ def compute_all(
         n_acyclic = None
 
     # Distance - one Levenshtein matrix feeds both avg-edit-distance and
-    # structural-var.
+    # structural-var. Variants stay integer-coded (cheaper hashing).
     variants, weights, downsampled = _select_variants(counts, max_variants)
     d_matrix = _levenshtein_matrix(variants)
     avg_edit = avg_edit_distance_from_matrix(d_matrix, weights)
     struct_var = structural_variety_from_matrix(d_matrix)
+
+    avg_distinct = float(
+        np.mean([np.unique(prep.grp_act[s:e]).size for s, e in pairwise(prep.bounds)])
+    )
 
     values: dict[str, Any] = {
         # Entropy
@@ -847,21 +1171,21 @@ def compute_all(
         "min_seq_len": lens["min"],
         "avg_seq_len": lens["avg"],
         "max_seq_len": lens["max"],
-        "avg_td_e": avg_time_diff(df),
+        "avg_td_e": avg_time_diff(df, prep=prep),
         # Variation
         "n_acyclic_paths": n_acyclic,
         "n_acyclic_paths_log10": exp10,
         "n_ties": n_ties(states),
-        "lempel_ziv": lempel_ziv_complexity(df),
+        "lempel_ziv": lempel_ziv_complexity(df, prep=prep),
         "n_unique_seq": n_variants,
         "perc_unique_seq": (n_variants / n_cases) * 100.0 if n_cases else None,
-        "avg_distinct_e": float(df.groupby("case_id")["activity"].nunique().mean()),
-        "order_var": order_variation(df),
-        "activity_var": activity_variation(df),
+        "avg_distinct_e": avg_distinct,
+        "order_var": order_variation(df, prep=prep),
+        "activity_var": activity_variation(df, prep=prep),
         # Distance
         "affinity": affinity(counts),
         "structure": structure(e_edges, v_vertices),
-        "dev_random": deviation_from_random(df),
+        "dev_random": deviation_from_random(df, prep=prep),
         "avg_edit_distance": avg_edit,
         "structural_var": struct_var,
         # Metadata

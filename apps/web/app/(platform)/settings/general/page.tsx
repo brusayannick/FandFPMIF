@@ -14,12 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useUi } from "@/lib/stores/ui";
 import { StorageGauge } from "@/components/settings/storage-gauge";
-import { WorkerConcurrency } from "@/components/settings/worker-concurrency";
 import { useOnboardingState, useUpdateOnboarding } from "@/lib/onboarding-queries";
 import type { ExperienceLevel } from "@/lib/stores/onboarding";
-import { Button } from "@/components/ui/button";
-import { Compass } from "lucide-react";
-import { useTour } from "@/lib/stores/tour";
 
 export default function GeneralSettingsPage() {
   const { theme = "system", setTheme } = useTheme();
@@ -41,7 +37,6 @@ export default function GeneralSettingsPage() {
 
   const onboardingQuery = useOnboardingState();
   const updateOnboarding = useUpdateOnboarding();
-  const startTour = useTour((s) => s.start);
   const experienceLevel = onboardingQuery.data?.experience_level ?? null;
   const setExperienceLevel = (level: ExperienceLevel) => {
     if (!onboardingQuery.data) return;
@@ -83,35 +78,15 @@ export default function GeneralSettingsPage() {
 
       <Card variant="glass">
         <CardHeader>
-          <CardTitle className="text-base">Product tour</CardTitle>
-        </CardHeader>
-        <CardContent className="flex items-center justify-between gap-4">
-          <p className="text-xs text-muted-foreground">
-            Replay the interactive walkthrough of process discovery — the
-            platform&apos;s core feature. It guides you from importing a log to
-            reading your mined process map.
-          </p>
-          <Button
-            variant="outline"
-            className="shrink-0 cursor-pointer gap-2"
-            onClick={() => startTour()}
-          >
-            <Compass className="h-4 w-4" />
-            Start tour
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card variant="glass">
-        <CardHeader>
           <CardTitle className="text-base">Notifications</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <Label className="flex items-center justify-between gap-3">
             <span className="space-y-0.5">
-              <span className="block text-sm">Mute non-error toasts</span>
+              <span className="block text-sm">Hide success notifications</span>
               <span className="block text-xs text-muted-foreground">
-                Errors always toast. Successes and queue notices stay quiet.
+                When on, success and info popups are hidden. Error messages are
+                always shown.
               </span>
             </span>
             <Switch checked={muted} onCheckedChange={setMuted} className="cursor-pointer" />
@@ -234,28 +209,6 @@ export default function GeneralSettingsPage() {
         </CardHeader>
         <CardContent>
           <StorageGauge />
-        </CardContent>
-      </Card>
-
-      <Card variant="glass">
-        <CardHeader>
-          <CardTitle className="text-base">Jobs</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-2">
-            <Label>Worker concurrency</Label>
-            <WorkerConcurrency />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card variant="glass">
-        <CardHeader>
-          <CardTitle className="text-base">Telemetry</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          Off by default. The platform is local-first; data never leaves your
-          machine. Manage what gets captured in <a href="/settings/privacy" className="underline">Settings → Privacy</a>.
         </CardContent>
       </Card>
     </div>

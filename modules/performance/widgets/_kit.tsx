@@ -4,11 +4,14 @@
  * Tiny presentation kit shared by the performance module's dashboard cards.
  * Each card is bundled independently (`apps/web/scripts/bundle-modules.mjs`),
  * so this file is inlined into every widget bundle – keep it small and
- * dependency-light (only runtime externals: ui/skeleton + lib/format).
+ * dependency-light (only runtime externals: ui/skeleton, ui/tooltip via
+ * InfoHint, lib/format).
  */
 import type { ReactNode } from "react";
 
 import { Skeleton } from "@/components/ui/skeleton";
+
+import { InfoHint } from "../panel/info-hint";
 
 export function CardShell({
   loading,
@@ -31,10 +34,24 @@ export function CardShell({
   return <div className="h-full">{children}</div>;
 }
 
-export function KpiTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
+export function KpiTile({
+  label,
+  value,
+  hint,
+  info,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  /** Plain-language explanation shown behind a small ⓘ button next to the label. */
+  info?: ReactNode;
+}) {
   return (
     <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="flex items-center gap-1 text-muted-foreground">
+        <span className="truncate text-[11px] uppercase tracking-wide">{label}</span>
+        {info && <InfoHint label={`What does ${label} mean?`}>{info}</InfoHint>}
+      </div>
       <div className="mt-0.5 truncate text-lg font-semibold tabular-nums tracking-tight">
         {value}
       </div>

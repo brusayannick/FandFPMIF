@@ -6,10 +6,11 @@ of {importing, processing, ready, failed}.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from mate.api.schemas.common import UtcDateTime
 
 # `importing` = parsing the source; `processing` = parsed, modules precomputing
 # (the log is disabled until they finish); `ready` = openable; `failed` = error.
@@ -138,14 +139,14 @@ class EventLogSummary(BaseModel):
     objects_count: int | None = None
     object_types_count: int | None = None
     relations_count: int | None = None
-    date_min: datetime | None = None
-    date_max: datetime | None = None
+    date_min: UtcDateTime | None = None
+    date_max: UtcDateTime | None = None
     error: str | None = None
     folder_id: str | None = None
     position: int = 0
-    created_at: datetime
-    imported_at: datetime | None = None
-    last_edited_at: datetime | None = None
+    created_at: UtcDateTime
+    imported_at: UtcDateTime | None = None
+    last_edited_at: UtcDateTime | None = None
     # True when the importer had to guess a mandatory column - drives the
     # "review column mapping" warning in the process overview.
     mapping_needs_review: bool = False
@@ -203,7 +204,7 @@ class FolderSummary(BaseModel):
     name: str
     parent_id: str | None = None
     position: int = 0
-    created_at: datetime
+    created_at: UtcDateTime
 
 
 class FolderCreate(BaseModel):

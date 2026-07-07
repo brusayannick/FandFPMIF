@@ -15,5 +15,9 @@ const DashboardViewImpl = dynamic(
 );
 
 export function DashboardView({ dashboardId }: { dashboardId: string }) {
-  return <DashboardViewImpl dashboardId={dashboardId} />;
+  // Keyed so switching boards remounts the impl: local edit state re-hydrates
+  // for the new board and the unmount cleanup flushes any pending autosave for
+  // the previous one (the App Router keeps the page component mounted across
+  // navigations within the same dynamic segment).
+  return <DashboardViewImpl key={dashboardId} dashboardId={dashboardId} />;
 }

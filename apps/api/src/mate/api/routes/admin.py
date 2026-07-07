@@ -45,6 +45,7 @@ from mate.api.db.engine import get_sessionmaker
 from mate.api.db.models import AnalyticsEvent, User
 from mate.api.db.session import SessionDep
 from mate.api.routes.analytics import event_to_dict
+from mate.api.schemas.common import UtcDateTime
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -593,8 +594,8 @@ class ExportPreview(BaseModel):
     matched_events: int
     matched_sessions: int
     distinct_users: int
-    date_min: datetime | None
-    date_max: datetime | None
+    date_min: UtcDateTime | None
+    date_max: UtcDateTime | None
     event_types: list[ExportTypeCount]
 
 

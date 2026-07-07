@@ -342,10 +342,12 @@ function DfgTab({ logId }: { logId: string }) {
               value={dfg.layoutMode}
               onValueChange={(v) => setDfg({ layoutMode: v as typeof dfg.layoutMode })}
             >
-              <SelectTrigger className="h-7 w-36 text-xs">
+              <SelectTrigger className="h-7 w-40 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="flow-vertical">Flow (top-down)</SelectItem>
+                <SelectItem value="flow-horizontal">Flow (left-right)</SelectItem>
                 <SelectItem value="temporal">Temporal</SelectItem>
                 <SelectItem value="temporal-phases-2">Phases #2</SelectItem>
                 <SelectItem value="temporal-phases-3">Phases #3</SelectItem>

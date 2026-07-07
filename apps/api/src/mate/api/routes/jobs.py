@@ -16,7 +16,7 @@ import asyncio
 import contextlib
 import json
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import structlog
@@ -32,6 +32,7 @@ from mate.api.db.models import Job
 from mate.api.db.session import SessionDep
 from mate.api.events import get_event_bus
 from mate.api.jobs.runtime import get_job_runtime
+from mate.api.schemas.common import utc_isoformat
 from mate.api.schemas.jobs import JobDetail
 from mate.api.shutdown import is_shutting_down
 
@@ -54,6 +55,11 @@ async def list_jobs(
     if type_filter:
         stmt = stmt.where(Job.type == type_filter)
     if since:
+        # Stored datetimes are naive UTC; an offset-aware `since` (e.g. the
+        # `...Z` created_at we now emit, echoed back) must be normalized before
+        # the SQL comparison or SQLite compares mismatched text forms.
+        if since.tzinfo is not None:
+            since = since.astimezone(UTC).replace(tzinfo=None)
         stmt = stmt.where(Job.created_at >= since)
     rows = (await session.execute(stmt)).scalars().all()
     return [JobDetail.model_validate(r) for r in rows]
@@ -139,7 +145,8 @@ _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 def _json_default(value: Any) -> Any:
     if isinstance(value, datetime):
-        return value.isoformat()
+        # Naive datetimes are UTC platform-wide; serialize with the offset.
+        return utc_isoformat(value)
     return str(value)
 
 

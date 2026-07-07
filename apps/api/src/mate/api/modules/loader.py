@@ -427,7 +427,7 @@ def _decode_event_filter_header(raw: str | None) -> list[dict[str, Any]] | None:
     return cleaned or None
 
 
-# Public alias for first-party callers (datasets / flows routes) that decode the
+# Public alias for first-party callers (datasets routes) that decode the
 # ephemeral filter header the same way module routes do.
 decode_event_filter_header = _decode_event_filter_header
 
@@ -1324,10 +1324,10 @@ class ModuleLoader:
     ) -> Any:
         """Invoke a loaded module's ``@route`` handler programmatically.
 
-        The public entry the dataset/flow layers use to produce a module's data
+        The public entry the dataset layer uses to produce a module's data
         without an HTTP round-trip - it reuses the module's result cache and the
         ephemeral filter exactly like a real request. Returns the raw handler
-        result (the dataset/flow layer normalizes it into an envelope)."""
+        result (the dataset layer normalizes it into an envelope)."""
         loaded = self.loaded.get(module_id)
         if loaded is None:
             raise ValueError(f"Module {module_id!r} is not loaded.")

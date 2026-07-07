@@ -16,7 +16,7 @@ import { formatDuration } from "@/lib/format";
 import { usePerformanceBottlenecks } from "../panel/queries";
 import { CardShell } from "./_kit";
 
-/** Top time-consuming activities, ranked by average sojourn time. */
+/** Top time-consuming activities, ranked by average time spent (sojourn time). */
 export default function Bottlenecks({
   logId,
   config,
@@ -58,7 +58,7 @@ export default function Bottlenecks({
           />
           <Tooltip
             formatter={(v: number, key) =>
-              key === "avg" ? [formatDuration(v), "Avg sojourn"] : [v, key]
+              key === "avg" ? [formatDuration(v), "Avg time spent"] : [v, key]
             }
             contentStyle={{ fontSize: 12 }}
           />

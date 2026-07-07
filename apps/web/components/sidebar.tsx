@@ -14,7 +14,6 @@ import {
   Pickaxe,
   ShieldCheck,
   Sun,
-  Workflow,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
@@ -57,12 +56,6 @@ const NAV: NavItem[] = [
     icon: LayoutDashboard,
     match: (p) => p.startsWith("/dashboards"),
     prefetch: (qc) => prefetchDashboards(qc),
-  },
-  {
-    href: "/flows",
-    label: "Builder",
-    icon: Workflow,
-    match: (p) => p.startsWith("/flows"),
   },
   {
     href: "/modules",

@@ -51,6 +51,9 @@ export interface AgentSimResult {
   activities?: { activity: string; real: number; sim: number }[];
   handover?: { resources: string[]; real: number[][]; sim: number[][] };
   preview?: { columns: string[]; rows: string[][]; total: number };
+  /** One entry per simulated run; absent on caches written before per-run
+   * downloads (the panel then falls back to a single run-0 button). */
+  downloads?: { index: number; cases?: number; events?: number }[];
 }
 
 export const METRIC_ORDER: MetricKey[] = ["NGD", "AEDD", "CEDD", "REDD", "CTDD"];

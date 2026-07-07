@@ -1,6 +1,16 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/*
+ * Module panels/widgets live outside apps/web, so Tailwind's automatic source
+ * detection never sees them – a utility class used only in a module panel
+ * silently compiles to no CSS (empty legend swatches, invisible bars).
+ * Explicitly scan their sources (scoped to panel/ + widgets/ to avoid the
+ * modules' .venv / node_modules / .dist trees).
+ */
+@source "../../../modules/*/panel";
+@source "../../../modules/*/widgets";
+
 @custom-variant dark (&:is(.dark *));
 
 /*

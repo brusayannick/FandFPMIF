@@ -6,25 +6,15 @@ import { CalendarRange, Check, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import type { FilterEntry } from "@/lib/api-types";
+import { toNaiveUtcString } from "@/lib/format";
 import type { TimeBounds } from "@/lib/dashboard-queries";
 
-/** ISO string the backend can compare against a DuckDB TIMESTAMP literal.
- *
- * Built from *local* wall-clock components on purpose. The bounds come back as
- * naive ISO (`datetime.isoformat()`, no offset), which `Date.parse` interprets
- * as local time – and the stored `timestamp` column is itself naive wall-clock.
- * Using `toISOString()` here would re-encode in UTC, shifting the literal by the
- * viewer's offset so the gte/lte window no longer lines up with the data (in a
- * +2h zone the filter matched everything → "the slider does nothing").
- */
-function isoNoTz(ms: number): string {
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-  );
-}
+// The bounds arrive as UTC ISO *with* offset, so `Date.parse` yields the true
+// instant. The stored `timestamp` column is naive UTC wall-clock, so the
+// gte/lte literals sent back must be the instant's UTC components without an
+// offset (`toNaiveUtcString`) – local components (or `toISOString`'s suffix)
+// would shift the window by the viewer's offset and the slider stops lining
+// up with the data.
 
 function fmt(ms: number): string {
   return new Date(ms).toLocaleString(undefined, {
@@ -87,10 +77,10 @@ export function DashboardTimeRange({
   const apply = () => {
     const entries: FilterEntry[] = [];
     if (value[0] > range.min) {
-      entries.push({ field: range.field, op: "gte", value: isoNoTz(value[0]) });
+      entries.push({ field: range.field, op: "gte", value: toNaiveUtcString(value[0]) });
     }
     if (value[1] < range.max) {
-      entries.push({ field: range.field, op: "lte", value: isoNoTz(value[1]) });
+      entries.push({ field: range.field, op: "lte", value: toNaiveUtcString(value[1]) });
     }
     setApplied([value[0], value[1]]);
     onChange(entries);

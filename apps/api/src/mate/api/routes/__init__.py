@@ -15,7 +15,6 @@ from mate.api.routes.datasets import router as datasets_router
 from mate.api.routes.event_log_data import router as event_log_data_router
 from mate.api.routes.event_logs import router as event_logs_router
 from mate.api.routes.events_sse import router as events_sse_router
-from mate.api.routes.flows import router as flows_router
 from mate.api.routes.folders import router as folders_router
 from mate.api.routes.jobs import router as jobs_router
 from mate.api.routes.mcp_admin import router as mcp_admin_router
@@ -51,7 +50,6 @@ v1.include_router(onboarding_router)
 v1.include_router(preferences_router)
 v1.include_router(dashboards_router)
 v1.include_router(datasets_router)
-v1.include_router(flows_router)
 v1.include_router(sharing_router)
 v1.include_router(events_sse_router)
 

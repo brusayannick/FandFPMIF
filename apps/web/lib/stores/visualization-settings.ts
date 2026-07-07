@@ -35,13 +35,24 @@ export interface DfgRenderSettings {
   edgeLabel: "count" | "duration" | "off";
   edgeThicknessEncoding: "linear" | "log" | "off";
   /** Layout mode for DFG visualization:
+   *  - "flow-vertical"      Celonis-style layered (Sugiyama) top-down flow: ELK layered with
+   *                         the dominant path straightened into a vertical spine, crossing
+   *                         minimisation + orthogonal-ish edge routing
+   *  - "flow-horizontal"    same layered algorithm, left-to-right
    *  - "temporal"           nodes along time axis by mean_trace_position; greedy lane-packing
    *  - "temporal-phases-2"  5 phase columns (quintile); 3× node-height gap
    *  - "temporal-phases-3"  7 fine phase columns; 2× node-height gap
    *  - "temporal-swimlane"  swimlane bands by role (Entry / Core / Exit)
    *  - "happy-path-tower"   happy-path spine + parallel activities stacked per-column
    *  Temporal modes require `mean_trace_position` on activities (discovery serializer v3+). */
-  layoutMode: "temporal" | "temporal-phases-2" | "temporal-phases-3" | "temporal-swimlane" | "happy-path-tower";
+  layoutMode:
+    | "flow-vertical"
+    | "flow-horizontal"
+    | "temporal"
+    | "temporal-phases-2"
+    | "temporal-phases-3"
+    | "temporal-swimlane"
+    | "happy-path-tower";
 }
 
 export interface PetriRenderSettings {
@@ -134,7 +145,9 @@ export const DEFAULT_DFG: DfgRenderSettings = {
   edgeTopPercent: 100,
   edgeLabel: "count",
   edgeThicknessEncoding: "log",
-  layoutMode: "temporal",
+  // Celonis-style layered flow is the default – the temporal modes stay
+  // available in the DFG toolbar's layout switcher.
+  layoutMode: "flow-vertical",
 };
 
 export const DEFAULT_PETRI: PetriRenderSettings = {

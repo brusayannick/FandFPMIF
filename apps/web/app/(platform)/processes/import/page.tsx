@@ -17,7 +17,7 @@ export default function ImportPage() {
           </PageDescription>
         </div>
       </PageHeader>
-      <div data-tour="import-form">
+      <div>
         <ImportForm />
       </div>
     </PageContainer>

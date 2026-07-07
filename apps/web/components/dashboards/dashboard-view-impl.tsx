@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { AnimatePresence, motion, useReducedMotion, type Transition } from "framer-motion";
 
+import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -73,6 +74,25 @@ const ZOOM_STEP = 1.25;
  * scroll-anchor math when zooming around a point. */
 const CANVAS_PAD = 12;
 
+/** Autosave debounce: a burst of edits (drag, typing) coalesces into one PATCH. */
+const AUTOSAVE_MS = 1000;
+
+/** The exact PATCH body autosave persists. Also serialized for the dirty
+ * check, so "needs saving" and "what gets saved" can never diverge. */
+function boardPatch(s: {
+  name: string;
+  items: DashboardItem[];
+  logId: string | null;
+  settings: CanvasSettings;
+}) {
+  return {
+    name: s.name.trim() || "Untitled",
+    items: s.items,
+    event_log_id: s.logId,
+    settings: s.settings,
+  };
+}
+
 export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const { data: dashboard, isLoading, isError } = useDashboard(dashboardId);
   const { data: logs } = useEventLogs({ status: "ready" });
@@ -95,8 +115,20 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   // Shared boards open read-only for the recipient – no edit toolbar, no log
   // picker. The backend also 404s owner-only mutations, so this is just UX.
   const isOwner = dashboard?.is_owner ?? true;
-  // Snapshot of the last-saved state, to compute the dirty flag.
+
+  // ── Autosave ─────────────────────────────────────────────────────────────
+  // Edits persist automatically – there is no Save button. `savedRef` holds
+  // the serialized last-persisted payload (the dirty check), `saveState`
+  // drives the subtle Saving…/Saved toolbar indicator, and the refs keep the
+  // flush paths (debounce timer, unmount, pagehide) reading current values.
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const savedRef = useRef<string>("");
+  const hydratedRef = useRef(false);
+  const inFlightRef = useRef(false);
+  const stateRef = useRef({ name, items, logId, settings });
+  stateRef.current = { name, items, logId, settings };
+  const updateRef = useRef(update.mutateAsync);
+  updateRef.current = update.mutateAsync;
 
   // ── Canvas zoom ──────────────────────────────────────────────────────────
   const [zoom, setZoom] = useState(1);
@@ -164,27 +196,97 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     setZoom(z);
   };
 
-  // Hydrate local edit state once the dashboard loads (and after each save).
+  // Hydrate local edit state once per board (the impl remounts per dashboardId
+  // – keyed in dashboard-view.tsx). After hydration, local state is the source
+  // of truth and flows one way (autosave → server); a background refetch (the
+  // mutation's onSettled invalidate) must never clobber edits made while a
+  // save was in flight.
   useEffect(() => {
-    if (!dashboard) return;
+    if (!dashboard || hydratedRef.current) return;
+    hydratedRef.current = true;
+    const s = canvasSettings(dashboard.settings);
     setName(dashboard.name);
     setItems(dashboard.items);
     setLogId(dashboard.event_log_id);
-    setSettings(canvasSettings(dashboard.settings));
-    savedRef.current = JSON.stringify({
-      name: dashboard.name,
-      items: dashboard.items,
-      event_log_id: dashboard.event_log_id,
-      settings: canvasSettings(dashboard.settings),
-    });
+    setSettings(s);
+    savedRef.current = JSON.stringify(
+      boardPatch({
+        name: dashboard.name,
+        items: dashboard.items,
+        logId: dashboard.event_log_id,
+        settings: s,
+      }),
+    );
   }, [dashboard]);
 
-  const dirty = useMemo(
-    () =>
-      savedRef.current !==
-      JSON.stringify({ name, items, event_log_id: logId, settings }),
-    [name, items, logId, settings],
-  );
+  // One save at a time; if edits land while a PATCH is in flight, run once
+  // more with the latest state when it settles. Ref-based (reassigned every
+  // render) so the debounce timer and the unmount flush always call a closure
+  // with current values.
+  const runSaveRef = useRef<() => Promise<void>>(async () => {});
+  runSaveRef.current = async () => {
+    if (inFlightRef.current || !hydratedRef.current || !isOwner) return;
+    const body = boardPatch(stateRef.current);
+    const key = JSON.stringify(body);
+    if (key === savedRef.current) return;
+    inFlightRef.current = true;
+    setSaveState("saving");
+    let saved = false;
+    try {
+      await updateRef.current(body);
+      savedRef.current = key;
+      saved = true;
+      setSaveState("saved");
+    } catch {
+      // No auto-retry loop: the next edit (or the unmount flush) retries.
+      setSaveState("error");
+      toast.error("Could not save dashboard");
+    } finally {
+      inFlightRef.current = false;
+    }
+    if (saved && JSON.stringify(boardPatch(stateRef.current)) !== savedRef.current) {
+      void runSaveRef.current();
+    }
+  };
+
+  // Debounced autosave: any change to the persisted payload (re)arms the
+  // timer, so a drag burst or typing in the name coalesces into one PATCH.
+  useEffect(() => {
+    if (!isOwner || !hydratedRef.current) return;
+    if (JSON.stringify(boardPatch({ name, items, logId, settings })) === savedRef.current) return;
+    const t = setTimeout(() => void runSaveRef.current(), AUTOSAVE_MS);
+    return () => clearTimeout(t);
+  }, [name, items, logId, settings, isOwner]);
+
+  // Flush the pending change when the view unmounts (navigating away, or
+  // switching boards – the impl is keyed by dashboardId) so nothing is lost
+  // to the debounce window. The mutation and its cache callbacks still run
+  // after unmount; React Query does not cancel mutations.
+  useEffect(() => {
+    return () => {
+      void runSaveRef.current();
+    };
+  }, []);
+
+  // Best-effort flush on hard unload (tab close / refresh): `keepalive` lets
+  // the PATCH outlive the document. SPA navigation is the unmount flush above.
+  // Bypasses the mutation on purpose – no cache work is meaningful here. Does
+  // not update savedRef: if the page survives (bfcache), the normal path
+  // re-sends an identical, idempotent full payload at worst.
+  useEffect(() => {
+    const flush = () => {
+      if (!hydratedRef.current) return;
+      const body = boardPatch(stateRef.current);
+      if (JSON.stringify(body) === savedRef.current) return;
+      void api(`/api/v1/dashboards/${dashboardId}`, {
+        method: "PATCH",
+        json: body,
+        keepalive: true,
+      }).catch(() => undefined);
+    };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [dashboardId]);
 
   // The board loads with its active saved filter applied (view mode). Read
   // from the *saved* settings so it's stable for the filter provider's mount.
@@ -213,21 +315,6 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
       ),
     [logs, dashboard?.log_model],
   );
-
-  const save = async () => {
-    try {
-      await update.mutateAsync({
-        name: name.trim() || "Untitled",
-        items,
-        event_log_id: logId,
-        settings,
-      });
-      savedRef.current = JSON.stringify({ name, items, event_log_id: logId, settings });
-      toast.success("Dashboard saved");
-    } catch {
-      toast.error("Could not save dashboard");
-    }
-  };
 
   const exportJson = () => {
     const doc = {
@@ -319,6 +406,28 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Subtle autosave status. Always-mounted live region (content swaps)
+              so screen readers announce transitions; empty while idle. */}
+          {isOwner && (
+            <span
+              aria-live="polite"
+              className="flex items-center gap-1.5 text-xs text-muted-foreground"
+            >
+              {saveState === "saving" ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Saving…
+                </>
+              ) : saveState === "saved" ? (
+                <>
+                  <Check className="h-3 w-3" />
+                  Saved
+                </>
+              ) : saveState === "error" ? (
+                <span className="text-destructive">Save failed</span>
+              ) : null}
+            </span>
+          )}
           {editing && (
             <DashboardSettingsDialog settings={settings} onChange={changeSettings} />
           )}
@@ -329,30 +438,12 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
             </Button>
           )}
           {editing ? (
-            <>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setEditing(false)}
-              >
-                <Eye className="mr-1.5 h-3.5 w-3.5" />
-                View
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={save}
-                disabled={!dirty || update.isPending}
-              >
-                {update.isPending ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Check className="mr-1.5 h-3.5 w-3.5" />
-                )}
-                Save
-              </Button>
-            </>
+            // Binary mode toggle: exactly one View (editing) / one Edit (viewing)
+            // button. Changes autosave, so leaving edit mode needs no save step.
+            <Button type="button" size="sm" onClick={() => setEditing(false)}>
+              <Eye className="mr-1.5 h-3.5 w-3.5" />
+              View
+            </Button>
           ) : isOwner ? (
             <>
               <Button

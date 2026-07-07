@@ -68,6 +68,9 @@ export function ProcessDetailClient({ logId }: { logId: string }) {
         sp.delete("case_id");
         sp.delete("missing_only");
       }
+      if (next !== "variants") {
+        sp.delete("activity");
+      }
       const query = sp.toString();
       router.replace(query ? `?${query}` : "?", { scroll: false });
     },

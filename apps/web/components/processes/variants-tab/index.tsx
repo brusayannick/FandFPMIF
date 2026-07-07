@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Search } from "lucide-react";
 
 import {
@@ -48,9 +49,12 @@ const SORT_LABEL: Record<SortField, string> = {
 
 export function VariantsTab({ logId, log }: { logId: string; log: EventLogDetail }) {
   const renameMap = useMemo(() => getActivityRenameMap(log), [log]);
+  const searchParams = useSearchParams();
   const [page, setPage] = useState(0);
   const [sort, setSort] = useState<SortState>({ field: INITIAL_SORT_FIELD, dir: INITIAL_SORT_DIR });
-  const [activityQuery, setActivityQuery] = useState("");
+  // Deep-linkable activity filter: e.g. the discovery DFG's "show variants
+  // with this activity" jump lands here with `?tab=variants&activity=…`.
+  const [activityQuery, setActivityQuery] = useState(() => searchParams.get("activity") ?? "");
   const [minCases, setMinCases] = useState("");
 
   const params = useMemo<VariantsListParams>(

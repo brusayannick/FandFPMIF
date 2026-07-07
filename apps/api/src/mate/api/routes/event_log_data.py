@@ -27,6 +27,7 @@ from mate.api.modules.event_filters import (
     validate_filters,
 )
 from mate.api.modules.event_log_access import EventLogAccess, _quote_ident
+from mate.api.schemas.common import utc_isoformat
 from mate.api.schemas.event_log_data import (
     ActiveFilterResult,
     ActiveFilterUpdate,
@@ -174,7 +175,9 @@ def _row_dict(values: tuple, columns: list[str]) -> dict[str, Any]:
         if val is None:
             out[col] = None
         elif isinstance(val, datetime):
-            out[col] = val.isoformat()
+            # Stored naive UTC (ingest normalizes) - attach the offset so the
+            # client parses the true instant instead of local wall-clock.
+            out[col] = utc_isoformat(val)
         elif isinstance(val, float) and math.isnan(val):
             out[col] = None
         else:
@@ -304,7 +307,7 @@ def _iso(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value.isoformat()
+        return utc_isoformat(value)
     return str(value)
 
 

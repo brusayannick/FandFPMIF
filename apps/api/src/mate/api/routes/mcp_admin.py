@@ -24,6 +24,7 @@ from mate.api.mcp.governance import (
     MintPolicy,
     get_mint_policy,
 )
+from mate.api.schemas.common import utc_isoformat
 
 router = APIRouter(tags=["mcp-admin"])
 
@@ -107,8 +108,8 @@ async def admin_list_tokens(session: SessionDep, user: AdminUserDep) -> list[Adm
             user_email=email,
             name=t.name,
             token_prefix=t.token_prefix,
-            created_at=t.created_at.isoformat(),
-            last_used_at=t.last_used_at.isoformat() if t.last_used_at else None,
+            created_at=utc_isoformat(t.created_at),
+            last_used_at=utc_isoformat(t.last_used_at) if t.last_used_at else None,
             revoked=t.revoked,
         )
         for t, email in rows

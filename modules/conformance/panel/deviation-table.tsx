@@ -7,7 +7,13 @@ import { cn } from "@/lib/cn";
 import { formatNumber } from "@/lib/format";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
+import { CONF_COLORS } from "./conformance-decorate";
 import type { PerActivityDeviation, PerVariant, Technique } from "./types";
+
+const DEVIATIONS_TITLE =
+  "How often the recorded process differed from the reference model at this activity";
+const LOG_MOVES_TITLE = "Happened in the log but not allowed by the model at that point";
+const MODEL_MOVES_TITLE = "Required by the model but skipped in the log";
 
 export function DeviationTable({
   perActivity,
@@ -52,11 +58,29 @@ function ActivityTable({
         <thead>
           <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
             <th className="px-3 py-2 font-medium">Activity</th>
-            <th className="px-3 py-2 text-right font-medium">Deviations</th>
+            <th
+              className="px-3 py-2 text-right font-medium"
+              style={{ cursor: "help" }}
+              title={DEVIATIONS_TITLE}
+            >
+              Deviations
+            </th>
             {alignments ? (
               <>
-                <th className="px-3 py-2 text-right font-medium">Log moves</th>
-                <th className="px-3 py-2 text-right font-medium">Model moves</th>
+                <th
+                  className="px-3 py-2 text-right font-medium"
+                  style={{ cursor: "help" }}
+                  title={LOG_MOVES_TITLE}
+                >
+                  In log, not in model
+                </th>
+                <th
+                  className="px-3 py-2 text-right font-medium"
+                  style={{ cursor: "help" }}
+                  title={MODEL_MOVES_TITLE}
+                >
+                  In model, skipped in log
+                </th>
               </>
             ) : null}
             <th className="px-3 py-2 text-right font-medium">Cases</th>
@@ -69,8 +93,12 @@ function ActivityTable({
               <td className="px-3 py-2">
                 <span className="font-mono text-xs">{r.activity}</span>
                 {!r.matched ? (
-                  <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-500">
-                    no log match
+                  <span
+                    className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-500"
+                    style={{ cursor: "help" }}
+                    title="In the model but never recorded in the log - likely an activity-name mismatch"
+                  >
+                    not in log
                   </span>
                 ) : null}
               </td>
@@ -188,8 +216,9 @@ function SeverityBar({ value, max }: { value: number; max: number }) {
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
       <div
-        className="h-full rounded-full bg-red-500/70"
-        style={{ width: `${pct}%` }}
+        className="h-full rounded-full"
+        // Inline colour: `bg-red-500/70` is not compiled for module sources.
+        style={{ width: `${pct}%`, background: CONF_COLORS.chart, opacity: 0.75 }}
         aria-hidden
       />
     </div>

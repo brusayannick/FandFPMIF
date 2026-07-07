@@ -68,7 +68,7 @@ frontend:
     - id: bottlenecks
       entry: ./widgets/Bottlenecks.tsx
       title: Bottlenecks
-      description: Activities ranked by average sojourn time.
+      description: Activities ranked by average time spent (waiting + processing).
       icon: Hourglass
       default_w: 6
       default_h: 9

@@ -54,9 +54,9 @@ def build_input_csv(df: pd.DataFrame, out_path: Path) -> dict[str, int]:
 
     start = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
     # end_timestamp is optional: most real logs carry a single timestamp. When
-    # it's absent (or null for a row) we fall back to the start - a zero-duration
-    # activity. AgentSimulator still models arrivals, control flow and handovers;
-    # only per-activity durations degrade.
+    # it's absent (or null for a row) we first fall back to the start; if the
+    # *whole* log then carries no duration at all, the gap-to-next-event
+    # fallback below turns waiting time into activity durations.
     if "end_timestamp" in df.columns:
         end = pd.to_datetime(df["end_timestamp"], utc=True, errors="coerce").fillna(start)
     else:
@@ -80,6 +80,21 @@ def build_input_csv(df: pd.DataFrame, out_path: Path) -> dict[str, int]:
     out = out.sort_values(["case_id", "start_time", "end_time"]).reset_index(drop=True)
     if out.empty:
         raise ValueError("No usable events after cleaning (need start + end timestamps).")
+
+    # Single-timestamp logs (no end_timestamp column, or one that never exceeds
+    # the start - e.g. SEPSIS): with `end = start` every activity duration is
+    # zero, so the simulator learns fix(0) durations everywhere and emits
+    # *instantaneous* cases - the simulated cycle-time distribution collapses to
+    # a spike at 0 and the real-vs-simulated charts show nothing meaningful.
+    # The log still spans time *between* events, so fold each event's waiting
+    # gap into its duration: end = the case's next event start (the last event
+    # stays zero-duration). Case-level durations (first→last event) are
+    # preserved exactly; only the activity/waiting split is unknowable here.
+    # Only triggered when the whole log carries no positive duration at all -
+    # logs with real end timestamps keep them untouched.
+    if not (out["end_time"] > out["start_time"]).any():
+        nxt = out.groupby("case_id")["start_time"].shift(-1)
+        out["end_time"] = nxt.fillna(out["start_time"])
 
     out["start_time"] = out["start_time"].dt.strftime("%Y-%m-%d %H:%M:%S%z")
     out["end_time"] = out["end_time"].dt.strftime("%Y-%m-%d %H:%M:%S%z")

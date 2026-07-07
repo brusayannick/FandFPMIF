@@ -29,6 +29,7 @@ from mate.api.db.models import (
     UserSetting,
 )
 from mate.api.db.session import SessionDep
+from mate.api.schemas.common import UtcDateTime, utc_isoformat
 
 log = structlog.get_logger(__name__)
 # Path deliberately neutral (`/usage` instead of `/analytics`) so default
@@ -56,7 +57,7 @@ class AnalyticsConfigPayload(BaseModel):
     capture_clicks: bool = True
     capture_perf: bool = True
     capture_errors: bool = True
-    opted_in_at: datetime | None = None
+    opted_in_at: UtcDateTime | None = None
     anon_user_id_seed: str = Field(default_factory=lambda: str(uuid.uuid4()))
     # Read-only: surfaced from the USER_TRACKING_ONBOARDING env var so the
     # frontend can pick the onboarding default and hide the privacy step/tab
@@ -308,8 +309,8 @@ class AnalyticsSummary(BaseModel):
     total_events: int
     total_sessions: int
     sessions_last_30d: int
-    oldest_event: datetime | None
-    newest_event: datetime | None
+    oldest_event: UtcDateTime | None
+    newest_event: UtcDateTime | None
     by_type: list[TypeCount]
 
 
@@ -433,8 +434,8 @@ def event_to_dict(ev: AnalyticsEvent) -> dict[str, Any]:
         "ua_class": ev.ua_class,
         "locale": ev.locale,
         "tz": ev.tz,
-        "occurred_at": ev.occurred_at.isoformat(),
-        "server_received_at": ev.server_received_at.isoformat(),
+        "occurred_at": utc_isoformat(ev.occurred_at),
+        "server_received_at": utc_isoformat(ev.server_received_at),
     }
 
 

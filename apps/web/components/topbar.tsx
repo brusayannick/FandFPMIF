@@ -1,11 +1,9 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Compass, Search, Sparkles } from "lucide-react";
-
-import { useTour } from "@/lib/stores/tour";
+import { Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
@@ -18,14 +16,8 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { CommandPalette } from "@/components/cmdk";
 import { useEventLogs } from "@/lib/queries";
 import { useDashboards } from "@/lib/dashboard-queries";
-
-function isMac() {
-  if (typeof navigator === "undefined") return false;
-  return /Mac|iPhone|iPad/.test(navigator.platform);
-}
 
 function deriveCrumbs(
   pathname: string,
@@ -79,23 +71,10 @@ export function Topbar() {
   const pathname = usePathname();
   const { data: logs } = useEventLogs();
   const { data: dashboards } = useDashboards();
-  const [open, setOpen] = useState(false);
-  const startTour = useTour((s) => s.start);
 
   const logNames = new Map(logs?.map((log) => [log.id, log.name]) ?? []);
   const dashboardNames = new Map(dashboards?.map((d) => [d.id, d.name]) ?? []);
   const crumbs = deriveCrumbs(pathname, logNames, dashboardNames);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setOpen(true);
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-background/70 px-4 backdrop-blur-xl backdrop-saturate-150 supports-[backdrop-filter]:bg-background/55 sm:px-6 lg:px-8">
@@ -121,34 +100,6 @@ export function Topbar() {
       </Breadcrumb>
 
       <MateTopbarButton />
-
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="cursor-pointer gap-1.5 text-muted-foreground"
-        onClick={() => startTour()}
-        aria-label="Start product tour"
-      >
-        <Compass className="h-3.5 w-3.5" />
-        <span className="hidden lg:inline">Tour</span>
-      </Button>
-
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="cursor-pointer gap-2 text-muted-foreground"
-        onClick={() => setOpen(true)}
-      >
-        <Search className="h-3.5 w-3.5" />
-        <span className="hidden md:inline">Search</span>
-        <kbd className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-          {isMac() ? "⌘K" : "Ctrl+K"}
-        </kbd>
-      </Button>
-
-      <CommandPalette open={open} onOpenChange={setOpen} />
     </header>
   );
 }

@@ -2,7 +2,8 @@
 
 import { useState, type ReactNode } from "react";
 
-import { ArrowDown, Play, Square, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowDown, Gauge, GitBranch, Play, Square, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { formatDuration, formatNumber } from "@/lib/format";
 
+import { useDiscoveryScope } from "./discovery-settings-context";
 import type { DfgActivity, DfgData, DfgEdge } from "./types";
 
 interface DfgDetailsPanelProps {
@@ -178,7 +180,45 @@ function NodeDetails({ activity, data }: { activity: DfgActivity; data: DfgData 
           </Section>
         </>
       )}
+
+      <Separator />
+
+      <ExploreSection activityId={activity.id} />
     </div>
+  );
+}
+
+/** Cross-view jumps for the selected activity – same targets as the node's
+ *  right-click menu on the canvas. The activity travels as `?activity=` so the
+ *  destination can preselect it. */
+function ExploreSection({ activityId }: { activityId: string }) {
+  const { logId } = useDiscoveryScope();
+  const router = useRouter();
+  const activityParam = encodeURIComponent(activityId);
+
+  return (
+    <Section title="Explore">
+      <div className="grid gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="cursor-pointer justify-start gap-2"
+          onClick={() => router.push(`/processes/${logId}/modules/performance?activity=${activityParam}`)}
+        >
+          <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
+          View performance metrics
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="cursor-pointer justify-start gap-2"
+          onClick={() => router.push(`/processes/${logId}?tab=variants&activity=${activityParam}`)}
+        >
+          <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+          Show variants with this activity
+        </Button>
+      </div>
+    </Section>
   );
 }
 

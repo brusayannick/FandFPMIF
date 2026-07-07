@@ -36,6 +36,11 @@ export function LabelReportBanner({ report }: { report: LabelReport | undefined 
             model: <ChipList items={missingInModel} />
           </p>
         )}
+        <p className="text-muted-foreground">
+          Names are compared exactly (ignoring case and extra spaces) — even a one-letter
+          difference counts as a different activity. Rename the tasks in the model or the log
+          activities to make them line up.
+        </p>
       </div>
     </div>
   );

@@ -42,6 +42,9 @@ interface CanvasShellProps {
   overlay?: ReactNode;
   proOptions?: ReactFlowProps["proOptions"];
   onNodeClick?: NodeMouseHandler;
+  /** Right-click on a node – e.g. to open a canvas context menu. The handler
+   *  is responsible for `event.preventDefault()` to suppress the browser menu. */
+  onNodeContextMenu?: NodeMouseHandler;
   onEdgeClick?: EdgeMouseHandler;
   onPaneClick?: (event: React.MouseEvent) => void;
   // The canvas component (DfgCanvas, etc.) parameterises its own state with
@@ -77,6 +80,7 @@ function CanvasInner({
   overlay,
   proOptions,
   onNodeClick,
+  onNodeContextMenu,
   onEdgeClick,
   onPaneClick,
   onNodesChange,
@@ -126,6 +130,7 @@ function CanvasInner({
         minZoom={0.1}
         maxZoom={2}
         onNodeClick={onNodeClick}
+        onNodeContextMenu={onNodeContextMenu}
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
         onNodesChange={onNodesChange}

@@ -7,7 +7,7 @@ import { create } from "zustand";
  * walkthrough of process discovery). Completion is persisted server-side via
  * the `onboarding` UserSetting (`tour_completed`); this store only holds the
  * ephemeral run state so any component can launch/drive it (`TourOverlay`
- * renders it, Settings + Topbar start it, the wizard auto-chains into it).
+ * renders it, Settings → About starts it, the wizard auto-chains into it).
  */
 interface TourState {
   active: boolean;

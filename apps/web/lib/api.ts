@@ -9,11 +9,12 @@
  *
  * If the session is missing or `session.error === "RefreshAccessTokenError"`,
  * there is no usable bearer token, so we don't fire an unauthenticated request
- * that would just 401. Instead we sign the user out and send them to `/login`.
- * Signing out (rather than a plain redirect) is required: a refresh-failed
- * session still has a valid JWT cookie, so `auth()` keeps returning it and the
- * login page would bounce the user straight back. `signOut()` clears that
- * cookie and ends the Keycloak SSO session, breaking the loop.
+ * that would just 401. Instead we end the session and send the user to /login
+ * via the server-side `GET /logout` route (a document navigation, not a
+ * fetch). Ending the session (rather than a plain redirect) is required: a
+ * refresh-failed session still has a valid cookie, so `auth()` keeps returning
+ * it and the login page would bounce the user straight back. /logout expires
+ * the cookies and deletes the server-side session entry, breaking the loop.
  */
 
 import type { Session } from "next-auth";
@@ -93,9 +94,23 @@ export function invalidateSessionCache(): void {
 }
 
 async function fetchSession(): Promise<SessionResult> {
+  // Raw fetch instead of next-auth's getSession(): getSession() swallows every
+  // non-OK response (a 500, an extension/content-blocker interception, a stale
+  // service worker's error page) into `null` – indistinguishable from a real
+  // "logged out". Callers would then sign out and redirect, and because the
+  // cookie is still valid server-side, /login bounces straight back → the
+  // Safari infinite login loop. Only an OK response whose JSON parses may
+  // claim the user is signed out; everything else is "auth unknown".
   try {
-    const { getSession } = await import("next-auth/react");
-    return (await getSession()) as Session | null;
+    const res = await fetch("/api/auth/session", {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!res.ok) return SESSION_FETCH_FAILED;
+    const data = (await res.json()) as unknown;
+    // Auth.js returns `null` (or `{}`) with 200 when there is no session.
+    if (!data || typeof data !== "object" || !("user" in data)) return null;
+    return data as Session;
   } catch {
     return SESSION_FETCH_FAILED;
   }
@@ -155,14 +170,15 @@ export async function logoutToLogin(): Promise<void> {
   if (window.location.pathname.startsWith("/login")) return;
   signingOut = true;
   const callbackUrl = `${window.location.pathname}${window.location.search}`;
-  const loginUrl = `/login?callbackUrl=${encodeURIComponent(callbackUrl)}`;
-  try {
-    const { signOut } = await import("next-auth/react");
-    await signOut({ redirectTo: loginUrl });
-  } catch {
-    // Fallback: hard-navigate to login if sign-out couldn't run.
-    window.location.assign(loginUrl);
-  }
+  // Top-level navigation through the server-side logout route – NOT signOut():
+  // signOut() is a fetch to /api/auth/*, and whatever intercepts the session
+  // fetch (content blocker, privacy extension, stale service worker – usually
+  // the reason we're logging out at all) kills that fetch the same way. The
+  // cookie then survives, /login sees a healthy session and bounces straight
+  // back → infinite loop. A document navigation can't be intercepted by
+  // fetch-layer blockers; /logout expires the cookies and deletes the
+  // server-side session entry itself.
+  window.location.assign(`/logout?callbackUrl=${encodeURIComponent(callbackUrl)}`);
 }
 
 async function attachAuth(headers: Headers): Promise<void> {

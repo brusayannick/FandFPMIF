@@ -51,7 +51,7 @@ export const BorderBeam = React.forwardRef<HTMLDivElement, BorderBeamProps>(
           straight across them (corner stutter + a misaligned bottom edge). The
           parent mask clips this full-box gradient to the border ring. */}
       <div
-        className="absolute inset-0 rounded-[inherit] motion-safe:animate-[border-beam_var(--border-beam-duration,6s)_linear_infinite]"
+        className="absolute -inset-px rounded-[inherit] motion-safe:animate-[border-beam_var(--border-beam-duration,6s)_linear_infinite]"
         style={
           {
             animationDelay: `${delay}s`,

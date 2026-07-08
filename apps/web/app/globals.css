@@ -472,9 +472,15 @@
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+/* Registered so the angle interpolates smoothly (a plain custom prop would jump
+   at 100%). Drives the conic-gradient sweep in `components/glass/border-beam`. */
+@property --border-beam-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
 @keyframes border-beam {
-  0% { offset-distance: 0%; }
-  100% { offset-distance: 100%; }
+  to { --border-beam-angle: 360deg; }
 }
 @keyframes meteor-fall {
   0% { transform: rotate(var(--meteor-angle, 215deg)) translateX(0); opacity: 1; }

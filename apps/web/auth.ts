@@ -102,6 +102,21 @@ const KEYCLOAK_IDP_HINT = process.env.KEYCLOAK_IDP_HINT ?? "";
 // local dev (the dev Keycloak is reached directly, no proxy in between).
 const KEYCLOAK_INTERNAL_URL = process.env.KEYCLOAK_INTERNAL_URL ?? "";
 
+// Public base URL of the deployment (https in prod, http://localhost in dev).
+const AUTH_URL = process.env.AUTH_URL ?? "";
+// Pin whether Auth.js uses `__Secure-`-prefixed, `Secure` cookies to the stable
+// AUTH_URL scheme instead of letting it infer per-request from X-Forwarded-Proto.
+// Behind the uni edge proxy + Caddy that header isn't pinned, so the authorize
+// leg (a `signIn` server action) and the callback leg (`/api/auth/callback/*`)
+// can disagree on the cookie NAME. The OAuth check cookies (PKCE code_verifier,
+// state, nonce) are keyed by their own name (it's the HKDF salt), so a name flip
+// makes the callback derive a different key and jose can't decrypt the verifier
+// it finds — surfacing as `InvalidCheck: pkceCodeVerifier value could not be
+// parsed`, which kills login at the callback even though the opaque session-store
+// cookie (a plain sid, no crypto) keeps existing sessions working. Pinning this
+// makes the two legs agree unconditionally.
+const USE_SECURE_COOKIES = AUTH_URL.startsWith("https://");
+
 // Demo/dev login bypass. When DEMO_MODE is truthy we add a credentials provider
 // ("demo") that signs a fixed demo user in with no form and no Keycloak round
 // trip, minting DEMO_ACCESS_TOKEN as the session access token. The API accepts
@@ -255,6 +270,15 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         ]
       : []),
   ],
+  // Self-hosted behind the uni edge proxy + Caddy: trust the forwarded Host so
+  // Auth.js builds callback URLs and cookie flags from AUTH_URL rather than
+  // re-deriving them from each raw request (prod compose didn't set
+  // AUTH_TRUST_HOST; this closes that gap for every environment).
+  trustHost: true,
+  // Deterministic `__Secure-` cookie naming across the authorize + callback legs
+  // (see USE_SECURE_COOKIES) so a non-pinned X-Forwarded-Proto can't flip the
+  // prefix mid-flow and break the PKCE check.
+  useSecureCookies: USE_SECURE_COOKIES,
   session: { strategy: "jwt", maxAge: SESSION_MAX_AGE },
   ...(jwtOverride ? { jwt: jwtOverride } : {}),
   callbacks: {

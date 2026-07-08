@@ -80,5 +80,15 @@
 
 	# Everything else – the Next.js app, its static assets, and Auth.js
 	# routes at /api/auth/*.
-	reverse_proxy web:3000
+	#
+	# Pin X-Forwarded-Proto=https so Next/Auth.js unambiguously sees HTTPS on
+	# every request (TLS terminates upstream at the uni edge proxy and here at
+	# Caddy). Without it the proto forwarded to `web` isn't guaranteed, and
+	# Auth.js can flip the `__Secure-` cookie prefix between the authorize and
+	# callback legs → the PKCE check fails with `pkceCodeVerifier value could not
+	# be parsed`. auth.ts also pins this from AUTH_URL; the two are belt-and-
+	# suspenders and must agree.
+	reverse_proxy web:3000 {
+		header_up X-Forwarded-Proto https
+	}
 }

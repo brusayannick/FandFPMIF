@@ -45,14 +45,17 @@ export const BorderBeam = React.forwardRef<HTMLDivElement, BorderBeamProps>(
       }
       {...props}
     >
+      {/* A conic-gradient comet rotated via the registered `--border-beam-angle`
+          (globals.css). The angle interpolates smoothly, so the beam glides the
+          rounded corners instead of the old `offset-path: rect()` which cut
+          straight across them (corner stutter + a misaligned bottom edge). The
+          parent mask clips this full-box gradient to the border ring. */}
       <div
-        className="absolute aspect-square motion-safe:animate-[border-beam_var(--border-beam-duration,6s)_linear_infinite]"
+        className="absolute inset-0 rounded-[inherit] motion-safe:animate-[border-beam_var(--border-beam-duration,6s)_linear_infinite]"
         style={
           {
-            width: size,
-            offsetPath: "rect(0 auto auto 0)",
             animationDelay: `${delay}s`,
-            background: `linear-gradient(to left, ${colorFrom}, ${colorTo})`,
+            background: `conic-gradient(from var(--border-beam-angle, 0deg), ${colorFrom} 0deg, ${colorTo} ${size}deg)`,
           } as React.CSSProperties
         }
       />

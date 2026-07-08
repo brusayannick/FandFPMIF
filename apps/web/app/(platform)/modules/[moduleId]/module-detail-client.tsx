@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ArrowLeft, FileBox, Lock, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { toastError } from "@/lib/toast";
+import { useProgressRouter } from "@/lib/use-progress-router";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ActionButton } from "@/components/ui/action-button";
@@ -94,7 +94,7 @@ function readAiDraft(cfg: Record<string, unknown>): AiConfigDraft {
 }
 
 export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
-  const router = useRouter();
+  const router = useProgressRouter();
   const { data: cfg } = useModuleConfig(moduleId);
   const { data: manifest, isLoading: manifestLoading, isError: manifestError } =
     useModuleManifest(moduleId);

@@ -2,10 +2,10 @@ import { redirect } from "next/navigation";
 
 import { auth, signIn, DEMO_MODE } from "@/auth";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
-import { Button } from "@/components/ui/button";
 import { MateLogo } from "@/components/mate-logo";
 import { BorderBeam } from "@/components/glass/border-beam";
 import { DemoAutoSignIn } from "./demo-auto-signin";
+import { LoginCta, DemoSubmitButton } from "./login-cta";
 import { RecoveryAutoRetry } from "./recovery-auto-retry";
 
 export default async function LoginPage({
@@ -62,9 +62,7 @@ export default async function LoginPage({
               await signIn("demo", { redirectTo: callbackUrl });
             }}
           >
-            <Button type="submit" className="w-full" size="lg">
-              Enter demo workspace
-            </Button>
+            <DemoSubmitButton label="Enter demo workspace" pendingLabel="Entering…" />
           </form>
         </>
       ) : (
@@ -73,9 +71,11 @@ export default async function LoginPage({
               one-shot guard inside stops a failing OAuth from looping and leaves
               the manual link as the fallback. */}
           {staleSession ? <RecoveryAutoRetry href={startUrl} /> : null}
-          <Button asChild className="w-full" size="lg">
-            <a href={startUrl}>{staleSession ? "Sign in again" : "Login with university account"}</a>
-          </Button>
+          <LoginCta
+            href={startUrl}
+            label={staleSession ? "Sign in again" : "Login with university account"}
+            pendingLabel="Signing in…"
+          />
         </>
       )}
     </div>

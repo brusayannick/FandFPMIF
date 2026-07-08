@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -28,11 +28,23 @@ import {
  * Behavior: shown only on the first authed page of a browser session
  * (sessionStorage flag), and it WAITS until every route + the data have settled
  * (determinate N/M progress), capped by a hard timeout so a stuck compile can
- * never trap the user. SSR renders nothing (needs sessionStorage), so it fades in
- * a frame after hydration and fades back out — no hydration mismatch.
+ * never trap the user.
+ *
+ * First paint: this component needs sessionStorage, so SSR renders nothing and
+ * it can only appear a beat after hydration — on its own that flashed the page
+ * behind it. The platform layout therefore server-renders a static twin
+ * (`#ff-splash-boot`) that covers the screen from the very first byte of HTML;
+ * once this component commits its own overlay (or decides not to show one) it
+ * stamps `data-ff-splash-done` on <html>, which hides the boot cover via CSS
+ * (globals.css). Same pixels, so the handoff is invisible.
  */
 
+// Also read by the boot-cover inline script in app/(platform)/layout.tsx —
+// keep the two literals in sync.
 const SESSION_KEY = "__ff_splash_shown_v1";
+
+// This component SSRs (returning null), where useLayoutEffect warns in dev.
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 const MIN_SHOW_MS = 600; // let the logo animation register even if warming is fast
 const HARD_TIMEOUT_MS = 12_000; // safety: never trap the user, even on a stuck compile
 const FADE_MS = 500;
@@ -68,6 +80,15 @@ export function AppSplash({ isAdmin = false }: { isAdmin?: boolean }) {
   const router = useRouter();
   const qc = useQueryClient();
   const ran = useRef(false);
+
+  // Retire the server-rendered boot cover exactly when this overlay is in the
+  // DOM (or when there's nothing to show). useLayoutEffect = after commit,
+  // before paint, so there is never a gap between the two covers.
+  useIsoLayoutEffect(() => {
+    if (state !== "init") {
+      document.documentElement.setAttribute("data-ff-splash-done", "");
+    }
+  }, [state]);
 
   useEffect(() => {
     if (ran.current) return;
@@ -149,16 +170,8 @@ export function AppSplash({ isAdmin = false }: { isAdmin?: boolean }) {
       }`}
       style={{ transitionDuration: `${FADE_MS}ms` }}
     >
-      <style>{`
-        @keyframes ff-splash-glow { 0%,100%{opacity:.28;transform:scale(1)} 50%{opacity:.55;transform:scale(1.12)} }
-        @media (prefers-reduced-motion: reduce){ .ff-splash-anim{animation:none!important} }
-      `}</style>
-
       <div className="relative">
-        <div
-          className="ff-splash-anim pointer-events-none absolute inset-0 -m-2 rounded-2xl bg-primary/30 blur-2xl"
-          style={{ animation: "ff-splash-glow 1.8s ease-in-out infinite" }}
-        />
+        <div className="ff-splash-glow-anim pointer-events-none absolute inset-0 -m-2 rounded-2xl bg-primary/30 blur-2xl" />
         <MateLogo
           animated
           className="relative h-16 w-16 text-foreground duration-700 animate-in fade-in-0 zoom-in-50"

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,9 +30,10 @@ import {
 } from "@/lib/analytics-queries";
 import { trackCustom } from "@/lib/analytics/client";
 import { EV } from "@/lib/analytics/events";
+import { useProgressRouter } from "@/lib/use-progress-router";
 
 export default function PrivacySettingsPage() {
-  const router = useRouter();
+  const router = useProgressRouter();
   const cfgQuery = useAnalyticsConfig();
   const summaryQuery = useAnalyticsSummary();
   const updateMut = useUpdateAnalyticsConfig();

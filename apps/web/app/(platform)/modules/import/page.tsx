@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Upload, X } from "lucide-react";
@@ -16,6 +15,7 @@ import {
 import { ApiError, rawFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { toastError } from "@/lib/toast";
+import { useProgressRouter } from "@/lib/use-progress-router";
 
 const ACCEPT_SUFFIXES = [".zip", ".tar", ".tar.gz", ".tgz"];
 
@@ -25,7 +25,7 @@ function hasAcceptedSuffix(name: string) {
 }
 
 export default function ImportModulePage() {
-  const router = useRouter();
+  const router = useProgressRouter();
   const qc = useQueryClient();
 
   const onInstalled = useCallback(

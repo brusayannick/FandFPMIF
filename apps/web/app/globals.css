@@ -756,3 +756,35 @@
 .djs-container svg:focus-visible {
   outline: none;
 }
+
+/* First-load splash. `#ff-splash-boot` is the server-rendered pre-hydration
+   cover in (platform)/layout.tsx: it is part of the initial HTML so the very
+   first paint of a new browser session shows the splash, never a flash of the
+   page behind it. An inline script ahead of it stamps `data-ff-splash-done` on
+   <html> when the splash already ran this session (sessionStorage flag), hiding
+   the cover before it can paint; components/app-splash.tsx stamps the same
+   attribute once its hydrated overlay has committed, taking over seamlessly.
+   The glow keyframes live here (not in a component <style>) so both the boot
+   cover and the hydrated overlay share them. */
+html[data-ff-splash-done] #ff-splash-boot {
+  display: none;
+}
+@keyframes ff-splash-glow {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.12);
+  }
+}
+.ff-splash-glow-anim {
+  animation: ff-splash-glow 1.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ff-splash-glow-anim {
+    animation: none;
+  }
+}

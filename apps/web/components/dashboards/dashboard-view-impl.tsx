@@ -48,10 +48,11 @@ import { DashboardTimeRange } from "@/components/dashboards/dashboard-time-range
 import { useEventLogs } from "@/lib/queries";
 import { useNoShareTargets } from "@/lib/sharing-queries";
 import {
-  activePresetFilters,
   canvasSettings,
   DEFAULT_CANVAS_SETTINGS,
   GRANULARITY,
+  initialColumnFilters as loadColumnFilters,
+  initialTimeFilters as loadTimeFilters,
   rescaleColumns,
   useDashboard,
   useEventColumns,
@@ -60,6 +61,7 @@ import {
   type CanvasSettings,
   type DashboardItem,
 } from "@/lib/dashboard-queries";
+import type { FilterEntry } from "@/lib/api-types";
 
 const DEFAULT_COLS = 12;
 
@@ -293,12 +295,34 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     return () => window.removeEventListener("pagehide", flush);
   }, [dashboardId]);
 
-  // The board loads with its active saved filter applied (view mode). Read
-  // from the *saved* settings so it's stable for the filter provider's mount.
+  // The board loads with its committed view applied (view mode): the owner's
+  // last column-filter bar + time-range window (falling back to the active
+  // saved preset for legacy boards). Read from the *saved* settings so it's
+  // stable for the filter provider's mount – and it's the same settings a share
+  // recipient receives, so their board opens on the owner's filtered view.
   const initialFilters = useMemo(
-    () => (dashboard ? activePresetFilters(canvasSettings(dashboard.settings)) : []),
+    () => (dashboard ? loadColumnFilters(canvasSettings(dashboard.settings)) : []),
     [dashboard],
   );
+  const initialTime = useMemo(
+    () => (dashboard ? loadTimeFilters(canvasSettings(dashboard.settings)) : []),
+    [dashboard],
+  );
+
+  // Persist the committed filter view (column bar + time range) onto the board's
+  // settings so it transfers to share recipients. Owner-only – it folds into
+  // `settings`, which rides the normal autosave path. Functional update so a
+  // concurrent settings edit (a preset toggle, granularity change) isn't lost.
+  const handleFilterCommit = (next: {
+    columnFilters: FilterEntry[];
+    timeFilters: FilterEntry[];
+  }) => {
+    setSettings((s) => ({
+      ...s,
+      column_filters: next.columnFilters,
+      time_filters: next.timeFilters,
+    }));
+  };
 
   // Settings edits flow through here so a granularity change (which changes the
   // column count) can rescale the cards' x/w to keep their relative layout.
@@ -362,7 +386,11 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     // The filter provider wraps the whole view (toolbar included) so the
     // settings dialog can read/apply the live filter state for saved filters.
     // It mounts seeded with the active saved filter's filters.
-    <DashboardFilterProvider initialColumnFilters={initialFilters}>
+    <DashboardFilterProvider
+      initialColumnFilters={initialFilters}
+      initialTimeFilters={initialTime}
+      onCommit={isOwner ? handleFilterCommit : undefined}
+    >
       <div className="flex h-full flex-col">
       {/* Toolbar */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5 sm:px-6 lg:px-8">
@@ -633,7 +661,9 @@ function DashboardFilterBarConnected({ logId }: { logId: string }) {
 }
 
 function DashboardTimeRangeConnected({ logId }: { logId: string }) {
-  const { setTimeFilters } = useDashboardFilter();
+  const { timeFilters, setTimeFilters } = useDashboardFilter();
   const { data: bounds } = useTimeBounds(logId);
-  return <DashboardTimeRange bounds={bounds} onChange={setTimeFilters} />;
+  return (
+    <DashboardTimeRange bounds={bounds} committed={timeFilters} onChange={setTimeFilters} />
+  );
 }

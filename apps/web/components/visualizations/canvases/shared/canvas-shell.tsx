@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import {
   Background,
   BackgroundVariant,
-  Controls,
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
@@ -25,7 +24,14 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { Button } from "@/components/ui/button";
-import { Maximize2, Minus, Plus } from "lucide-react";
+import { Frame, Minus, Plus } from "lucide-react";
+
+import { cn } from "@/lib/cn";
+import {
+  CanvasFullscreenButton,
+  useCanvasIdleVisibility,
+  useFullscreen,
+} from "./canvas-controls";
 
 interface CanvasShellProps {
   nodes: Node[];
@@ -89,9 +95,18 @@ function CanvasInner({
   selectionOnDrag = false,
   panOnDrag = true,
   onSelectionChange,
-}: Omit<CanvasShellProps, "className">) {
+  isFullscreen,
+  onToggleFullscreen,
+}: Omit<CanvasShellProps, "className"> & {
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
+}) {
   const { fitView, zoomIn, zoomOut } = useReactFlow();
   const lastKey = useRef<string | number | undefined>(undefined);
+
+  // Minimap is hidden by default and fades in only while the user actively
+  // pans/zooms/drags (see the activity handlers below), auto-hiding on idle.
+  const { visible: minimapVisible, notifyActivity } = useCanvasIdleVisibility({ idleMs: 1200 });
 
   useEffect(() => {
     if (fitViewKey !== lastKey.current) {
@@ -102,19 +117,41 @@ function CanvasInner({
     }
   }, [fitViewKey, fitView]);
 
+  // Re-fit when entering/leaving fullscreen (the viewport just resized). Skip
+  // the initial run – the `fitView` prop already frames the graph on mount.
+  const didMountFs = useRef(false);
+  useEffect(() => {
+    if (!didMountFs.current) {
+      didMountFs.current = true;
+      return;
+    }
+    const id = requestAnimationFrame(() => fitView({ duration: 200, padding: 0.2 }));
+    return () => cancelAnimationFrame(id);
+  }, [isFullscreen, fitView]);
+
   const onFit = useCallback(() => fitView({ duration: 200, padding: 0.2 }), [fitView]);
 
   return (
     // Fade the whole canvas in once it mounts with data – charts/graphs land
     // softly instead of popping. Opacity-only, so xyflow's own layout math is
     // unaffected; runtime external => module canvases inherit this free.
-    <div className="relative h-full w-full animate-in fade-in-0 duration-300">
+    <div
+      className="relative h-full w-full animate-in fade-in-0 duration-300"
+      // Wheel-zoom and pointer-pan are extra activity signals that RF's
+      // onMove* may not cover on every browser; capture-phase so RF can't
+      // swallow them first.
+      onWheelCapture={notifyActivity}
+      onPointerDownCapture={notifyActivity}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         proOptions={proOptions ?? { hideAttribution: true }}
+        onMoveStart={notifyActivity}
+        onMove={notifyActivity}
+        onNodeDrag={notifyActivity}
         nodesDraggable
         nodesConnectable={false}
         nodesFocusable
@@ -146,21 +183,30 @@ function CanvasInner({
         {showGrid && (
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="!bg-background" />
         )}
-        <Controls showInteractive={false} className="!border-border !bg-card" />
         {miniMap && (
-          <MiniMap
-            pannable
-            zoomable
-            className="!border !border-border !bg-card !rounded-md overflow-hidden shadow-sm"
-            maskColor="rgba(0, 0, 0, 0.15)"
-            maskStrokeColor="rgba(0, 0, 0, 0.4)"
-            maskStrokeWidth={1}
-            nodeColor={minimapNodeColor}
-            nodeStrokeColor="rgba(0, 0, 0, 0.6)"
-            nodeStrokeWidth={2}
-            nodeBorderRadius={3}
-            offsetScale={4}
-          />
+          // `miniMap` is the enable flag (store gate via `general.showMinimap`);
+          // opacity is the interaction gate. `<MiniMap>` positions itself
+          // absolutely, so the static wrapper only fades the subtree.
+          <div
+            className={cn(
+              "transition-opacity duration-300",
+              minimapVisible ? "opacity-100" : "pointer-events-none opacity-0",
+            )}
+          >
+            <MiniMap
+              pannable
+              zoomable
+              className="!border !border-border !bg-card !rounded-md overflow-hidden shadow-sm"
+              maskColor="rgba(0, 0, 0, 0.15)"
+              maskStrokeColor="rgba(0, 0, 0, 0.4)"
+              maskStrokeWidth={1}
+              nodeColor={minimapNodeColor}
+              nodeStrokeColor="rgba(0, 0, 0, 0.6)"
+              nodeStrokeWidth={2}
+              nodeBorderRadius={3}
+              offsetScale={4}
+            />
+          </div>
         )}
       </ReactFlow>
 
@@ -194,8 +240,9 @@ function CanvasInner({
             aria-label="Fit to view"
             title="Fit to view"
           >
-            <Maximize2 className="h-3.5 w-3.5" />
+            <Frame className="h-3.5 w-3.5" />
           </Button>
+          <CanvasFullscreenButton isFullscreen={isFullscreen} onToggle={onToggleFullscreen} />
           {toolbarSlot}
         </div>
       </div>
@@ -206,10 +253,17 @@ function CanvasInner({
 }
 
 export function CanvasShell(props: CanvasShellProps) {
+  // The sized outer div is the fullscreen target, so the toolbar + minimap go
+  // fullscreen with the canvas.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { isFullscreen, toggle } = useFullscreen(containerRef);
   return (
-    <div className={props.className ?? "h-[640px] w-full overflow-hidden rounded-xl border bg-card"}>
+    <div
+      ref={containerRef}
+      className={props.className ?? "h-[640px] w-full overflow-hidden rounded-xl border bg-card"}
+    >
       <ReactFlowProvider>
-        <CanvasInner {...props} />
+        <CanvasInner {...props} isFullscreen={isFullscreen} onToggleFullscreen={toggle} />
       </ReactFlowProvider>
     </div>
   );

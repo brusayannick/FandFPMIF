@@ -59,10 +59,15 @@ export function ProcessComparisonPanel({ logId }: { logId: string; moduleId: str
   const logsQuery = useComparisonLogs();
   const logs = logsQuery.data ?? [];
 
+  // Resolve a log id to its name; never surface a raw id/uuid. When a name can't
+  // be resolved (log still loading, or no longer in the ready list) fall back to
+  // the log's *role* in the comparison — `logId` is the baseline the panel was
+  // opened on, everything else is a comparison log — matching the "Baseline" /
+  // "Comparison" vocabulary the rest of the panel uses.
   const labelFor = useMemo(() => {
     const map = new Map(logs.map((l) => [l.id, l.name]));
-    return (id: string) => map.get(id) ?? id.slice(0, 8);
-  }, [logs]);
+    return (id: string) => map.get(id) ?? (id === logId ? "Baseline" : "Comparison");
+  }, [logs, logId]);
 
   const others = logs.filter((l) => l.id !== logId);
   const [selected, setSelected] = useState<string[]>([]);
@@ -589,7 +594,7 @@ function BpmnTab({
       {isLoading ? (
         <div className="space-y-2">
           <Skeleton className="h-4 w-40" />
-          <Skeleton className="h-[560px] w-full rounded-xl" />
+          <Skeleton style={{ height: 560 }} className="w-full rounded-xl" />
           <p className="text-xs text-muted-foreground">
             Mining a BPMN model for each log — this can take a moment on large logs.
           </p>
@@ -634,7 +639,10 @@ function BpmnPane({
   return (
     <div className="space-y-1.5">
       <PaneHeader name={name} swatch={swatch} />
-      <div className="h-[560px] w-full overflow-hidden rounded-xl border bg-card">
+      {/* Inline height: `h-[560px]` is a module-only arbitrary Tailwind value and
+          the web app's build doesn't emit those, so the class was dropped and the
+          pane collapsed to 0 height (the BPMN "rendered too small"). */}
+      <div style={{ height: 560 }} className="w-full overflow-hidden rounded-xl border bg-card">
         {/* Re-mount on log change: the canvas ignores xml updates after mount. */}
         <ComparisonBpmnCanvas key={paneKey} xml={xml} map={map} />
       </div>

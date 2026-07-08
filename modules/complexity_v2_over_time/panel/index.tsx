@@ -28,10 +28,10 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/cn";
-import { formatDuration } from "@/lib/format";
 
+import { MetricInfoHint } from "./metric-info";
 import {
-  useComplexityTimeseries,
+  useComplexityV2Timeseries,
   useDriftPeriods,
   type ComplexityMetrics,
   type DriftPeriod,
@@ -40,32 +40,37 @@ import {
   type TimeseriesParams,
 } from "./queries";
 
-// Friendly labels reused from the complexity panel's row labels.
+// Friendly labels for every Table 3.3 metric key (mirrors complexity_v2's
+// METRIC_DEFS names). Reused across the selector, legend and tooltip.
 const KPI_LABELS: Record<string, string> = {
-  variant_entropy: "Variant entropy",
-  normalized_variant_entropy: "Variant entropy (normalised)",
-  sequence_entropy: "Sequence entropy",
-  normalized_sequence_entropy: "Sequence entropy (normalised)",
-  sequence_entropy_linear: "Sequence entropy (linear forgetting)",
-  normalized_sequence_entropy_linear: "Sequence entropy (linear, normalised)",
-  sequence_entropy_exponential: "Sequence entropy (exponential forgetting)",
-  normalized_sequence_entropy_exponential:
-    "Sequence entropy (exponential, normalised)",
-  structure: "Structure",
-  affinity: "Affinity",
-  magnitude: "Magnitude (events)",
-  support: "Support (cases)",
-  variety: "Variety (distinct activities)",
-  level_of_detail: "Level of detail",
-  time_granularity_s: "Time granularity (s)",
-  distinct_traces_pct: "Distinct traces %",
-  deviation_from_random: "Deviation from random",
+  var_e: "Variant entropy",
+  seq_e: "Sequence entropy",
+  nvar_e: "Variant entropy (normalized)",
+  nseq_e: "Sequence entropy (normalized)",
+  en_var_e: "Enriched variant entropy",
+  en_seq_e: "Enriched sequence entropy",
+  en_nvar_e: "Enriched variant entropy (normalized)",
+  en_nseq_e: "Enriched sequence entropy (normalized)",
+  n_events: "Number of events",
+  n_event_types: "Number of event types",
+  n_sequences: "Number of sequences (cases)",
+  min_seq_len: "Min sequence length",
+  avg_seq_len: "Avg sequence length",
+  max_seq_len: "Max sequence length",
+  avg_td_e: "Avg time between events (s)",
+  n_acyclic_paths: "Number of acyclic paths",
+  n_ties: "Number of ties",
   lempel_ziv: "Lempel-Ziv complexity",
-  pentland_task: "Pentland task complexity",
-  pentland_process: "Pentland process complexity",
-  trace_length_min: "Trace length (min)",
-  trace_length_avg: "Trace length (avg)",
-  trace_length_max: "Trace length (max)",
+  n_unique_seq: "Number of unique sequences",
+  perc_unique_seq: "Percentage of unique sequences",
+  avg_distinct_e: "Avg distinct events per sequence",
+  order_var: "Order variation",
+  activity_var: "Activity variation",
+  affinity: "Average affinity",
+  structure: "Structure",
+  dev_random: "Deviation from random",
+  avg_edit_distance: "Average edit distance",
+  structural_var: "Structural process variety",
 };
 
 const GRANULARITIES: { value: string; label: string }[] = [
@@ -77,7 +82,7 @@ const GRANULARITIES: { value: string; label: string }[] = [
   { value: "yearly", label: "Yearly" },
 ];
 
-const DEFAULT_KPI = "variant_entropy";
+const DEFAULT_KPI = "nseq_e";
 
 // Per-line colours. The first five reuse the app's shadcn chart tokens so the
 // palette matches the rest of the UI; the rest extend it for the rare case a
@@ -99,25 +104,6 @@ function lineColor(i: number): string {
 
 function kpiLabel(key: string): string {
   return KPI_LABELS[key] ?? key;
-}
-
-// Unit-bearing metric keys: `_s` are durations in seconds, `_pct` percentages;
-// every other complexity metric is a dimensionless index.
-function isDurationKey(key: string): boolean {
-  return key.endsWith("_s");
-}
-
-function isPercentKey(key: string): boolean {
-  return key.endsWith("_pct");
-}
-
-// Format one metric value for its key: durations human-readable, percentages
-// with a `%`, everything else as a plain number (integers verbatim, else 3 dp).
-function fmtMetric(key: string, v: number | null): string {
-  if (v === null || !Number.isFinite(v)) return "–";
-  if (isDurationKey(key)) return formatDuration(v);
-  if (isPercentKey(key)) return `${v.toFixed(2)} %`;
-  return Number.isInteger(v) ? String(v) : v.toFixed(3);
 }
 
 // ── Concept-drift overlay styling (colour by drift type) ──────────────────────
@@ -212,15 +198,15 @@ function buildDriftBands(slices: SlicePoint[], drifts: DriftPeriod[]): DriftBand
   return bands;
 }
 
-export function ComplexityOverTimePanel({ logId }: { logId: string; moduleId: string }) {
+export function ComplexityV2OverTimePanel({ logId }: { logId: string; moduleId: string }) {
   const [mode, setMode] = useState<SliceMode>("calendar");
   const [slices, setSlices] = useState(50);
   const [granularity, setGranularity] = useState("auto");
   const [windowDays, setWindowDays] = useState(30);
   const [stepDays, setStepDays] = useState(7);
-  // Multiple KPIs may be plotted at once – one line each.
+  // Multiple metrics may be plotted at once – one line each.
   const [selectedKpis, setSelectedKpis] = useState<string[]>([DEFAULT_KPI]);
-  // Min-max each series to [0,1] so metrics on different scales (e.g. magnitude
+  // Min-max each series to [0,1] so metrics on different scales (e.g. n_events
   // vs. normalised entropy) stay comparable on one shared axis.
   const [normalize, setNormalize] = useState(true);
 
@@ -230,11 +216,12 @@ export function ComplexityOverTimePanel({ logId }: { logId: string; moduleId: st
     return { granularity };
   }, [mode, slices, granularity, windowDays, stepDays]);
 
-  const q = useComplexityTimeseries(logId, mode, params);
+  const q = useComplexityV2Timeseries(logId, mode, params);
   const driftQuery = useDriftPeriods(logId);
 
-  // Keep the KPI selection valid as the available metric keys change. Functional
-  // update + identity short-circuit avoids a render loop on the fresh `[]` ref.
+  // Keep the metric selection valid as the available metric keys change.
+  // Functional update + identity short-circuit avoids a render loop on the
+  // fresh `[]` ref.
   const metricKeys = q.data?.metric_keys ?? [];
   useEffect(() => {
     if (metricKeys.length === 0) return;
@@ -249,10 +236,6 @@ export function ComplexityOverTimePanel({ logId }: { logId: string; moduleId: st
   // One row per slice carrying, per selected metric, both the raw value (for the
   // tooltip) and the display value (raw, or normalised when `normalize` is on).
   const chartData = useMemo<ChartDatum[]>(() => {
-    // Only min-max normalise when *comparing* two or more metrics. A single
-    // metric is always plotted raw so the Y-axis keeps its real scale + units –
-    // normalising one series would silently collapse the axis to a unitless 0–1.
-    const applyNorm = selectedKpis.length > 1 && normalize;
     const pts = q.data?.slices ?? [];
     const ranges: Record<string, { min: number; max: number }> = {};
     for (const key of selectedKpis) {
@@ -276,7 +259,7 @@ export function ComplexityOverTimePanel({ logId }: { logId: string; moduleId: st
         raw[key] = num;
         if (num === null) {
           disp[key] = null;
-        } else if (applyNorm) {
+        } else if (normalize) {
           const { min, max } = ranges[key];
           disp[key] = max > min ? (num - min) / (max - min) : 0.5;
         } else {
@@ -652,20 +635,19 @@ function ChartBody({
   }
 
   const multiScale = selectedKpis.length > 1 && normalize;
-  // A raw single-metric axis carries that metric's own unit; only unit-format the
-  // ticks when every plotted line shares it (mixed raw units → plain numbers).
-  const durationAxis = !multiScale && selectedKpis.every(isDurationKey);
-  const percentAxis = !multiScale && selectedKpis.every(isPercentKey);
   const heading =
     selectedKpis.length === 1
       ? `${kpiLabel(selectedKpis[0])} over time`
-      : "Complexity metrics over time";
+      : "Complexity V2 metrics over time";
 
   return (
     <Card>
       <CardContent>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <h3 className="text-sm font-semibold">{heading}</h3>
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+            {heading}
+            {selectedKpis.length === 1 && <MetricInfoHint metricKey={selectedKpis[0]} />}
+          </h3>
           <DriftLegend driftBands={driftBands} driftRan={driftRan} />
         </div>
         <ResponsiveContainer width="100%" height={400}>
@@ -694,24 +676,12 @@ function ChartBody({
             <YAxis
               tick={{ fill: "var(--muted-foreground)", fontSize: 10 }}
               stroke="var(--border)"
-              width={durationAxis ? 76 : 56}
+              width={56}
               domain={multiScale ? [0, 1] : undefined}
-              tickFormatter={
-                durationAxis
-                  ? (v: number) => formatDuration(v)
-                  : percentAxis
-                    ? (v: number) => `${v}%`
-                    : undefined
-              }
               allowDecimals
             />
-            <Tooltip
-              content={<KpiTooltip selectedKpis={selectedKpis} />}
-            />
-            <Legend
-              wrapperStyle={{ fontSize: 11 }}
-              iconType="plainline"
-            />
+            <Tooltip content={<KpiTooltip selectedKpis={selectedKpis} />} />
+            <Legend wrapperStyle={{ fontSize: 11 }} iconType="plainline" />
             {selectedKpis.map((key, i) => (
               <Line
                 key={key}
@@ -822,7 +792,7 @@ function KpiTooltip({
               style={{ backgroundColor: lineColor(i) }}
             />
             <span className="text-muted-foreground">{kpiLabel(key)}:</span>
-            <span className="ml-auto pl-3">{fmtMetric(key, datum.raw[key] ?? null)}</span>
+            <span className="ml-auto pl-3">{fmt(datum.raw[key] ?? null)}</span>
           </div>
         ))}
       </div>
@@ -831,4 +801,9 @@ function KpiTooltip({
       </div>
     </div>
   );
+}
+
+function fmt(v: number | null): string {
+  if (v === null || !Number.isFinite(v)) return "–";
+  return Number.isInteger(v) ? String(v) : v.toFixed(3);
 }

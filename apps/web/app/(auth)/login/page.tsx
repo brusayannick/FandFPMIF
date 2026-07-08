@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth, signIn, DEMO_MODE } from "@/auth";
 import { ThemeToggleButton } from "@/components/theme-toggle-button";
 import { Button } from "@/components/ui/button";
+import { MateLogo } from "@/components/mate-logo";
 import { BorderBeam } from "@/components/glass/border-beam";
 import { clearAuthCookies } from "@/lib/clear-session";
 import { DemoAutoSignIn } from "./demo-auto-signin";
@@ -45,6 +46,7 @@ export default async function LoginPage({
       <BorderBeam className="rounded-2xl" />
       <ThemeToggleButton className="absolute right-4 top-4 h-8 w-8 cursor-pointer text-muted-foreground" />
       <div className="space-y-2 text-center">
+        <MateLogo className="mx-auto h-11 w-11 text-foreground" />
         <h1 className="text-2xl font-semibold">Mate</h1>
         <p className="text-sm text-muted-foreground">
           {DEMO_MODE

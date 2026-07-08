@@ -174,6 +174,12 @@ export function injectComparisonStyles(): void {
 .djs-element.ff-cmp-hit .djs-outline{stroke:#2563eb!important;stroke-width:3px!important;stroke-dasharray:none!important;display:block!important;}
 .ff-cmp-badge{font:600 10px/1.35 ui-sans-serif,system-ui,sans-serif;background:hsl(151 60% 35%);color:#fff;padding:1px 5px;border-radius:6px;white-space:nowrap;pointer-events:none;box-shadow:0 1px 2px rgba(0,0,0,.25);}
 .ff-cmp-badge-down{background:hsl(0 70% 45%);}
+/* diagram-js-minimap: pin bottom-right (toolbar owns top-right), theme it, and
+   let the canvas fade it via the ff-minimap-hidden opacity gate. */
+.djs-minimap{top:auto!important;bottom:12px!important;right:12px!important;background:var(--card)!important;border:1px solid var(--border)!important;border-radius:6px!important;box-shadow:0 1px 2px rgba(0,0,0,.08)!important;transition:opacity .3s ease!important;}
+.djs-minimap .map{width:200px;height:140px;}
+.djs-minimap .toggle{display:none!important;}
+.djs-minimap.ff-minimap-hidden{opacity:0!important;pointer-events:none!important;}
 `;
   const style = document.createElement("style");
   style.id = STYLE_ID;

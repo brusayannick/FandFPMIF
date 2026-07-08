@@ -1,20 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Background,
   Controls,
   MarkerType,
+  MiniMap,
   Position,
   ReactFlow,
   type Edge,
   type Node,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import ELK, { type ElkExtendedEdge, type ElkNode } from "elkjs/lib/elk.bundled.js";
 
 import { formatNumber } from "@/lib/format";
+import { cn } from "@/lib/cn";
 import type { GraphData, VizComponentProps } from "@/lib/visualizations/types";
 import { VizEmpty } from "@/components/visualizations/viz-shell";
+import {
+  CanvasFullscreenButton,
+  useCanvasIdleVisibility,
+  useFullscreen,
+} from "@/components/visualizations/canvases/shared/canvas-controls";
 
 import "@xyflow/react/dist/style.css";
 
@@ -122,13 +130,35 @@ export function ProcessMapViz({ dataset }: VizComponentProps) {
     };
   }, [graph]);
 
+  const rootRef = useRef<HTMLDivElement>(null);
+  const rfRef = useRef<ReactFlowInstance | null>(null);
+  const { isFullscreen, toggle: toggleFullscreen } = useFullscreen(rootRef);
+  // Minimap hidden by default; fades in only while the user pans/zooms.
+  const { visible: minimapVisible, notifyActivity } = useCanvasIdleVisibility({ idleMs: 1200 });
+
+  // Re-fit when entering/leaving fullscreen (viewport resized). Skip mount.
+  const didMountFs = useRef(false);
+  useEffect(() => {
+    if (!didMountFs.current) {
+      didMountFs.current = true;
+      return;
+    }
+    const id = requestAnimationFrame(() => rfRef.current?.fitView({ duration: 200, padding: 0.2 }));
+    return () => cancelAnimationFrame(id);
+  }, [isFullscreen]);
+
   if (!graph || graph.nodes.length === 0) {
     return <VizEmpty message={dataset.meta?.note ?? "No process model."} />;
   }
   if (!state) return <VizEmpty message="Laying out…" />;
 
   return (
-    <div className="h-full w-full">
+    <div
+      ref={rootRef}
+      className={cn("relative h-full w-full", isFullscreen && "bg-background")}
+      onWheelCapture={notifyActivity}
+      onPointerDownCapture={notifyActivity}
+    >
       <ReactFlow
         nodes={state.nodes}
         edges={state.edges}
@@ -138,10 +168,37 @@ export function ProcessMapViz({ dataset }: VizComponentProps) {
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
+        onInit={(inst) => {
+          rfRef.current = inst;
+        }}
+        onMoveStart={notifyActivity}
+        onMove={notifyActivity}
       >
         <Background gap={16} className="text-border" />
         <Controls showInteractive={false} />
+        <div
+          className={cn(
+            "transition-opacity duration-300",
+            minimapVisible ? "opacity-100" : "pointer-events-none opacity-0",
+          )}
+        >
+          <MiniMap
+            pannable
+            zoomable
+            className="!border !border-border !bg-card !rounded-md overflow-hidden shadow-sm"
+            maskColor="rgba(0, 0, 0, 0.15)"
+            nodeColor={() => "rgb(148, 163, 184)"}
+            nodeStrokeColor="rgba(0, 0, 0, 0.6)"
+            nodeStrokeWidth={2}
+            nodeBorderRadius={3}
+          />
+        </div>
       </ReactFlow>
+      <div className="pointer-events-none absolute right-3 top-3 flex gap-1.5">
+        <div className="pointer-events-auto flex items-center gap-1 rounded-md border bg-card/80 p-1 shadow-sm backdrop-blur">
+          <CanvasFullscreenButton isFullscreen={isFullscreen} onToggle={toggleFullscreen} />
+        </div>
+      </div>
     </div>
   );
 }

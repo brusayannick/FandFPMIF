@@ -68,14 +68,27 @@ function encodeFilterHeader(entries: FilterEntry[]): string {
 export function DashboardFilterProvider({
   children,
   initialColumnFilters = [],
+  initialTimeFilters = [],
+  onCommit,
 }: {
   children: ReactNode;
-  /** Column filters to load with – the board's active saved filter, if any.
-   * Read once on mount; later preset switches flow through `setColumnFilters`. */
+  /** Column filters to load with – the board's committed live bar (or its active
+   * saved filter). Read once on mount; later changes flow through `setColumnFilters`. */
   initialColumnFilters?: FilterEntry[];
+  /** Time-range window to load with – the board's committed window (a shared
+   * board seeds this from the owner). Read once on mount. */
+  initialTimeFilters?: FilterEntry[];
+  /** Fires (debounced, never on the initial mount) whenever the committed filter
+   * view changes, so the owner can persist it on the board. Omitted for a
+   * read-only recipient – their tweaks stay ephemeral. */
+  onCommit?: (next: { columnFilters: FilterEntry[]; timeFilters: FilterEntry[] }) => void;
 }) {
   const [columnFilters, setColumnFilters] = useState<FilterEntry[]>(initialColumnFilters);
-  const [timeFilters, setTimeFilters] = useState<FilterEntry[]>([]);
+  const [timeFilters, setTimeFilters] = useState<FilterEntry[]>(initialTimeFilters);
+  // Ref so the debounced commit effect can call the latest handler without
+  // re-arming the timer on every parent render.
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
   // One client per provider instance – widget queries are isolated here.
   const [widgetQueryClient] = useState(
     () =>
@@ -113,12 +126,15 @@ export function DashboardFilterProvider({
     if (commitTimer.current) clearTimeout(commitTimer.current);
     commitTimer.current = setTimeout(() => {
       setAmbientHeaders({ [EVENT_FILTER_HEADER]: header });
+      // Let the owner persist the committed view on the board (so it transfers
+      // to share recipients). No-op for a read-only recipient (no handler).
+      onCommitRef.current?.({ columnFilters, timeFilters });
       void widgetQueryClient.resetQueries();
     }, 300);
     return () => {
       if (commitTimer.current) clearTimeout(commitTimer.current);
     };
-  }, [combined, widgetQueryClient]);
+  }, [combined, columnFilters, timeFilters, widgetQueryClient]);
 
   // Tidy up when the dashboard unmounts so the header can't leak onto other
   // pages' requests.

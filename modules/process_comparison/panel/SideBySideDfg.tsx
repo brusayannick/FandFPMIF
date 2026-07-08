@@ -89,12 +89,22 @@ export function SideBySideDfg({ data, side }: { data: DfgDiffData; side: "a" | "
   }, [data, side]);
 
   return (
-    <CanvasShell
-      nodes={nodes}
-      edges={edges}
-      miniMap={false}
-      className="h-[520px] w-full overflow-hidden rounded-xl border bg-card"
-      fitViewKey={`${data.other_log_id}-${side}-${nodes.length}`}
-    />
+    // The pane needs a real, non-zero height for React Flow to measure and fit
+    // against. `h-[520px]` is an *arbitrary* Tailwind value used only inside a
+    // module panel, and the web app's Tailwind build does not emit module-only
+    // arbitrary utilities (only classes that also appear under apps/web survive,
+    // which is why the overlay's `h-[640px]` works but this one didn't). The class
+    // was silently dropped, the container collapsed to 0 height, and both maps
+    // rendered invisibly. Pin the height with an inline style — which never
+    // depends on the CSS build — and let CanvasShell fill it via the always-present
+    // `h-full`.
+    <div style={{ height: 520 }} className="w-full">
+      <CanvasShell
+        nodes={nodes}
+        edges={edges}
+        className="h-full w-full overflow-hidden rounded-xl border bg-card"
+        fitViewKey={`${data.other_log_id}-${side}-${nodes.length}`}
+      />
+    </div>
   );
 }

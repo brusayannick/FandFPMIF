@@ -11,7 +11,6 @@ import {
   LayoutDashboard,
   Moon,
   PanelLeftClose,
-  Pickaxe,
   ShieldCheck,
   Sun,
 } from "lucide-react";
@@ -23,6 +22,7 @@ import { prefetchDashboards, prefetchEventLogs, prefetchModules } from "@/lib/cl
 import { useMounted } from "@/lib/use-mounted";
 import { useUi } from "@/lib/stores/ui";
 import { Button } from "@/components/ui/button";
+import { MateLogo } from "@/components/mate-logo";
 import { UserMenu } from "@/components/user-menu";
 import { useTrack } from "@/lib/analytics/hooks";
 import { EV } from "@/lib/analytics/events";
@@ -112,12 +112,7 @@ export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
       >
         {!collapsed && (
           <>
-            <div
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground dark:bg-sidebar-foreground dark:text-sidebar"
-              aria-hidden
-            >
-              <Pickaxe className="h-4 w-4" />
-            </div>
+            <MateLogo animateOnHover className="h-7 w-7 shrink-0 text-sidebar-foreground" />
             <span className="truncate text-sm font-semibold tracking-tight">PM-MATE</span>
           </>
         )}

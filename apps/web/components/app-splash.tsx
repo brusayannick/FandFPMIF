@@ -3,9 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { Pickaxe } from "lucide-react";
 
-import { prefetchDashboards, prefetchEventLogs, prefetchModules } from "@/lib/client-prefetch";
+import { MateLogo } from "@/components/mate-logo";
+import {
+  prefetchDashboards,
+  prefetchEventLogs,
+  prefetchModules,
+  warmSecondaryData,
+} from "@/lib/client-prefetch";
 
 /**
  * Once-per-session branded first-load screen that actually CACHES the app's
@@ -108,6 +113,13 @@ export function AppSplash({ isAdmin = false }: { isAdmin?: boolean }) {
       ]).finally(bump),
     ];
 
+    // Best-effort, fire-and-forget: warm the drill-down the user is most likely
+    // to hit next — the top ready processes' detail + every tab, the first
+    // dashboard, and (via warmRoute) those two detail ROUTES. Deliberately NOT
+    // awaited and NOT part of the progress count, so it never holds the splash
+    // open; it just keeps warming in the background after the fade-out.
+    void warmSecondaryData(qc, warmRoute);
+
     const dismiss = () => {
       if (dismissed) return;
       dismissed = true;
@@ -144,12 +156,13 @@ export function AppSplash({ isAdmin = false }: { isAdmin?: boolean }) {
 
       <div className="relative">
         <div
-          className="ff-splash-anim pointer-events-none absolute inset-0 rounded-2xl bg-primary/40 blur-xl"
+          className="ff-splash-anim pointer-events-none absolute inset-0 -m-2 rounded-2xl bg-primary/30 blur-2xl"
           style={{ animation: "ff-splash-glow 1.8s ease-in-out infinite" }}
         />
-        <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-sidebar-primary text-sidebar-primary-foreground shadow-lg duration-700 animate-in fade-in-0 zoom-in-50 dark:bg-sidebar-foreground dark:text-sidebar">
-          <Pickaxe className="h-8 w-8" />
-        </div>
+        <MateLogo
+          animated
+          className="relative h-16 w-16 text-foreground duration-700 animate-in fade-in-0 zoom-in-50"
+        />
       </div>
 
       <div className="flex flex-col items-center gap-1 text-center duration-700 animate-in fade-in-0 slide-in-from-bottom-2">

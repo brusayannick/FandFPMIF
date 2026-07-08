@@ -50,6 +50,14 @@ class CanvasSettings(BaseModel):
     chrome: CardChrome = Field(default_factory=CardChrome)
     presets: list[FilterPreset] = Field(default_factory=list)
     active_preset_id: str | None = None
+    # The board's *committed live view* - the owner's current column-filter bar
+    # and time-range window, persisted here so a shared board opens on exactly
+    # the owner's filtered view (the recipient reads them off the detail
+    # response and seeds their ephemeral filter state). ``None`` (absent, e.g.
+    # legacy boards) means "never committed" - the web app then falls back to
+    # the active preset for columns. Opaque dicts, same as ``FilterPreset``.
+    column_filters: list[dict[str, Any]] | None = None
+    time_filters: list[dict[str, Any]] | None = None
 
 
 class DatasetRef(BaseModel):

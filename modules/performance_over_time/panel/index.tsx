@@ -231,6 +231,10 @@ export function PerformanceOverTimePanel({ logId }: { logId: string; moduleId: s
   // One row per slice carrying, per selected metric, both the raw value (for the
   // tooltip) and the display value (raw, or normalised when `normalize` is on).
   const chartData = useMemo<ChartDatum[]>(() => {
+    // Only min-max normalise when *comparing* two or more metrics. A single
+    // metric is always plotted raw so the Y-axis keeps its real scale + units –
+    // normalising one series would silently collapse the axis to a unitless 0–1.
+    const applyNorm = selectedKpis.length > 1 && normalize;
     const pts = q.data?.slices ?? [];
     const ranges: Record<string, { min: number; max: number }> = {};
     for (const key of selectedKpis) {
@@ -254,7 +258,7 @@ export function PerformanceOverTimePanel({ logId }: { logId: string; moduleId: s
         raw[key] = num;
         if (num === null) {
           disp[key] = null;
-        } else if (normalize) {
+        } else if (applyNorm) {
           const { min, max } = ranges[key];
           disp[key] = max > min ? (num - min) / (max - min) : 0.5;
         } else {

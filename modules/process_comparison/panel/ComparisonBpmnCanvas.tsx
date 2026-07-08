@@ -9,6 +9,12 @@ import { AlertTriangle, Maximize, Minus, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
+import {
+  CanvasFullscreenButton,
+  fitBpmnViewport,
+  useCanvasIdleVisibility,
+  useFullscreen,
+} from "@/components/visualizations/canvases/shared/canvas-controls";
 
 // bpmn-js / bpmn-auto-layout are bundled straight into this panel - intentionally
 // NOT in runtime-externals.json. The host runs `next dev --turbo`, and Turbopack
@@ -20,6 +26,9 @@ import { EmptyState } from "@/components/empty-state";
 // NavigatedViewer is the strictly view-only bpmn-js entry: pan + scroll-zoom.
 import NavigatedViewer from "bpmn-js/lib/NavigatedViewer";
 import { layoutProcess } from "bpmn-auto-layout";
+// diagram-js-minimap ships JS only (no d.ts); esbuild bundles it like bpmn-js.
+// Its CSS is imported by apps/web/app/layout.tsx.
+import minimapModule from "diagram-js-minimap";
 
 import {
   applyComparisonOverlay,
@@ -63,6 +72,11 @@ export function ComparisonBpmnCanvas({ xml, map, decor }: ComparisonBpmnCanvasPr
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const rootRef = useRef<HTMLDivElement>(null);
+  const { isFullscreen, toggle: toggleFullscreen } = useFullscreen(rootRef);
+  // Minimap hidden by default; fades in only while the user pans/zooms.
+  const { visible: minimapVisible, notifyActivity } = useCanvasIdleVisibility({ idleMs: 1200 });
+
   useEffect(() => {
     injectComparisonStyles();
     const container = containerRef.current;
@@ -72,13 +86,28 @@ export function ComparisonBpmnCanvas({ xml, map, decor }: ComparisonBpmnCanvasPr
     let cancelled = false;
 
     (async () => {
-      modeler = new NavigatedViewer({ container }) as unknown as ModelerHandle;
+      modeler = new NavigatedViewer({
+        container,
+        additionalModules: [minimapModule],
+      }) as unknown as ModelerHandle;
       try {
         const laidOut = await ensureLayout(xml);
         if (cancelled || !modeler) return;
         await modeler.importXML(laidOut);
-        const canvas = modeler.get<{ zoom: (mode: string) => void }>("canvas");
-        canvas.zoom("fit-viewport");
+        const canvas = modeler.get<{
+          zoom: (scale?: number | string, center?: string) => number;
+        }>("canvas");
+        fitBpmnViewport(canvas);
+        // Open the minimap (we drive its show/hide via the `ff-minimap-hidden`
+        // opacity class) and pump interaction activity on every viewbox change.
+        try {
+          modeler.get<{ open: () => void }>("minimap").open();
+          modeler
+            .get<{ on: (e: string, cb: () => void) => void }>("eventBus")
+            .on("canvas.viewbox.changed", () => notifyActivity());
+        } catch {
+          /* minimap is best-effort – never block the canvas on it */
+        }
       } catch (err) {
         console.error("ComparisonBpmnCanvas: importXML failed", err);
         if (!cancelled) setError((err as Error)?.message ?? "Failed to render BPMN");
@@ -113,24 +142,57 @@ export function ComparisonBpmnCanvas({ xml, map, decor }: ComparisonBpmnCanvasPr
     }
   }, [ready, map, decor]);
 
+  // Re-fit on fullscreen enter/exit (the viewport just resized). Skip mount.
+  const didMountFs = useRef(false);
+  useEffect(() => {
+    if (!didMountFs.current) {
+      didMountFs.current = true;
+      return;
+    }
+    const id = requestAnimationFrame(() => {
+      const canvas = modelerRef.current?.get<{
+        zoom: (scale?: number | string, center?: string) => number;
+      }>("canvas");
+      if (canvas) fitBpmnViewport(canvas);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [isFullscreen]);
+
+  // Opacity gate for the minimap – toggled by interaction activity.
+  useEffect(() => {
+    containerRef.current
+      ?.querySelector(".djs-minimap")
+      ?.classList.toggle("ff-minimap-hidden", !minimapVisible);
+  }, [minimapVisible, ready]);
+
   const zoomBy = (factor: number) => {
     const modeler = modelerRef.current;
     if (!modeler) return;
-    const canvas = modeler.get<{ zoom: (m?: number | string) => number }>("canvas");
+    const canvas = modeler.get<{ zoom: (m?: number | string, c?: string) => number }>("canvas");
     const current = canvas.zoom();
-    canvas.zoom(typeof current === "number" ? current * factor : "fit-viewport");
+    canvas.zoom(typeof current === "number" ? current * factor : "fit-viewport", "auto");
   };
-  const fit = () =>
-    modelerRef.current?.get<{ zoom: (m: string) => void }>("canvas").zoom("fit-viewport");
+  const fit = () => {
+    const canvas = modelerRef.current?.get<{
+      zoom: (scale?: number | string, center?: string) => number;
+    }>("canvas");
+    if (canvas) fitBpmnViewport(canvas);
+  };
 
   if (error) {
     return <EmptyState icon={AlertTriangle} title="Could not render BPMN" description={error} />;
   }
 
   return (
-    <div className="relative h-full w-full">
+    <div
+      ref={rootRef}
+      className={`relative h-full w-full${isFullscreen ? " bg-background" : ""}`}
+      onWheelCapture={notifyActivity}
+      onPointerDownCapture={notifyActivity}
+    >
       <div ref={containerRef} className="h-full w-full" />
-      <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-1 rounded-md border bg-card/90 p-1 shadow-sm backdrop-blur">
+      {/* Top-right so the minimap owns bottom-right, matching the RF canvases. */}
+      <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md border bg-card/90 p-1 shadow-sm backdrop-blur">
         <Button
           variant="ghost"
           size="icon"
@@ -152,6 +214,7 @@ export function ComparisonBpmnCanvas({ xml, map, decor }: ComparisonBpmnCanvasPr
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fit} title="Fit to view">
           <Maximize className="h-4 w-4" />
         </Button>
+        <CanvasFullscreenButton isFullscreen={isFullscreen} onToggle={toggleFullscreen} />
       </div>
     </div>
   );

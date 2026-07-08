@@ -157,3 +157,63 @@ export function prefetchProcessTabs(qc: QueryClient, log: EventLogDetail): void 
     staleTime: 30_000,
   });
 }
+
+/**
+ * Best-effort secondary warm, fired (never awaited) during the first-load
+ * splash's animation window. On top of the primary list routes/data, this warms
+ * the *drill-down* the user is most likely to hit next so it, too, renders from
+ * cache instead of a skeleton:
+ *  - the top few `ready` event logs' detail + every process/OCEL tab,
+ *  - the first few dashboards' detail,
+ *  - and (via the optional `warmRoute` handed down from the splash) the RSC
+ *    payload / route chunk for the first process + dashboard detail PAGE.
+ * Everything is guarded and swallowed — a miss just means that page loads on the
+ * click, exactly as before. Bounded (top 3) so a huge workspace stays cheap.
+ */
+export async function warmSecondaryData(
+  qc: QueryClient,
+  warmRoute?: (route: string) => Promise<void> | void,
+): Promise<void> {
+  // Processes: reuse the list the splash already warmed (or fetch it, deduped by
+  // React Query), then warm the top ready logs' detail + tabs.
+  try {
+    const logs =
+      qc.getQueryData<EventLogSummary[]>([...queryKeys.eventLogs(), {}]) ??
+      (await qc.fetchQuery({
+        queryKey: [...queryKeys.eventLogs(), {}],
+        queryFn: () => api<EventLogSummary[]>(eventLogsListPath()),
+        staleTime: STALE,
+      })) ??
+      [];
+    const ready = logs.filter((l) => l.status === "ready");
+    if (ready[0]) void warmRoute?.(`/processes/${ready[0].id}`);
+    await Promise.allSettled(ready.slice(0, 3).map((l) => warmLogDetail(qc, l.id)));
+  } catch {
+    /* best-effort */
+  }
+
+  // Dashboards: warm the top few details + the first dashboard's detail route.
+  try {
+    const dashboards =
+      qc.getQueryData<DashboardSummary[]>(dashboardKeys.all()) ??
+      (await qc.fetchQuery({
+        queryKey: dashboardKeys.all(),
+        queryFn: () => api<DashboardSummary[]>(dashboardsListPath()),
+        staleTime: STALE,
+      })) ??
+      [];
+    if (dashboards[0]) void warmRoute?.(`/dashboards/${dashboards[0].id}`);
+    dashboards.slice(0, 3).forEach((d) => prefetchDashboard(qc, d.id));
+  } catch {
+    /* best-effort */
+  }
+}
+
+async function warmLogDetail(qc: QueryClient, id: string): Promise<void> {
+  const detail = await qc.fetchQuery({
+    queryKey: queryKeys.eventLog(id),
+    queryFn: () => api<EventLogDetail>(eventLogPath(id)),
+    staleTime: STALE,
+  });
+  prefetchProcessTabs(qc, detail);
+}

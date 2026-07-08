@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarRange, Check, RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,28 @@ function fmt(ms: number): string {
   });
 }
 
+/** Reconstruct the slider window from the board's committed time entries so a
+ * persisted / shared time range shows on the thumbs (not just in the data). The
+ * entries carry naive-UTC wall-clock literals (`toNaiveUtcString`), so parse
+ * them as UTC (`+ "Z"`) to recover the instant. Missing gte/lte ⇒ the full
+ * bound; the window is clamped to the range and falls back to full on garbage. */
+function windowFromCommitted(
+  committed: FilterEntry[] | undefined,
+  range: { field: string; min: number; max: number },
+): [number, number] {
+  let start = range.min;
+  let end = range.max;
+  for (const f of committed ?? []) {
+    if (f.field !== range.field || typeof f.value !== "string") continue;
+    const ms = Date.parse(`${f.value}Z`);
+    if (Number.isNaN(ms)) continue;
+    const clamped = Math.min(Math.max(ms, range.min), range.max);
+    if (f.op === "gte") start = clamped;
+    else if (f.op === "lte") end = clamped;
+  }
+  return end < start ? [range.min, range.max] : [start, end];
+}
+
 /**
  * The dashboard's bottom time-range slider. Narrows the log's start/end window.
  * Dragging is visual only (the labels track the thumbs live); the range is
@@ -36,9 +58,13 @@ function fmt(ms: number): string {
  */
 export function DashboardTimeRange({
   bounds,
+  committed,
   onChange,
 }: {
   bounds: TimeBounds | undefined;
+  /** The board's committed time-range entries – seeds the thumbs on mount so a
+   * persisted (and thus *shared*) window shows, instead of always full span. */
+  committed?: FilterEntry[];
   onChange: (entries: FilterEntry[]) => void;
 }) {
   const range = useMemo(() => {
@@ -54,11 +80,25 @@ export function DashboardTimeRange({
   const [value, setValue] = useState<[number, number] | null>(null);
   const [applied, setApplied] = useState<[number, number] | null>(null);
 
-  // Reset both to the full span whenever the bound log changes.
+  // Seed from the committed window on the *first* run only (read via ref so a
+  // later apply/reset – which changes `committed` – doesn't stomp the thumbs);
+  // a subsequent bound-log change resets to the full span (the old window is
+  // meaningless for the new log).
+  const committedRef = useRef(committed);
+  committedRef.current = committed;
+  const seededRef = useRef(false);
   useEffect(() => {
-    const full = range ? ([range.min, range.max] as [number, number]) : null;
-    setValue(full);
-    setApplied(full);
+    if (!range) {
+      setValue(null);
+      setApplied(null);
+      return;
+    }
+    const w = seededRef.current
+      ? ([range.min, range.max] as [number, number])
+      : windowFromCommitted(committedRef.current, range);
+    seededRef.current = true;
+    setValue(w);
+    setApplied(w);
   }, [range]);
 
   if (!range || !value || !applied) {

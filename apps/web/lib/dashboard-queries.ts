@@ -73,6 +73,14 @@ export interface CanvasSettings {
   presets: FilterPreset[];
   /** Which preset applies on load (view mode). `null` = no saved filter. */
   active_preset_id: string | null;
+  /** The board's committed live column-filter bar. Persisted so a *shared*
+   * board opens on the owner's filtered view. `undefined` (legacy / never
+   * committed) ⇒ fall back to the active preset. */
+  column_filters?: FilterEntry[];
+  /** The board's committed time-range window (0–2 synthetic `timestamp`
+   * gte/lte entries). Persisted so a shared board opens on the owner's time
+   * range. `undefined` ⇒ full span. */
+  time_filters?: FilterEntry[];
 }
 
 export const DEFAULT_CARD_CHROME: CardChrome = { border: true };
@@ -172,6 +180,13 @@ export function canvasSettings(raw: Partial<CanvasSettings> | null | undefined):
     presets,
     // Drop a dangling reference to a deleted preset.
     active_preset_id: presets.some((p) => p.id === activeId) ? activeId : null,
+    // Kept as-is (arrays) or dropped to `undefined` (absent ⇒ legacy board).
+    column_filters: Array.isArray(raw?.column_filters)
+      ? (raw.column_filters as FilterEntry[])
+      : undefined,
+    time_filters: Array.isArray(raw?.time_filters)
+      ? (raw.time_filters as FilterEntry[])
+      : undefined,
   };
 }
 
@@ -179,6 +194,18 @@ export function canvasSettings(raw: Partial<CanvasSettings> | null | undefined):
 export function activePresetFilters(settings: CanvasSettings): FilterEntry[] {
   const active = settings.presets.find((p) => p.id === settings.active_preset_id);
   return active ? active.filters : [];
+}
+
+/** The column filters the board should *load* with. Prefers the committed live
+ * bar (so a shared board opens on the owner's exact view); falls back to the
+ * active preset for legacy boards that never committed a live bar. */
+export function initialColumnFilters(settings: CanvasSettings): FilterEntry[] {
+  return settings.column_filters ?? activePresetFilters(settings);
+}
+
+/** The time-range window the board should load with (empty ⇒ full span). */
+export function initialTimeFilters(settings: CanvasSettings): FilterEntry[] {
+  return settings.time_filters ?? [];
 }
 
 export interface DashboardSummary {

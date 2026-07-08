@@ -29,6 +29,7 @@
   "@/components/empty-state",
   "@/components/ai/ai-guidance-card",
   "@/components/visualizations/canvases/shared/canvas-shell",
+  "@/components/visualizations/canvases/shared/canvas-controls",
   "@/components/visualizations/canvases/shared/canvas-skeleton",
   "@/lib/api",
   "@/lib/cn",

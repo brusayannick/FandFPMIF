@@ -238,6 +238,17 @@ export function locateActivity(modeler: BpmnModelerLike, query: string): boolean
   return true;
 }
 
+// diagram-js-minimap ships a top-right, light-only panel. Restyle it to match
+// the React Flow minimap (bottom-right, card surface, rounded) and let the
+// canvas fade it via the `ff-minimap-hidden` class (opacity gate). We drive
+// open/close ourselves, so the built-in toggle is hidden.
+const MINIMAP_CSS = `
+.djs-minimap{top:auto!important;bottom:12px!important;right:12px!important;background:var(--card)!important;border:1px solid var(--border)!important;border-radius:6px!important;box-shadow:0 1px 2px rgba(0,0,0,.08)!important;transition:opacity .3s ease!important;}
+.djs-minimap .map{width:200px;height:140px;}
+.djs-minimap .toggle{display:none!important;}
+.djs-minimap.ff-minimap-hidden{opacity:0!important;pointer-events:none!important;}
+`;
+
 const STYLE_ID = "ff-conformance-styles";
 
 /** Map a 0..1 deviation ratio to a red fill/stroke pair. Exported so the
@@ -270,6 +281,7 @@ export function injectConformanceStyles(): void {
 ${devRules.join("\n")}
 .ff-conf-badge{font:600 10px/1.35 ui-sans-serif,system-ui,sans-serif;background:${CONF_COLORS.badge};color:#fff;padding:1px 5px;border-radius:6px;white-space:nowrap;pointer-events:none;box-shadow:0 1px 2px rgba(0,0,0,.25);}
 .ff-conf-badge-warn{background:${CONF_COLORS.badgeWarn};}
+${MINIMAP_CSS}
 `;
   const style = document.createElement("style");
   style.id = STYLE_ID;

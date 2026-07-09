@@ -23,10 +23,15 @@ export interface GeneralSettings {
 }
 
 export interface DfgRenderSettings {
-  /** Fraction of activities to show, sorted by frequency. 1 = all, 0.5 = top half. */
-  activitiesShown: number;
-  /** Fraction of edges to show, sorted by frequency, after the activity filter. */
-  connectionsShown: number;
+  /** Fraction of activities to show, sorted by frequency. 1 = all, 0.5 = top
+   *  half. "auto" = knee of the cumulative frequency-coverage curve (Kneedle),
+   *  resolved client-side from the DFG payload (modules/discovery/panel/
+   *  auto-threshold.ts); dragging the slider writes a number and freezes it. */
+  activitiesShown: number | "auto";
+  /** Fraction of edges to show, sorted by frequency, after the activity
+   *  filter. "auto" = knee of the FULL edge frequency curve applied as a
+   *  frequency cutoff to the candidates. */
+  connectionsShown: number | "auto";
   hideSelfLoops: boolean;
   /** Keep only the top N% of visible edges by count (100 = show all). Unlike
    *  the connections slider this does NOT affect node visibility – nodes stay
@@ -34,25 +39,10 @@ export interface DfgRenderSettings {
   edgeTopPercent: 100 | 95 | 90 | 85 | 80 | 70;
   edgeLabel: "count" | "duration" | "off";
   edgeThicknessEncoding: "linear" | "log" | "off";
-  /** Layout mode for DFG visualization:
-   *  - "flow-vertical"      Celonis-style layered (Sugiyama) top-down flow: ELK layered with
-   *                         the dominant path straightened into a vertical spine, crossing
-   *                         minimisation + orthogonal-ish edge routing
-   *  - "flow-horizontal"    same layered algorithm, left-to-right
-   *  - "temporal"           nodes along time axis by mean_trace_position; greedy lane-packing
-   *  - "temporal-phases-2"  5 phase columns (quintile); 3× node-height gap
-   *  - "temporal-phases-3"  7 fine phase columns; 2× node-height gap
-   *  - "temporal-swimlane"  swimlane bands by role (Entry / Core / Exit)
-   *  - "happy-path-tower"   happy-path spine + parallel activities stacked per-column
-   *  Temporal modes require `mean_trace_position` on activities (discovery serializer v3+). */
-  layoutMode:
-    | "flow-vertical"
-    | "flow-horizontal"
-    | "temporal"
-    | "temporal-phases-2"
-    | "temporal-phases-3"
-    | "temporal-swimlane"
-    | "happy-path-tower";
+  /** The DFG ships exactly one layout — the measured Celonis clone
+   *  ("Process flow (Celonis)"). Older persisted values are coerced in
+   *  `selectDfg`. */
+  layoutMode: "celonis-classic";
 }
 
 export interface PetriRenderSettings {
@@ -139,15 +129,18 @@ export const DEFAULT_GENERAL: GeneralSettings = {
 };
 
 export const DEFAULT_DFG: DfgRenderSettings = {
-  activitiesShown: 1,
-  connectionsShown: 1,
+  // Auto-simplified on first open (Celonis-style): the knee of the frequency
+  // curve decides how many activities/connections show; users can drag the
+  // sliders up to 100% at any time. Persisted numeric values from before the
+  // "auto" sentinel keep working unchanged.
+  activitiesShown: "auto",
+  connectionsShown: "auto",
   hideSelfLoops: false,
   edgeTopPercent: 100,
   edgeLabel: "count",
   edgeThicknessEncoding: "log",
-  // Celonis-style layered flow is the default – the temporal modes stay
-  // available in the DFG toolbar's layout switcher.
-  layoutMode: "flow-vertical",
+  // The DFG ships exactly one layout: the measured Celonis clone.
+  layoutMode: "celonis-classic",
 };
 
 export const DEFAULT_PETRI: PetriRenderSettings = {
@@ -287,8 +280,23 @@ export const useVizSettings = create<VizSettingsState>()((set) => ({
 // Convenience selectors
 // --------------------------------------------------------------------------
 
+// Coerced-settings cache: selectors MUST return stable references (see the
+// EMPTY_POSITIONS note below) — building a fresh object per call makes
+// useSyncExternalStore loop forever ("Maximum update depth exceeded").
+const coercedDfg = new WeakMap<DfgRenderSettings, DfgRenderSettings>();
+
 export function selectDfg(state: VizSettingsState, logId: string, moduleId: string): DfgRenderSettings {
-  return state.perLog[logId]?.[moduleId]?.dfg ?? DEFAULT_DFG;
+  const stored = state.perLog[logId]?.[moduleId]?.dfg;
+  if (!stored) return DEFAULT_DFG;
+  // Migration: older builds persisted removed layout modes — everything
+  // renders as the Celonis clone now. Cached per stored ref for stability.
+  if ((stored.layoutMode as string) === "celonis-classic") return stored;
+  let c = coercedDfg.get(stored);
+  if (!c) {
+    c = { ...stored, layoutMode: "celonis-classic" };
+    coercedDfg.set(stored, c);
+  }
+  return c;
 }
 
 export function selectPetri(state: VizSettingsState, logId: string, moduleId: string): PetriRenderSettings {

@@ -5,9 +5,7 @@ import {
   AlertTriangle,
   ArrowUp,
   Download,
-  RotateCcw,
   Search,
-  Settings2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -44,16 +42,12 @@ import { PetriNetCanvas } from "./canvases/PetriNetCanvas";
 import { PrefixTreeCanvas } from "./canvases/PrefixTreeCanvas";
 import { ProcessTreeCanvas } from "./canvases/ProcessTreeCanvas";
 import { DfgDetailsPanel } from "./dfg-details-panel";
-import { computeDfgVisibility } from "./dfg-filter";
 import {
   DiscoverySettingsProvider,
-  useDfgSettings,
   useHeuristicsRenderSettings,
   usePetriSettings,
   useProcessTreeSettings,
-  useResetPositions,
 } from "./discovery-settings-context";
-import { SettingsSheet } from "./settings-sheet";
 
 import {
   downloadBpmn,
@@ -92,8 +86,6 @@ export function DiscoveryPanel({ logId, moduleId }: { logId: string; moduleId: s
 
 function DiscoveryPanelContent({ logId }: { logId: string }) {
   const [view, setView] = useState<View>("dfg");
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const resetPositions = useResetPositions();
 
   return (
     <div className="flex flex-col gap-4">
@@ -127,47 +119,7 @@ function DiscoveryPanelContent({ logId }: { logId: string }) {
           })}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm" className="cursor-pointer gap-1.5">
-                <RotateCcw className="h-3.5 w-3.5" />
-                Reset layout
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Reset layout?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  All dragged node positions for this module on this log will be discarded and
-                  the auto-layout will be reapplied. This cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  className="cursor-pointer"
-                  onClick={() => resetPositions()}
-                >
-                  Reset
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-
-          <Button
-            variant="outline"
-            size="sm"
-            className="cursor-pointer gap-1.5"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-            Configure
-          </Button>
-        </div>
       </div>
-
-      <SettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
 
       <div className="space-y-3">
         {view === "dfg" && <DfgTab logId={logId} />}
@@ -238,145 +190,11 @@ function FilterField({ label, children }: { label: string; children: React.React
 // --------------------------------------------------------------------------
 
 function DfgTab({ logId }: { logId: string }) {
-  const [dfg, setDfg] = useDfgSettings();
-  const [variantPct, setVariantPct] = useState<number>(1);
-  const { data, isLoading, isError, error } = useDiscoveryDfg(logId, variantPct < 1 ? variantPct : undefined);
-
+  const { data, isLoading, isError, error } = useDiscoveryDfg(logId);
   const [selected, setSelected] = useState<{ kind: "node" | "edge"; id: string } | null>(null);
-
-  // Live counts: ask the same helper the canvas uses, so the slider labels
-  // and the rendered graph never disagree (e.g. spanning-floor edges still
-  // show up in the count even when the user drags connections to 0).
-  const counts = (() => {
-    if (!data) {
-      return { totalActivities: 0, shownActivities: 0, candidateEdges: 0, shownEdges: 0 };
-    }
-    const filtered = computeDfgVisibility(data, dfg);
-    return {
-      totalActivities: data.activities.length,
-      shownActivities: filtered.visibleActivities.length,
-      candidateEdges: filtered.candidateEdges.length,
-      shownEdges: filtered.visibleEdges.length,
-    };
-  })();
 
   return (
     <>
-      <div
-        data-tour="discovery-filters"
-        className="space-y-3 rounded-lg border bg-muted/40 px-4 py-3 text-xs"
-      >
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-3">
-          <RankSlider
-            label="Activities"
-            fraction={dfg.activitiesShown}
-            shown={counts.shownActivities}
-            total={counts.totalActivities}
-            onChange={(v) => setDfg({ activitiesShown: v })}
-          />
-          <RankSlider
-            label="Connections"
-            fraction={dfg.connectionsShown}
-            shown={counts.shownEdges}
-            total={counts.candidateEdges}
-            onChange={(v) => setDfg({ connectionsShown: v })}
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t pt-3">
-          <FilterField label="Algorithm">
-            <span className="text-xs font-medium text-foreground">Direct-Follows Graph</span>
-          </FilterField>
-          <FilterField label="Hide self-loops">
-            <Switch
-              checked={dfg.hideSelfLoops}
-              onCheckedChange={(v) => setDfg({ hideSelfLoops: v })}
-            />
-          </FilterField>
-          <FilterField label="Show top edges">
-            <Select
-              value={String(dfg.edgeTopPercent)}
-              onValueChange={(v) => setDfg({ edgeTopPercent: Number(v) as typeof dfg.edgeTopPercent })}
-            >
-              <SelectTrigger className="h-7 w-20 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="100">100%</SelectItem>
-                <SelectItem value="95">95%</SelectItem>
-                <SelectItem value="90">90%</SelectItem>
-                <SelectItem value="85">85%</SelectItem>
-                <SelectItem value="80">80%</SelectItem>
-                <SelectItem value="70">70%</SelectItem>
-              </SelectContent>
-            </Select>
-          </FilterField>
-          <FilterField label="Edge label">
-            <Select value={dfg.edgeLabel} onValueChange={(v) => setDfg({ edgeLabel: v as typeof dfg.edgeLabel })}>
-              <SelectTrigger className="h-7 w-32 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="count">Count</SelectItem>
-                <SelectItem value="duration">Duration</SelectItem>
-                <SelectItem value="off">Off</SelectItem>
-              </SelectContent>
-            </Select>
-          </FilterField>
-          <FilterField label="Thickness">
-            <Select
-              value={dfg.edgeThicknessEncoding}
-              onValueChange={(v) => setDfg({ edgeThicknessEncoding: v as typeof dfg.edgeThicknessEncoding })}
-            >
-              <SelectTrigger className="h-7 w-28 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="log">Log</SelectItem>
-                <SelectItem value="linear">Linear</SelectItem>
-                <SelectItem value="off">Off</SelectItem>
-              </SelectContent>
-            </Select>
-          </FilterField>
-          <FilterField label="Layout">
-            <Select
-              value={dfg.layoutMode}
-              onValueChange={(v) => setDfg({ layoutMode: v as typeof dfg.layoutMode })}
-            >
-              <SelectTrigger className="h-7 w-40 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="flow-vertical">Flow (top-down)</SelectItem>
-                <SelectItem value="flow-horizontal">Flow (left-right)</SelectItem>
-                <SelectItem value="temporal">Temporal</SelectItem>
-                <SelectItem value="temporal-phases-2">Phases #2</SelectItem>
-                <SelectItem value="temporal-phases-3">Phases #3</SelectItem>
-                <SelectItem value="temporal-swimlane">Swimlane</SelectItem>
-                <SelectItem value="happy-path-tower">Happy Path Tower</SelectItem>
-              </SelectContent>
-            </Select>
-          </FilterField>
-          <FilterField label="Variant coverage">
-            <Select
-              value={String(variantPct)}
-              onValueChange={(v) => setVariantPct(Number(v))}
-            >
-              <SelectTrigger className="h-7 w-20 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1">100%</SelectItem>
-                <SelectItem value="0.95">95%</SelectItem>
-                <SelectItem value="0.9">90%</SelectItem>
-                <SelectItem value="0.8">80%</SelectItem>
-                <SelectItem value="0.7">70%</SelectItem>
-                <SelectItem value="0.5">50%</SelectItem>
-              </SelectContent>
-            </Select>
-          </FilterField>
-        </div>
-      </div>
-
       {isLoading ? (
         <CanvasSkeleton />
       ) : isError || !data ? (
@@ -405,38 +223,6 @@ function DfgTab({ logId }: { logId: string }) {
   );
 }
 
-function RankSlider({
-  label,
-  fraction,
-  shown,
-  total,
-  step = 0.005,
-  onChange,
-}: {
-  label: string;
-  fraction: number;
-  shown: number;
-  total: number;
-  step?: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <Label className="w-24 shrink-0 text-xs text-muted-foreground font-normal">{label}</Label>
-      <Slider
-        value={[fraction]}
-        min={0}
-        max={1}
-        step={step}
-        onValueChange={(v) => onChange(v[0] ?? 0)}
-        className="flex-1"
-      />
-      <span className="tabular-nums w-20 text-right text-muted-foreground shrink-0">
-        {shown} / {total}
-      </span>
-    </div>
-  );
-}
 
 type PetriAlgo = "alpha" | "alpha-plus" | "inductive" | "imf" | "ilp";
 

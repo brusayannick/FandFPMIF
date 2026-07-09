@@ -39,7 +39,7 @@ export const BorderBeam = React.forwardRef<HTMLDivElement, BorderBeamProps>(
     <div
       ref={ref}
       className={cn(
-        "pointer-events-none absolute inset-0 rounded-[inherit] motion-reduce:hidden",
+        "pointer-events-none absolute inset-0 m-0 rounded-[inherit] motion-reduce:hidden",
         "motion-safe:animate-[border-beam_var(--border-beam-duration,6s)_linear_infinite]",
         className
       )}

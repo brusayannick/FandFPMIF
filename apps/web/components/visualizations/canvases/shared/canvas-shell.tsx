@@ -8,6 +8,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
+  useNodesInitialized,
   useReactFlow,
   type Edge,
   type EdgeMouseHandler,
@@ -117,6 +118,20 @@ function CanvasInner({
     }
   }, [fitViewKey, fitView]);
 
+  // Exact initial framing. The `fitView` prop (and any mount-time rAF) can run
+  // before React Flow's ResizeObserver has measured node dimensions — the fit
+  // then uses zero/stale heights and leaves the graph mis-framed. Re-fit once
+  // when all nodes report measured; gated to a single run so later node
+  // additions (e.g. filter sliders) never yank the user's viewport.
+  const nodesInitialized = useNodesInitialized();
+  const didInitFit = useRef(false);
+  useEffect(() => {
+    if (!nodesInitialized || didInitFit.current) return;
+    didInitFit.current = true;
+    const id = requestAnimationFrame(() => fitView({ padding: 0.2 }));
+    return () => cancelAnimationFrame(id);
+  }, [nodesInitialized, fitView]);
+
   // Re-fit when entering/leaving fullscreen (the viewport just resized). Skip
   // the initial run – the `fitView` prop already frames the graph on mount.
   const didMountFs = useRef(false);
@@ -153,6 +168,11 @@ function CanvasInner({
         onMove={notifyActivity}
         onNodeDrag={notifyActivity}
         nodesDraggable
+        // Without a threshold a plain CLICK counts as a drag (React Flow
+        // default 0) and fires onNodeDragStop — canvases that persist dragged
+        // positions then freeze a node wherever it happened to be, including
+        // mid-layout-animation. Require real movement before drag semantics.
+        nodeDragThreshold={2}
         nodesConnectable={false}
         nodesFocusable
         edgesFocusable

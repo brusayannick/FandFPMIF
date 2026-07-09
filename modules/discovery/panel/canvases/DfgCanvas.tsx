@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  MarkerType,
   useEdgesState,
   useNodesState,
   type Edge,
@@ -13,14 +12,11 @@ import {
 
 import { formatDuration, formatNumber } from "@/lib/format";
 
-import { temporalLayout } from "../layout/temporal";
-import { temporalPhasesLayout } from "../layout/temporal-phases";
-import { temporalSwimlaneLayout } from "../layout/temporal-swimlane";
-import { happyPathTowerLayout } from "../layout/happy-path-tower";
-import { dominantFlowLayout } from "../layout/dominant-flow";
-import { mapEdgeType, truncate } from "../layout/direction";
+import { celonisFlowLayout } from "../layout/celonis-flow";
 import { ActivityNode, type ActivityNodeData } from "../nodes/activity-node";
-import { ElkSplineEdge } from "../edges/elk-spline-edge";
+import { TerminalNode, type TerminalNodeData } from "../nodes/terminal-node";
+import { CelonisEdge } from "../edges/celonis-edge";
+import { DfgCanvasControls } from "../dfg-canvas-controls";
 import { DfgNodeMenu, type DfgNodeMenuTarget } from "../dfg-node-menu";
 import type { DfgData } from "../types";
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
@@ -34,8 +30,27 @@ import {
   usePersistNodePositions,
 } from "../discovery-settings-context";
 
-const nodeTypes = { activity: ActivityNode } as const;
-const edgeTypes = { "elk-spline": ElkSplineEdge } as const;
+const nodeTypes = { activity: ActivityNode, terminal: TerminalNode } as const;
+const edgeTypes = { celonis: CelonisEdge } as const;
+
+/** Pseudo-node ids for the Process-flow terminals (never real activity ids —
+ *  activity ids are the activity labels themselves). */
+const START_ID = "__START__";
+const END_ID = "__END__";
+/** Terminal pill size — must match what celonisFlowLayout assumes. Wide
+ *  enough that "PROCESS START" + case count render on one line. */
+const TERMINAL_SIZE = { width: 184, height: 36 } as const;
+/** Sizes measured from Celonis for the 1:1 clone mode. Height = their
+ *  two-line card (59px) so long names always fit 2 clamped lines + count. */
+const CELONIS_NODE_SIZE = { width: 220, height: 59 } as const;
+const CELONIS_TERMINAL_SIZE = { width: 112, height: 43 } as const;
+
+/** Celonis-style compact count: 965, 1K, 36.7K, 1.2M. */
+function compactCount(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}K`;
+  return String(n);
+}
 
 /** Duration of the node-position morph when a re-layout replaces an existing one. */
 const LAYOUT_ANIMATION_MS = 420;
@@ -96,6 +111,9 @@ export function DfgCanvas({
   nodesRef.current = nodes;
   const animRef = useRef(0);
   const lastModeRef = useRef<typeof dfg.layoutMode | null>(null);
+  // Committed (post-layout, post-merge) positions — baseline for deciding
+  // whether a drag actually moved a node (see onNodeDragStop).
+  const layoutPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
@@ -108,12 +126,18 @@ export function DfgCanvas({
     // Connectivity-aware Celonis-style filter (sliders + spanning floor).
     const { visibleActivities, visibleEdges } = computeDfgVisibility(data, dfg);
 
+    // The DFG has exactly one layout — the Celonis clone. Persisted legacy
+    // layoutMode values from older builds render as Celonis too.
+    const isCelonis = true;
+    const isClassic = true;
+
     const activityNodes: Node<ActivityNodeData>[] = visibleActivities.map((a) => ({
       id: a.id,
       type: "activity",
       position: { x: 0, y: 0 },
       data: {
-        label: truncate(a.label, general.nodeLabelMaxLength),
+        // The Celonis skin does its own 2-line CSS clamp with ellipsis.
+        label: a.label,
         frequency: a.frequency,
         isStart: startSet.has(a.id),
         isEnd: endSet.has(a.id),
@@ -124,26 +148,20 @@ export function DfgCanvas({
             ? 0
             : (a.frequency / Math.max(maxFreq, 1)) * general.colorIntensity,
         highlighted: a.id === highlightedActivityId,
+        ...(isCelonis ? { handleOrientation: "vertical" as const } : {}),
+        ...(isClassic
+          ? {
+              variant: "celonis" as const,
+              countLabel: compactCount(a.frequency),
+              freqRatio: a.frequency / Math.max(maxFreq, 1),
+            }
+          : {}),
       },
     }));
 
-    const isFlow = dfg.layoutMode === "flow-vertical" || dfg.layoutMode === "flow-horizontal";
-    // Flow layouts render along ELK's routed bend points (orthogonal channels,
-    // rounded corners) via the elk-spline edge; the other layouts keep the
-    // user-selected xyflow curve style.
-    const edgeType = isFlow
-      ? ("elk-spline" as const)
-      : mapEdgeType(general.edgeRouting === "spline" ? "spline" : general.edgeRouting);
+    const edgeType = "celonis" as const;
 
     const dfgEdges: Edge[] = visibleEdges.map((e) => {
-      const ratio = e.frequency / Math.max(maxEdgeFreq, 1);
-      const stroke =
-        dfg.edgeThicknessEncoding === "off"
-          ? 1.5
-          : dfg.edgeThicknessEncoding === "linear"
-            ? 0.5 + 4 * ratio
-            : 1 + Math.log10(1 + e.frequency);
-
       // Edge label modes: explicit (no silent fall-through to count when
       // duration is selected but missing – show "–" so the user knows).
       let label: string | undefined;
@@ -155,8 +173,8 @@ export function DfgCanvas({
             ? formatDuration(e.performance_seconds)
             : "–";
       } else {
-        // count
-        label = formatNumber(e.frequency);
+        // count — the Celonis clone abbreviates like the original (# 36.7K).
+        label = `# ${compactCount(e.frequency)}`;
       }
 
       return {
@@ -164,28 +182,102 @@ export function DfgCanvas({
         source: e.source,
         target: e.target,
         label,
-        labelStyle: { fill: "var(--muted-foreground)", fontSize: 10 },
-        labelBgPadding: [4, 2],
-        labelBgBorderRadius: 4,
+        labelStyle: { fill: "var(--muted-foreground)", fontSize: isClassic ? 11 : 10 },
+        labelBgPadding: [4, 2] as [number, number],
+        labelBgBorderRadius: isClassic ? 11 : 4,
         labelBgStyle: { fill: "var(--card)", stroke: "var(--border)", strokeWidth: 1 },
         type: edgeType,
         animated: false,
         style: {
-          stroke: "var(--muted-foreground)",
-          strokeWidth: stroke,
-          opacity: 0.5 + 0.5 * ratio,
+          // Measured Celonis styling: uniform teal, width ∝ frequency
+          // (ceil(12·f/max), min 1), no fading.
+          stroke: "var(--dfg-edge, rgb(36, 148, 153))",
+          strokeWidth: Math.max(1, Math.ceil((12 * e.frequency) / Math.max(maxEdgeFreq, 1))),
+          opacity: 1,
         },
-        markerEnd: { type: MarkerType.ArrowClosed, color: "var(--muted-foreground)" },
       };
     });
 
-    // TB needs more vertical breathing room (edge labels sit on the vertical
-    // segments and there's no horizontal travel to absorb them); LR is the
-    // opposite. So spacing is direction-aware. Flow layouts fix their own
-    // direction and ignore the general layout-direction setting.
-    const isVertical = isFlow
-      ? dfg.layoutMode === "flow-vertical"
-      : general.layoutDirection === "TB" || general.layoutDirection === "BT";
+    // Process-flow terminals: pseudo-nodes bracketing the map (Celonis's
+    // "Process start"/"Process end"), one dashed edge per visible start/end
+    // activity. Injected only for this layout so the other modes stay
+    // untouched. Labels only in count mode — terminals have no duration.
+    const celonisNodes: Node[] = [...activityNodes];
+    const celonisEdges: Edge[] = [...dfgEdges];
+    if (isCelonis) {
+      const terminalStyle = {
+        stroke: "var(--dfg-edge, rgb(36, 148, 153))",
+        strokeWidth: 1,
+        opacity: 1,
+      } as const;
+      const visibleStarts = visibleActivities.filter((a) => startSet.has(a.id));
+      const visibleEnds = visibleActivities.filter((a) => endSet.has(a.id));
+      if (visibleStarts.length > 0) {
+        const total = visibleStarts.reduce((s, a) => s + (data.start_activities[a.id] ?? 0), 0);
+        celonisNodes.push({
+          id: START_ID,
+          type: "terminal",
+          position: { x: 0, y: 0 },
+          data: {
+            kind: "start",
+            caseCount: total,
+            orientation: "vertical",
+            ...(isClassic ? { variant: "celonis" as const } : {}),
+          } satisfies TerminalNodeData,
+        });
+        for (const a of visibleStarts) {
+          const c = data.start_activities[a.id] ?? 0;
+          celonisEdges.push({
+            id: `${START_ID}__${a.id}`,
+            source: START_ID,
+            target: a.id,
+            type: "celonis",
+            label:
+              dfg.edgeLabel === "count" && metric !== "performance"
+                ? isClassic
+                  ? `# ${compactCount(c)}`
+                  : formatNumber(c)
+                : undefined,
+            labelStyle: { fill: "var(--muted-foreground)", fontSize: isClassic ? 11 : 10 },
+            ...(isClassic ? { labelBgBorderRadius: 11 } : {}),
+            style: terminalStyle,
+          });
+        }
+      }
+      if (visibleEnds.length > 0) {
+        const total = visibleEnds.reduce((s, a) => s + (data.end_activities[a.id] ?? 0), 0);
+        celonisNodes.push({
+          id: END_ID,
+          type: "terminal",
+          position: { x: 0, y: 0 },
+          data: {
+            kind: "end",
+            caseCount: total,
+            orientation: "vertical",
+            ...(isClassic ? { variant: "celonis" as const } : {}),
+          } satisfies TerminalNodeData,
+        });
+        for (const a of visibleEnds) {
+          const c = data.end_activities[a.id] ?? 0;
+          celonisEdges.push({
+            id: `${a.id}__${END_ID}`,
+            source: a.id,
+            target: END_ID,
+            type: "celonis",
+            label:
+              dfg.edgeLabel === "count" && metric !== "performance"
+                ? isClassic
+                  ? `# ${compactCount(c)}`
+                  : formatNumber(c)
+                : undefined,
+            labelStyle: { fill: "var(--muted-foreground)", fontSize: isClassic ? 11 : 10 },
+            ...(isClassic ? { labelBgBorderRadius: 11 } : {}),
+            style: terminalStyle,
+          });
+        }
+      }
+    }
+
 
     // Within-layer tie-breaker. Prefer real temporal order (mean_trace_position
     // from the discovery serializer v3+): activities that occur earlier in
@@ -202,9 +294,8 @@ export function DfgCanvas({
     }
     const hasTemporal = positionByActivity.size > 0;
 
-    const nodeSize = isVertical
-      ? { width: 220, height: 60 }
-      : { width: 200, height: 64 };
+    const nodeSize = CELONIS_NODE_SIZE;
+    const termSize = CELONIS_TERMINAL_SIZE;
 
     const modeChanged = lastModeRef.current !== null && lastModeRef.current !== dfg.layoutMode;
     lastModeRef.current = dfg.layoutMode;
@@ -230,8 +321,12 @@ export function DfgCanvas({
 
       const finish = () => {
         setNodes(merged);
+        layoutPosRef.current = new Map(merged.map((n) => [n.id, n.position]));
         setLaid(true);
-        if (modeChanged) setFitNonce((v) => v + 1);
+        // Refit on mode switches AND on the very first layout: ReactFlow's
+        // mount-time fitView can frame before a synchronous layout's node
+        // dimensions settle, leaving the initial viewport misaligned.
+        if (modeChanged || !laid) setFitNonce((v) => v + 1);
       };
 
       if (!laid || !moves) {
@@ -263,80 +358,48 @@ export function DfgCanvas({
       animRef.current = window.requestAnimationFrame(step);
     };
 
-    if (isFlow) {
-      // Celonis-style layered flow (ELK, async): dominant path straightened
-      // into the central spine, orthogonal-ish routing.
+    if (isCelonis) {
+      // Process flow (Celonis look): custom Sugiyama — DP max-frequency spine
+      // pinned to the center column, loop-backs in outside lanes, terminal
+      // pseudo-nodes. Synchronous, so the morph animation runs same-tick.
+      //
+      // Pin every node to the exact pixel width the layout assumed: activity
+      // cards are content-sized by default, so their real handle x would
+      // drift from the layout's column centers and trip the edge renderer's
+      // drag-fallback into straight beziers through the map.
+      for (const n of celonisNodes) {
+        n.style = {
+          ...(n.style ?? {}),
+          width: n.type === "terminal" ? termSize.width : nodeSize.width,
+          height: n.type === "terminal" ? termSize.height : nodeSize.height,
+        };
+      }
+      const maxStartCount = Math.max(1, ...Object.values(data.start_activities));
+      const significantStarts = new Set(
+        Object.entries(data.start_activities)
+          .filter(([, c]) => c >= maxStartCount * 0.1)
+          .map(([id]) => id),
+      );
       const edgeFreqMap = new Map<string, number>();
-      for (const e of visibleEdges) edgeFreqMap.set(`${e.source}\u0000${e.target}`, e.frequency);
-      void dominantFlowLayout(activityNodes, dfgEdges, {
-        direction: dfg.layoutMode === "flow-vertical" ? "DOWN" : "RIGHT",
-        nodeSize,
-        edgeFrequency: (s, t) => edgeFreqMap.get(`${s}\u0000${t}`) ?? 0,
-        frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
-        startActivityIds: startSet,
-        endActivityIds: endSet,
-        rankByNode: (id) => positionByActivity.get(id),
-      }).then(apply);
-    } else if (dfg.layoutMode === "temporal" && hasTemporal) {
+      for (const e of visibleEdges) edgeFreqMap.set(`${e.source} ${e.target}`, e.frequency);
       apply(
-        temporalLayout(activityNodes, dfgEdges, {
-          direction: general.layoutDirection,
+        celonisFlowLayout(celonisNodes, celonisEdges, {
           nodeSize,
-          rankByNode: (id) => positionByActivity.get(id),
-        }),
-      );
-    } else if (
-      (dfg.layoutMode === "temporal-phases-2" || dfg.layoutMode === "temporal-phases-3") &&
-      hasTemporal
-    ) {
-      const phaseConfig = {
-        "temporal-phases-2": { phaseCount: 5, phaseGapMultiplier: 3 },
-        "temporal-phases-3": { phaseCount: 7, phaseGapMultiplier: 2 },
-      } as const;
-      const { phaseCount, phaseGapMultiplier } = phaseConfig[dfg.layoutMode];
-      apply(
-        temporalPhasesLayout(activityNodes, dfgEdges, {
-          direction: general.layoutDirection,
-          nodeSize,
-          phaseCount,
-          phaseGapMultiplier,
-          rankByNode: (id) => positionByActivity.get(id),
+          terminalSize: termSize,
+          edgeFrequency: (s, t) => edgeFreqMap.get(`${s} ${t}`) ?? 0,
           frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
-        }),
-      );
-    } else if (dfg.layoutMode === "temporal-swimlane" && hasTemporal) {
-      apply(
-        temporalSwimlaneLayout(activityNodes, dfgEdges, {
-          direction: general.layoutDirection,
-          nodeSize,
-          rankByNode: (id) => positionByActivity.get(id),
-          startCountByNode: (id) => data.start_activities[id] ?? 0,
-          endCountByNode: (id) => data.end_activities[id] ?? 0,
-          frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
-        }),
-      );
-    } else if (dfg.layoutMode === "happy-path-tower") {
-      const edgeFreqMap = new Map<string, number>();
-      for (const e of visibleEdges) edgeFreqMap.set(`${e.source}__${e.target}`, e.frequency);
-      apply(
-        happyPathTowerLayout(activityNodes, dfgEdges, {
-          direction: general.layoutDirection,
-          nodeSize,
-          rankByNode: (id) => positionByActivity.get(id),
-          edgeFrequency: (src, tgt) => edgeFreqMap.get(`${src}__${tgt}`) ?? 0,
-          frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
-          startActivityIds: startSet,
+          // Layout anchoring uses only SIGNIFICANT starts (≥10% of the max
+          // start count): a marginal start like SEPSIS' Leucocytes (18 of
+          // 1050 cases) must not pin a mid-process activity to the top row.
+          // The Process-start terminal still connects to ALL visible starts.
+          startActivityIds: significantStarts,
           endActivityIds: endSet,
-        }),
-      );
-    } else {
-      // Fallback: temporal-family mode without rank data → plain temporal (no ranks).
-      apply(
-        temporalLayout(activityNodes, dfgEdges, {
-          direction: general.layoutDirection,
-          nodeSize,
-          rankByNode: () => undefined,
-        }),
+          rankByNode: (id) => positionByActivity.get(id),
+          startTerminalId: START_ID,
+          endTerminalId: END_ID,
+          routing: "celonis",
+          classic: true,
+        }) as { nodes: Node<ActivityNodeData>[]; edges: Edge[] },
       );
     }
 
@@ -349,9 +412,6 @@ export function DfgCanvas({
     data,
     metric,
     highlightedActivityId,
-    general.layoutDirection,
-    general.edgeRouting,
-    general.nodeLabelMaxLength,
     general.colorIntensity,
     general.theme,
     dfg.activitiesShown,
@@ -359,12 +419,29 @@ export function DfgCanvas({
     dfg.hideSelfLoops,
     dfg.edgeTopPercent,
     dfg.edgeLabel,
-    dfg.edgeThicknessEncoding,
     dfg.layoutMode,
+    // Re-layout when persisted node positions change — this is what makes
+    // "Reset layout" morph the graph back WITHOUT a reload (the store slice
+    // identity changes on reset and after every real drag; both re-merge).
+    positions,
   ]);
 
   const onNodeDragStop = useCallback<NodeMouseHandler>(
     (_, node) => {
+      // Persist only real movement. A plain click (or a click that lands
+      // mid-layout-animation) can end a zero-distance "drag"; persisting it
+      // would freeze the node at a junk position that then survives reloads
+      // via the server-synced store. Belt to canvas-shell's nodeDragThreshold.
+      const base = layoutPosRef.current.get(node.id);
+      // No committed layout yet (drag fired during load/morph) → nothing
+      // meaningful to persist; and a no-op "drag" (≤2px) is a click.
+      if (!base) return;
+      if (
+        Math.abs(base.x - node.position.x) <= 2 &&
+        Math.abs(base.y - node.position.y) <= 2
+      ) {
+        return;
+      }
       persist({ [node.id]: { x: node.position.x, y: node.position.y } });
     },
     [persist],
@@ -372,6 +449,7 @@ export function DfgCanvas({
 
   const onNodeClick = useCallback<NodeMouseHandler>(
     (_, node) => {
+      if (node.type === "terminal") return; // pseudo-nodes have no details
       setMenu(null);
       onSelect?.({ kind: "node", id: node.id });
     },
@@ -393,6 +471,7 @@ export function DfgCanvas({
   // variants). preventDefault suppresses the browser context menu.
   const onNodeContextMenu = useCallback<NodeMouseHandler>((event, node) => {
     event.preventDefault();
+    if (node.type === "terminal") return;
     const label = (node.data as ActivityNodeData | undefined)?.label;
     setMenu({
       activityId: node.id,
@@ -430,6 +509,7 @@ export function DfgCanvas({
       fitViewKey={`${data.kind}-${data.activities.length}-${fitNonce}`}
       miniMap={general.showMinimap}
       showGrid={general.showGrid}
+      toolbarSlot={<DfgCanvasControls data={data} />}
       overlay={
         <>
           {menu ? (

@@ -12,12 +12,32 @@ import time
 
 from mate.api.config import get_settings
 
-# Per-user token buckets: user_id -> (tokens, last_refill_monotonic).
+# Per-user token buckets: user_id -> (tokens, last_refill_monotonic). Writes
+# get their own (smaller) bucket on top of the per-request one.
 _buckets: dict[str, tuple[float, float]] = {}
+_write_buckets: dict[str, tuple[float, float]] = {}
 
 # Per-user concurrency gates (lazily created) + a global cap.
 _user_sems: dict[str, asyncio.Semaphore] = {}
 _global_sem: asyncio.Semaphore | None = None
+
+
+def _bucket_check(
+    buckets: dict[str, tuple[float, float]], user_id: str, rate: int, burst_setting: int
+) -> tuple[bool, int]:
+    if rate <= 0:
+        return True, 0
+    burst = float(max(rate, burst_setting))
+    refill_per_sec = rate / 60.0
+    now = time.monotonic()
+    tokens, last = buckets.get(user_id, (burst, now))
+    tokens = min(burst, tokens + (now - last) * refill_per_sec)
+    if tokens >= 1.0:
+        buckets[user_id] = (tokens - 1.0, now)
+        return True, 0
+    buckets[user_id] = (tokens, now)
+    retry_after = max(1, int((1.0 - tokens) / refill_per_sec)) if refill_per_sec else 1
+    return False, retry_after
 
 
 def check_rate_limit(user_id: str) -> tuple[bool, int]:
@@ -26,20 +46,24 @@ def check_rate_limit(user_id: str) -> tuple[bool, int]:
     ``mcp_rate_limit_per_minute = 0`` disables limiting.
     """
     settings = get_settings()
-    rate = settings.mcp_rate_limit_per_minute
-    if rate <= 0:
-        return True, 0
-    burst = float(max(rate, settings.mcp_rate_limit_burst))
-    refill_per_sec = rate / 60.0
-    now = time.monotonic()
-    tokens, last = _buckets.get(user_id, (burst, now))
-    tokens = min(burst, tokens + (now - last) * refill_per_sec)
-    if tokens >= 1.0:
-        _buckets[user_id] = (tokens - 1.0, now)
-        return True, 0
-    _buckets[user_id] = (tokens, now)
-    retry_after = max(1, int((1.0 - tokens) / refill_per_sec)) if refill_per_sec else 1
-    return False, retry_after
+    return _bucket_check(
+        _buckets, user_id, settings.mcp_rate_limit_per_minute, settings.mcp_rate_limit_burst
+    )
+
+
+def check_write_rate_limit(user_id: str) -> tuple[bool, int]:
+    """Separate, tighter bucket charged only by mutating tools.
+
+    Sits on top of the per-request limit so a runaway agent can list/read at
+    normal rates but can't machine-gun deletes/imports.
+    """
+    settings = get_settings()
+    return _bucket_check(
+        _write_buckets,
+        user_id,
+        settings.mcp_write_rate_limit_per_minute,
+        settings.mcp_write_rate_limit_burst,
+    )
 
 
 def _user_semaphore(user_id: str) -> asyncio.Semaphore:
@@ -82,6 +106,7 @@ def concurrency_gate(user_id: str) -> _Gate:
 
 def reset_for_tests() -> None:  # pragma: no cover - test helper
     _buckets.clear()
+    _write_buckets.clear()
     _user_sems.clear()
     global _global_sem
     _global_sem = None

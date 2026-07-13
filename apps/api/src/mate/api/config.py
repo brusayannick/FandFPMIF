@@ -246,6 +246,23 @@ class Settings(BaseSettings):
         default=True,
         description="MCP_REQUIRE_EGRESS_CONSENT - gate MCP data egress on per-user consent.",
     )
+    # Server-wide write lock. At boot: write tools are not registered at all.
+    # Live: an admin can also flip mcp.read_only (SystemSetting) without a
+    # restart - registered write tools then refuse with a read_only error.
+    mcp_read_only: bool = Field(
+        default=False,
+        description="MCP_READ_ONLY - expose only read tools over MCP.",
+    )
+    # Which toolsets to register, csv (see mcp/registry.py). Empty = every
+    # toolset except `admin`; the literal "all" also enables `admin`.
+    mcp_toolsets: str = Field(
+        default="",
+        description="MCP_TOOLSETS - csv of enabled toolsets; empty = all except admin.",
+    )
+    # Tighter bucket charged only by mutating tools (on top of the per-request
+    # rate limit). 0 disables it.
+    mcp_write_rate_limit_per_minute: int = Field(default=30, ge=0, le=100_000)
+    mcp_write_rate_limit_burst: int = Field(default=10, ge=0, le=100_000)
 
     @property
     def users_dir(self) -> Path:

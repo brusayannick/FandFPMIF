@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { type ComponentProps, useMemo } from "react";
-import { Plus, FileBox } from "lucide-react";
+import { useMemo } from "react";
+import { Plus, FileBox, Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { DotPattern } from "@/components/glass/dot-pattern";
@@ -13,6 +14,7 @@ import { ModuleCard } from "@/components/processes/module-card";
 import { useModules } from "@/lib/queries";
 import { stagger } from "@/lib/stagger";
 import { useUi } from "@/lib/stores/ui";
+import { cn } from "@/lib/cn";
 import type { ModuleSummary } from "@/lib/api-types";
 
 const CATEGORIES: { id: string; label: string }[] = [
@@ -40,11 +42,56 @@ function GlassEmpty(props: React.ComponentProps<typeof EmptyState>) {
   );
 }
 
-export function ModuleGrid({ logId }: { logId: string }) {
+// Module search. Rendered by the process detail view inside the tab row
+// (Overview/Events/…), so it's a standalone controlled component; ModuleGrid
+// consumes the same `query`.
+export function ModuleSearchBar({
+  query,
+  onQueryChange,
+  className,
+}: {
+  query: string;
+  onQueryChange: (value: string) => void;
+  className?: string;
+}) {
+  return (
+    <div className={cn("relative w-44 sm:w-60", className)}>
+      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={query}
+        onChange={(e) => onQueryChange(e.target.value)}
+        placeholder="Search modules…"
+        aria-label="Search modules"
+        className="h-8 pl-8 pr-8"
+      />
+      {query && (
+        <button
+          type="button"
+          onClick={() => onQueryChange("")}
+          aria-label="Clear search"
+          className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function ModuleGrid({
+  logId,
+  query,
+  onQueryChange,
+}: {
+  logId: string;
+  query: string;
+  onQueryChange: (value: string) => void;
+}) {
   const { data: modules, isLoading, isError } = useModules(logId);
   const confidentialOnly = useUi((s) => s.confidentialOnly);
   const showUnavailable = useUi((s) => s.showUnavailableModules);
   const showDisabled = useUi((s) => s.showDisabledModules);
+  const q = query.trim().toLowerCase();
 
   const grouped = useMemo(() => {
     // A module the log doesn't qualify for (manifest `requirements` not met)
@@ -59,6 +106,7 @@ export function ModuleGrid({ logId }: { logId: string }) {
     const out = new Map<string, ModuleSummary[]>();
     for (const c of CATEGORIES) out.set(c.id, []);
     for (const m of modules ?? []) {
+      if (q && !`${m.name} ${m.description ?? ""}`.toLowerCase().includes(q)) continue;
       if (confidentialOnly && !m.is_confidential_safe) continue;
       if (!showDisabled && m.enabled === false) continue;
       if (
@@ -76,7 +124,7 @@ export function ModuleGrid({ logId }: { logId: string }) {
       bucket.sort((a, b) => Number(openable(b)) - Number(openable(a)));
     }
     return out;
-  }, [modules, confidentialOnly, showUnavailable, showDisabled]);
+  }, [modules, confidentialOnly, showUnavailable, showDisabled, q]);
 
   const visibleCount = useMemo(
     () => [...grouped.values()].reduce((n, bucket) => n + bucket.length, 0),
@@ -144,59 +192,72 @@ export function ModuleGrid({ logId }: { logId: string }) {
     );
   }
 
-  if (visibleCount === 0) {
-    // Incompatible modules are shown grayed-out by default, so an empty grid
-    // means a filter (confidential mode / view settings) removed everything.
-    return (
-      <EmptyState
-        icon={FileBox}
-        title={confidentialOnly ? "No confidential-safe modules" : "No modules to show"}
-        description={
-          confidentialOnly
-            ? "Confidential mode is on and none of your installed modules are marked safe for it. Turn off confidential mode or import a confidential-safe module."
-            : "All of your installed modules are disabled or incompatible with this process, and your view settings hide them. Import another module or adjust your installed modules."
-        }
-        primaryAction={
-          <Button asChild className="cursor-pointer gap-2">
-            <Link href="/modules/import">
-              <Plus className="h-4 w-4" />
-              Import module
-            </Link>
-          </Button>
-        }
-      />
-    );
-  }
-
   return (
-    <div className="space-y-5" data-tour="module-grid">
-      {CATEGORIES.map((c) => {
-        const bucket = grouped.get(c.id)!;
-        if (bucket.length === 0) return null;
-        return (
-          <section key={c.id} className="space-y-2.5">
-            <div className="flex items-center gap-2 pb-1 border-b border-border">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-foreground/70">
-                {c.label}
-              </h2>
-              <span className="text-[10px] text-muted-foreground/60">({bucket.length})</span>
-            </div>
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {bucket.map((m, i) => (
-                // Entrance stagger lives on a wrapper so the card's own hover
-                // transform isn't pinned by the filled animation.
-                <div
-                  key={m.id}
-                  className="h-full animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both duration-300"
-                  style={stagger((categoryOffsets.get(c.id) ?? 0) + i)}
-                >
-                  <ModuleCard module={m} logId={logId} />
+    <div data-tour="module-grid">
+      {visibleCount === 0 ? (
+        <GlassEmpty
+          icon={FileBox}
+          title={
+            q
+              ? `No modules match “${query.trim()}”`
+              : confidentialOnly
+                ? "No confidential-safe modules"
+                : "No modules to show"
+          }
+          description={
+            q
+              ? "No installed module matches your search. Try a different term or clear the filter."
+              : confidentialOnly
+                ? "Confidential mode is on and none of your installed modules are marked safe for it. Turn off confidential mode or import a confidential-safe module."
+                : "All of your installed modules are disabled or incompatible with this process, and your view settings hide them. Import another module or adjust your installed modules."
+          }
+          primaryAction={
+            q ? (
+              <Button className="cursor-pointer gap-2" onClick={() => onQueryChange("")}>
+                <X className="h-4 w-4" />
+                Clear search
+              </Button>
+            ) : (
+              <Button asChild className="cursor-pointer gap-2">
+                <Link href="/modules/import">
+                  <Plus className="h-4 w-4" />
+                  Import module
+                </Link>
+              </Button>
+            )
+          }
+        />
+      ) : (
+        <div className="space-y-5">
+          {CATEGORIES.map((c) => {
+            const bucket = grouped.get(c.id)!;
+            if (bucket.length === 0) return null;
+            return (
+              <section key={c.id} className="space-y-2.5">
+                <div className="flex items-center gap-2 pb-1 border-b border-border">
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-foreground/70">
+                    {c.label}
+                  </h2>
+                  <span className="text-[10px] text-muted-foreground/60">({bucket.length})</span>
                 </div>
-              ))}
-            </div>
-          </section>
-        );
-      })}
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {bucket.map((m, i) => (
+                    // Entrance stagger lives on a wrapper so the card's own hover
+                    // transform isn't pinned by the filled animation.
+                    <div
+                      key={m.id}
+                      className="h-full animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both duration-300"
+                      style={stagger((categoryOffsets.get(c.id) ?? 0) + i)}
+                    >
+                      <ModuleCard module={m} logId={logId} />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -22,7 +22,12 @@ from mate.api.db.engine import get_sessionmaker
 from mate.api.db.models import ApiToken, EventLog, User, UserSetting
 from mate.api.mcp.auth import MCPPrincipal
 from mate.api.mcp.consent import MCP_EGRESS_CONSENT_KEY
-from mate.api.mcp.scopes import ALL_SCOPES, SCOPE_MODULES_READ, SCOPE_PROCESSES_READ
+from mate.api.mcp.scopes import (
+    ALL_SCOPES,
+    PAT_GRANTABLE_SCOPES,
+    SCOPE_MODULES_READ,
+    SCOPE_PROCESSES_READ,
+)
 
 from .conftest import TEST_USER_ID
 
@@ -164,7 +169,11 @@ async def test_consent_roundtrip_and_mcp_info(client: AsyncClient) -> None:
     info = (await client.get("/api/v1/api-tokens/mcp-info")).json()
     assert info["url"].endswith("/mcp")
     assert info["consented"] is True
-    assert {s["id"] for s in info["scopes_supported"]} == set(ALL_SCOPES)
+    # The mint UI offers every PAT-grantable scope - never `admin`.
+    assert {s["id"] for s in info["scopes_supported"]} == set(PAT_GRANTABLE_SCOPES)
+    assert "admin" not in {s["id"] for s in info["scopes_supported"]}
+    assert info["read_only"] is False
+    assert isinstance(info["toolsets"], list)
     assert "metadata_url" in info["oauth"]
 
 
@@ -214,9 +223,11 @@ async def test_tools_are_tenant_isolated(client: AsyncClient) -> None:
         await _set_consent(session, USER_B_ID, True)
         await session.commit()
 
-    a_ids = {p["id"] for p in await server.list_processes(_FakeCtx(_principal(TEST_USER_ID)))}
+    page_a = await server.list_processes(_FakeCtx(_principal(TEST_USER_ID)))
+    a_ids = {p["id"] for p in page_a["items"]}
     assert "log-a" in a_ids and "log-b" not in a_ids
-    b_ids = {p["id"] for p in await server.list_processes(_FakeCtx(_principal(USER_B_ID)))}
+    page_b = await server.list_processes(_FakeCtx(_principal(USER_B_ID)))
+    b_ids = {p["id"] for p in page_b["items"]}
     assert "log-b" in b_ids and "log-a" not in b_ids
 
     with pytest.raises(ValueError):
@@ -250,7 +261,9 @@ def test_rate_limit_token_bucket() -> None:
         allowed, retry_after = limits.check_rate_limit("u")
         assert allowed is False and retry_after >= 1
     finally:
-        for key, value in zip(("MCP_RATE_LIMIT_PER_MINUTE", "MCP_RATE_LIMIT_BURST"), prev, strict=True):
+        for key, value in zip(
+            ("MCP_RATE_LIMIT_PER_MINUTE", "MCP_RATE_LIMIT_BURST"), prev, strict=True
+        ):
             if value is None:
                 os.environ.pop(key, None)
             else:

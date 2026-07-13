@@ -8,6 +8,7 @@ import type {
   ApiTokenInfo,
   CreateTokenResponse,
   McpAdminConfig,
+  McpAdminUpdate,
   McpConsentState,
   McpInfo,
 } from "@/lib/api-types";
@@ -77,9 +78,13 @@ export function useMcpAdminConfig() {
 export function useUpdateMcpAdminConfig() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { enabled?: boolean; mint_policy?: string }) =>
+    mutationFn: (body: McpAdminUpdate) =>
       api<McpAdminConfig>("/api/v1/system/mcp", { method: "PUT", json: body }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ADMIN_CFG_KEY }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ADMIN_CFG_KEY });
+      // read_only surfaces in the user-facing mcp-info panel too.
+      void qc.invalidateQueries({ queryKey: MCP_INFO_KEY });
+    },
   });
 }
 

@@ -41,13 +41,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  PageContainer,
-  PageHeader,
-  PageTitle,
-  PageDescription,
-  PageActions,
-} from "@/components/page";
+import { PageContainer, PageHeader, PageActions } from "@/components/page";
 import { cn } from "@/lib/cn";
 import { formatRelative } from "@/lib/format";
 import { stagger } from "@/lib/stagger";
@@ -161,13 +155,7 @@ export function DashboardList() {
 
   return (
     <PageContainer>
-      <PageHeader>
-        <div className="space-y-1">
-          <PageTitle>Dashboards</PageTitle>
-          <PageDescription>
-            Compose cards from any module into a saved, reopenable board.
-          </PageDescription>
-        </div>
+      <PageHeader className="justify-end">
         <PageActions>
           <input
             ref={fileRef}

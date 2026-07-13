@@ -51,6 +51,14 @@
 	@health path /health
 	reverse_proxy @health api:8000
 
+	# MCP server (streamable HTTP, mounted on the API at /mcp) + its RFC 9728
+	# OAuth protected-resource metadata. Both live at the API root, outside
+	# /api/v1 - without these matchers they fall through to Next.js and 404.
+	@mcp path /mcp /mcp/*
+	reverse_proxy @mcp api:8000
+	@prm path /.well-known/oauth-protected-resource
+	reverse_proxy @prm api:8000
+
 	# Keycloak, served under the /auth relative path (KC_HTTP_RELATIVE_PATH).
 	@kc path /auth/*
 	reverse_proxy @kc keycloak:8080
@@ -62,7 +70,7 @@
 	# (incl. SSE under /api/v1/*) and the hashed, immutable build assets under
 	# /_next/static + /_next/image, which must stay cacheable.
 	@webDoc {
-		not path /api/v1/* /health /auth/* /_next/static/* /_next/image*
+		not path /api/v1/* /health /auth/* /_next/static/* /_next/image* /mcp /mcp/* /.well-known/oauth-protected-resource
 	}
 	header @webDoc Cache-Control "no-store"
 
@@ -72,7 +80,7 @@
 	# browser console so the policy can be tightened before it is enforced.
 	# To enforce, rename the header to Content-Security-Policy and drop any
 	# 'unsafe-*' the app no longer needs.
-	@webApp not path /api/v1/* /health /auth/*
+	@webApp not path /api/v1/* /health /auth/* /mcp /mcp/* /.well-known/oauth-protected-resource
 	header @webApp {
 		X-Frame-Options "SAMEORIGIN"
 		Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"

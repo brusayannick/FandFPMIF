@@ -1,14 +1,13 @@
 "use client";
 
-import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Inbox } from "lucide-react";
+import { Inbox } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { PageContainer, PageTitle } from "@/components/page";
+import { PageContainer } from "@/components/page";
 import { ChartCardSkeleton } from "@/components/skeletons";
 import { useEventLog, useVariant, useVariantCases } from "@/lib/queries";
 import { displayActivities, getActivityRenameMap } from "@/lib/activity-rename";
@@ -58,27 +57,9 @@ export default function VariantDetailPage() {
 
   return (
     <PageContainer className="space-y-8">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Link
-          href={`/processes/${logId}?tab=variants`}
-          className="inline-flex items-center gap-1 hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Back to variants
-        </Link>
-        {log && (
-          <>
-            <span>·</span>
-            <Link href={`/processes/${logId}`} className="hover:text-foreground">
-              {log.name}
-            </Link>
-          </>
-        )}
-      </div>
-
       <header className="space-y-3">
         <div className="flex flex-wrap items-center gap-3">
-          <PageTitle>Variant #{variant.rank}</PageTitle>
+          <span className="text-sm font-medium text-muted-foreground">#{variant.rank}</span>
           <Badge variant="outline" className="border-0 bg-muted text-[10px] font-mono uppercase tracking-wide text-muted-foreground">
             {variant.variant_id}
           </Badge>

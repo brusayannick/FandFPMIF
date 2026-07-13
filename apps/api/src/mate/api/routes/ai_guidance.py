@@ -47,6 +47,8 @@ log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/ai/guidance", tags=["ai"])
 
 _GUIDANCE_KEY = "__ai_guidance"
+# Public alias for external cache-only readers (the MCP analysis toolset).
+GUIDANCE_CACHE_KEY = _GUIDANCE_KEY
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────
@@ -95,10 +97,14 @@ def _hash_payload(payload: Any) -> str:
     return hashlib.blake2b(raw, digest_size=16).hexdigest()
 
 
-async def build_payload(module_id: str, log_id: str, user_id: str) -> tuple[Any, str, str]:
+async def build_payload(
+    module_id: str, log_id: str, user_id: str, *, restrict_event_log: bool = False
+) -> tuple[Any, str, str]:
     """Resolve a module's ``guidance_payload`` for a log.
 
-    Returns ``(payload, system_prompt, user_prefix)``.
+    Returns ``(payload, system_prompt, user_prefix)``. ``restrict_event_log=True``
+    (AI/MCP callers) wires the data wall: the module keeps its result cache but
+    every raw event-log accessor raises ``PermissionError``.
     """
     loader = get_module_loader()
     loaded = loader.loaded.get(module_id)
@@ -121,7 +127,9 @@ async def build_payload(module_id: str, log_id: str, user_id: str) -> tuple[Any,
         or f"Analyse this {module_id} module output for the process at hand:"
     )
 
-    ctx = await loader._make_context(module_id, log_id, user_id)
+    ctx = await loader._make_context(
+        module_id, log_id, user_id, restrict_event_log=restrict_event_log
+    )
     try:
         payload = (
             await fn(ctx) if asyncio.iscoroutinefunction(fn) else await asyncio.to_thread(fn, ctx)

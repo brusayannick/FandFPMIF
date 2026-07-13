@@ -1,7 +1,9 @@
-"""Mate MCP server - read-only access to a user's process-mining output.
+"""Mate MCP server - full-platform tools over a user's process-mining data.
 
-Mounted at ``/mcp`` (streamable HTTP) when ``settings.mcp_enabled``. Two pieces
-the rest of the app wires up:
+Toolsets (registry-gated), scoped PAT/OAuth auth, per-user egress consent,
+read-only mode and confirm-gated destructive tools; raw event rows are never
+exposed. Mounted at ``/mcp`` (streamable HTTP) when ``settings.mcp_enabled``.
+Two pieces the rest of the app wires up:
 
 * :func:`build_mcp_asgi_app` - the auth-wrapped ASGI app to ``app.mount(...)``.
 * :func:`mcp_session_manager` - an async context manager the API lifespan must

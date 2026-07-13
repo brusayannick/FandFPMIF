@@ -3,17 +3,14 @@
 import { useCallback, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Upload, X } from "lucide-react";
+import { FileDown, Upload, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  PageContainer,
-  PageTitle,
-  PageDescription,
-} from "@/components/page";
+import { PageContainer } from "@/components/page";
 import { ApiError, rawFetch } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { downloadBlob } from "@/lib/download";
 import { toastError } from "@/lib/toast";
 import { useProgressRouter } from "@/lib/use-progress-router";
 
@@ -42,13 +39,23 @@ export default function ImportModulePage() {
 
   return (
     <PageContainer className="space-y-6">
-      <header className="space-y-1">
-        <PageTitle>Install a module</PageTitle>
-        <PageDescription>
-          Upload a module archive. The platform unpacks it, resolves its
-          dependencies, and registers it without a restart.
-        </PageDescription>
-      </header>
+      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card/40 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <FileDown className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+          <div className="space-y-0.5">
+            <div className="text-sm font-medium">Module authoring guide</div>
+            <p className="text-xs text-muted-foreground">The complete guide to building a module</p>
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0 cursor-pointer"
+          onClick={() => downloadBlob("/api/v1/modules/readme", "README.md")}
+        >
+          <FileDown className="mr-1.5 h-3.5 w-3.5" /> Download README
+        </Button>
+      </div>
 
       <UploadTab onInstalled={onInstalled} />
     </PageContainer>

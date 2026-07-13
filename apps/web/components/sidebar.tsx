@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
+import { useState } from "react";
 import {
   Activity,
   Cog,
@@ -10,7 +11,8 @@ import {
   FolderKanban,
   LayoutDashboard,
   Moon,
-  PanelLeftClose,
+  Pin,
+  PinOff,
   ShieldCheck,
   Sun,
 } from "lucide-react";
@@ -86,52 +88,65 @@ const ADMIN_NAV: NavItem[] = [
 ];
 
 export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
-  const collapsed = useUi((s) => s.sidebarCollapsed);
-  const toggle = useUi((s) => s.toggleSidebar);
+  const pinned = useUi((s) => s.sidebarPinned);
+  const togglePinned = useUi((s) => s.toggleSidebarPinned);
+  // Transient hover-peek: ephemeral (never persisted). In auto mode the panel
+  // expands while the cursor is over it and retracts when it leaves.
+  const [hovered, setHovered] = useState(false);
   const pathname = usePathname();
   const track = useTrack();
   const qc = useQueryClient();
-  const onToggle = () => {
-    track(EV.SIDEBAR_TOGGLED, { collapsed_after: !collapsed });
-    toggle();
+
+  const expanded = pinned || hovered;
+  const collapsed = !expanded;
+
+  const onTogglePin = () => {
+    track(EV.SIDEBAR_TOGGLED, { pinned_after: !pinned });
+    togglePinned();
   };
 
   return (
-    <aside
-      className={cn(
-        "flex h-screen flex-col border-r border-white/10 [border-top-color:var(--glass-refraction-top)] bg-sidebar/85 text-sidebar-foreground backdrop-blur-xl backdrop-saturate-150 transition-[width] duration-150 ease-out supports-[backdrop-filter]:bg-sidebar/70",
-        collapsed ? "w-14" : "w-56",
-      )}
-      aria-label="Primary navigation"
-    >
-      <div
+    // Outer rail reserves the layout footprint: w-56 when pinned (pushes the
+    // content area), w-14 in auto mode (the panel below overlays content on
+    // hover instead, so peeking never reflows the app).
+    <div className={cn("relative shrink-0", pinned ? "w-56" : "w-14")}>
+      <aside
+        onMouseLeave={() => setHovered(false)}
         className={cn(
-          "flex items-center py-3.5",
-          collapsed ? "justify-center px-2" : "gap-2 px-3",
+          "flex h-screen flex-col border-r border-white/10 [border-top-color:var(--glass-refraction-top)] bg-sidebar/85 text-sidebar-foreground backdrop-blur-xl backdrop-saturate-150 transition-[width] duration-150 ease-out supports-[backdrop-filter]:bg-sidebar/70",
+          // Auto mode → float over content as an elevated overlay; pinned →
+          // static, taking its place in the flex flow.
+          !pinned && "absolute inset-y-0 left-0 z-30 shadow-xl shadow-black/20",
+          expanded ? "w-56" : "w-14",
         )}
+        aria-label="Primary navigation"
       >
+      {/* Logo stays pinned top-left in both states: same left padding whether
+          collapsed or expanded, so it never re-centers/"flies in" on the
+          width transition when the sidebar auto-collapses. */}
+      <div className="flex items-center gap-2 px-3 py-3.5">
+        {/* Collapsed rail shows just the brand mark; the pin toggle lives in the
+            expanded header (auto-mode expands on hover, so the collapsed top is
+            branding, not a control). */}
+        <MateLogo animateOnHover className="h-7 w-7 shrink-0 text-sidebar-foreground" />
         {!collapsed && (
           <>
-            <MateLogo animateOnHover className="h-7 w-7 shrink-0 text-sidebar-foreground" />
             <span className="truncate text-sm font-semibold tracking-tight">PM-MATE</span>
+            <button
+              type="button"
+              onClick={onTogglePin}
+              className="ml-auto cursor-pointer rounded-md p-1.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              aria-label={pinned ? "Unpin sidebar (auto-hide)" : "Pin sidebar open"}
+              aria-pressed={pinned}
+              title={pinned ? "Unpin sidebar (auto-hide)" : "Pin sidebar open"}
+            >
+              {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+            </button>
           </>
         )}
-        <button
-          type="button"
-          onClick={onToggle}
-          className={cn(
-            "cursor-pointer rounded-md p-1.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-            !collapsed && "ml-auto",
-          )}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <PanelLeftClose
-            className={cn("h-4 w-4 transition-transform", collapsed && "rotate-180")}
-          />
-        </button>
       </div>
 
-      <nav className="flex-1 px-2 pt-1">
+      <nav className="flex-1 px-2 pt-1" onMouseEnter={() => setHovered(true)}>
         <ul className="space-y-0.5">
           {(isAdmin ? [...NAV, ...ADMIN_NAV] : NAV).map((item) => {
             const Icon = item.icon;
@@ -148,14 +163,17 @@ export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
                 onMouseEnter={() => item.prefetch?.(qc)}
                 onFocus={() => item.prefetch?.(qc)}
                 className={cn(
-                  "flex h-9 items-center gap-3 rounded-md px-3 text-sm transition-colors cursor-pointer",
+                  // overflow-hidden clips the label while the sidebar is
+                  // mid-width-transition so a long name ("Module Settings")
+                  // never wraps to a 2nd line before the panel reaches w-56.
+                  "flex h-9 items-center gap-3 overflow-hidden rounded-md px-3 text-sm transition-colors cursor-pointer",
                   active
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                {!collapsed && <span>{item.label}</span>}
+                {!collapsed && <span className="whitespace-nowrap">{item.label}</span>}
               </Link>
             );
             return (
@@ -189,7 +207,8 @@ export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
           v0.1.1
         </div>
       )}
-    </aside>
+      </aside>
+    </div>
   );
 }
 

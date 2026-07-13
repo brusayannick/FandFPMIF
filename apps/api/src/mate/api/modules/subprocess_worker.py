@@ -634,7 +634,22 @@ async def _amain(socket_path: str, module_folder: str) -> int:
     conn.register("call", handle_call)
     conn.register("shutdown", lambda _params: True)
 
-    await conn._write({"id": None, "method": "ready", "params": {"handlers": handlers_meta}})
+    # Advertise duck-typed guidance support so the host shim only exposes a
+    # `guidance_payload` stub for modules that actually implement one (the
+    # AI/MCP path probes the instance with getattr, not the handler walk).
+    guidance_meta = None
+    if callable(getattr(instance, "guidance_payload", None)):
+        guidance_meta = {
+            "system_prompt": getattr(instance, "guidance_system_prompt", None),
+            "user_prefix": getattr(instance, "guidance_user_prefix", None),
+        }
+    await conn._write(
+        {
+            "id": None,
+            "method": "ready",
+            "params": {"handlers": handlers_meta, "guidance": guidance_meta},
+        }
+    )
     await conn.run()
     writer.close()
     try:

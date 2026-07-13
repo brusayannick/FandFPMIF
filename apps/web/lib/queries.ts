@@ -519,8 +519,11 @@ export function useModuleConfig(moduleId: string) {
       api<{
         config: Record<string, unknown>;
         enabled: boolean;
-        /** When true, an admin has locked this module's config for all users. */
+        /** When true, *every* card of this module is admin-locked. */
         controlled_by_admin?: boolean;
+        /** Per-card lock state: { config?, ai?, model? } for each card the
+         *  module exposes. Each card is disabled independently from this. */
+        controlled_cards?: Record<string, boolean>;
       }>(`/api/v1/modules/${moduleId}/config`),
   });
 }
@@ -625,8 +628,8 @@ export interface ModuleModelsResponse {
   models: ModuleModel[];
   selected: string | null;
   active: string | null;
-  /** Admin pinned one shared model platform-wide; the per-user picker is
-   *  then read-only (Admin → Controls → CV4CDD detection model). */
+  /** Admin locked this module's model card (pinned one shared model
+   *  platform-wide); the per-user picker is then read-only. */
   locked?: boolean;
 }
 

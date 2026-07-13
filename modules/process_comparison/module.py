@@ -58,8 +58,84 @@ def _cache_key(prefix: str, ordered_ids: list[str], mtimes: list[float]) -> str:
     return f"{prefix}__{digest}"
 
 
+def _cached_keys_newest_first(cache: Any, prefix: str) -> list[str]:
+    """Cache keys matching ``{prefix}__*``, newest first.
+
+    The SDK cache Protocol has no list API, but the platform's ``ResultCache``
+    exposes its directory - the same duck-typed peek the performance module
+    uses for its freshness check. Returns ``[]`` when the cache doesn't expose
+    a directory (e.g. a stub or an unbound cache).
+    """
+    root = getattr(cache, "dir", None)
+    if root is None:
+        return []
+    try:
+        candidates = sorted(
+            Path(root).glob(f"{prefix}__*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return []
+    return [p.stem for p in candidates]
+
+
 class ProcessComparisonModule(Module):
     id = "process_comparison"
+
+    guidance_system_prompt = (
+        "You are a process-mining analyst interpreting a comparison between "
+        "two or more event logs (a baseline versus comparison logs). Cite the "
+        "specific similarity metrics (Jaccard overlaps, footprint similarity, "
+        "EMD distance), KPI deltas and per-activity frequency-share shifts, "
+        "and name which log id each number belongs to. Distinguish structural "
+        "differences (new or removed activities and edges) from load shifts "
+        "(same structure, different frequencies)."
+    )
+    guidance_user_prefix = "Interpret this event-log comparison:"
+
+    async def guidance_payload(self, ctx: ModuleContext) -> dict[str, Any] | None:
+        """Compact summary of the most recent cached comparison results.
+
+        Result keys are ``{view}__{digest}`` (the digest hashes the compared
+        log ids + parquet mtimes), so the latest entry per view is resolved by
+        peeking at the cache directory. Reads only ``ctx.cache`` - never the
+        event log - so it works under the restricted AI/MCP context. Returns
+        ``None`` until at least one comparison has been run.
+        """
+
+        async def _latest(prefix: str) -> dict[str, Any] | None:
+            for key in _cached_keys_newest_first(ctx.cache, prefix)[:1]:
+                cached = await ctx.cache.get(key)
+                if isinstance(cached, dict):
+                    return cached
+            return None
+
+        similarity = await _latest("similarity")
+        summary = await _latest("summary")
+        deltas = await _latest("activity-deltas")
+        if similarity is None and summary is None and deltas is None:
+            return None
+
+        payload: dict[str, Any] = {}
+        if similarity is not None:
+            payload["similarity"] = {
+                "log_ids": similarity.get("log_ids"),
+                "metrics": similarity.get("metrics"),
+            }
+        if summary is not None:
+            payload["summary_delta"] = {
+                "baseline_log_id": summary.get("baseline_log_id"),
+                "other_log_id": summary.get("other_log_id"),
+                "kpis": summary.get("kpis"),
+            }
+        if deltas is not None:
+            activities = [a for a in deltas.get("activities", []) if isinstance(a, dict)]
+            payload["top_activity_deltas"] = {
+                "log_ids": deltas.get("log_ids"),
+                "activities": activities[:10],
+            }
+        return payload
 
     # -- shared loading ------------------------------------------------------
 

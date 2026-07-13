@@ -548,10 +548,11 @@ export interface AiConfigOut {
 
 // ── Admin control framework – /admin/controls ──────────────────────────────
 
-export type ControlScope = "setting" | "module";
+export type ControlScope = "setting" | "card";
 export type ControlMode = "user" | "admin";
 
-/** GET /admin/controls/items – one controllable setting or module. */
+/** GET /admin/controls/items – one controllable server setting, or one settings
+ *  card of a module (config / ai / model, keyed "<module_id>:<card_id>"). */
 export interface ControlItem {
   scope: ControlScope;
   key: string;
@@ -560,12 +561,23 @@ export interface ControlItem {
   control_mode: ControlMode | string;
   /** Whether the admin value has been set (never the secret itself). */
   admin_value_set: boolean;
-  /** Echoed admin value for non-secret items (modules, analytics, concurrency). */
+  /** Echoed admin value for non-secret items (cards, analytics, concurrency). */
   admin_value: unknown | null;
   /** True when any secret (ai.config key) is stored in the admin value. */
   secret_set: boolean;
-  /** JSON-schema for module items so the editor can render inputs. */
+  /** Config card's JSON-schema so the editor can render inputs. */
   config_schema: Record<string, unknown> | null;
+  // ── card scope only ──
+  /** The module this card belongs to. */
+  module_id?: string | null;
+  /** Which card: "config" | "ai" | "model". */
+  card_id?: string | null;
+  /** The card's human title. */
+  title?: string | null;
+  /** model_store manifest (model card) so the editor knows accept/config_key. */
+  model_store?: { title?: string; description?: string | null; accept?: string; config_key?: string } | null;
+  /** ai_models manifest (ai card) so the editor renders the right selectors. */
+  ai_models?: Record<string, unknown> | null;
 }
 
 export interface ControlItems {
@@ -688,6 +700,36 @@ export interface UsageInsights {
   ai: AiUsage;
 }
 
+// --- Admin → Modules (cross-user ownership dashboard + controls) -----------
+// Mirrors apps/api/.../routes/admin_modules.py.
+
+export interface AdminModuleOwner {
+  user_id: string;
+  email: string | null;
+  username: string | null;
+  /** "default" | "upload" | "admin" – best-effort provenance. */
+  source: string | null;
+  installed_at: string;
+}
+
+/** GET /admin/modules – one row per module known to the platform. */
+export interface AdminModuleRow {
+  id: string;
+  name: string;
+  version: string;
+  category: string;
+  has_frontend: boolean;
+  /** Ships in the repo modules/ folder; always default, cannot be un-defaulted. */
+  is_bundled: boolean;
+  /** In the effective default set (bundled or admin-declared) – every user gets it. */
+  is_default: boolean;
+  default_locked: boolean;
+  owner_count: number;
+  /** Earliest source="upload" owner – best-effort "who uploaded this". */
+  uploaded_by: AdminModuleOwner | null;
+  owners: AdminModuleOwner[];
+}
+
 // --- GET /system/resources (Admin → System, live CPU/RAM monitor) ----------
 
 export interface PerCoreStat {
@@ -788,6 +830,10 @@ export interface McpInfo {
   require_consent: boolean;
   consented: boolean;
   mint_allowed: boolean;
+  /** Live write lock – write tools are refused (or not even registered when boot-forced). */
+  read_only: boolean;
+  /** Toolsets registered at boot (env MCP_TOOLSETS). */
+  toolsets: string[];
   scopes_supported: McpScopeInfo[];
   oauth: McpOAuthInfo;
 }
@@ -800,9 +846,24 @@ export interface McpConsentState {
 
 /** GET/PUT /api/v1/system/mcp – admin live config. */
 export interface McpAdminConfig {
+  /** env MCP_ENABLED (mount happens at boot) */
   boot_enabled: boolean;
+  /** live effective availability */
   enabled: boolean;
   mint_policy: string;
+  /** env MCP_READ_ONLY (write tools not even registered) */
+  boot_read_only: boolean;
+  /** live effective write lock */
+  read_only: boolean;
+  /** registered at boot (env MCP_TOOLSETS) */
+  toolsets: string[];
+}
+
+/** PUT /api/v1/system/mcp body – all fields optional, only the given ones change. */
+export interface McpAdminUpdate {
+  enabled?: boolean;
+  mint_policy?: string;
+  read_only?: boolean;
 }
 
 /** GET /api/v1/admin/api-tokens – org-wide token (admin). */

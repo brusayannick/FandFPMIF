@@ -16,6 +16,21 @@ import structlog
 log = structlog.get_logger("mcp.audit")
 
 
+_MAX_LABEL_CHARS = 500
+
+
+def _bounded_labels(labels: dict[str, Any] | None) -> dict[str, Any]:
+    """Size-cap each label value so one giant argument can't bloat the trail."""
+    out: dict[str, Any] = {}
+    for key, value in (labels or {}).items():
+        if isinstance(value, (int, float, bool)) or value is None:
+            out[key] = value
+            continue
+        text = value if isinstance(value, str) else repr(value)
+        out[key] = text if len(text) <= _MAX_LABEL_CHARS else text[:_MAX_LABEL_CHARS] + "…"
+    return out
+
+
 async def record_tool_call(
     *,
     user_id: str,
@@ -25,8 +40,11 @@ async def record_tool_call(
     token_id: str | None,
     auth_type: str,
     labels: dict[str, Any] | None = None,
+    mutation: bool = False,
 ) -> None:
-    labels = labels or {}
+    # Nested under one key so a tool argument can never collide with (or
+    # overwrite) the envelope fields ("status", "tool", ...).
+    labels = _bounded_labels(labels)
     log.info(
         "mcp.tool_call",
         user_id=user_id,
@@ -35,7 +53,8 @@ async def record_tool_call(
         duration_ms=duration_ms,
         token_id=token_id,
         auth_type=auth_type,
-        **labels,
+        mutation=mutation,
+        args=labels,
     )
     try:
         from mate.api.db.engine import get_sessionmaker
@@ -53,7 +72,8 @@ async def record_tool_call(
                     "status": status,
                     "token_id": token_id,
                     "auth_type": auth_type,
-                    **labels,
+                    "mutation": mutation,
+                    "args": labels,
                 },
             )
     except Exception as exc:

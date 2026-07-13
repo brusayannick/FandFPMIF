@@ -10,12 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  PageContainer,
-  PageHeader,
-  PageTitle,
-  PageDescription,
-} from "@/components/page";
+import { PageContainer, PageHeader } from "@/components/page";
 import { EmptyState } from "@/components/empty-state";
 import { FileBox, Lock, Plus, RotateCcw } from "lucide-react";
 import { toastError } from "@/lib/toast";
@@ -178,13 +173,7 @@ export function ModulesClient() {
 
   return (
     <PageContainer>
-      <PageHeader>
-        <div className="space-y-1">
-          <PageTitle>Modules</PageTitle>
-          <PageDescription>
-            Enable or disable modules, or open one to configure it.
-          </PageDescription>
-        </div>
+      <PageHeader className="justify-end">
         <ModuleActions />
       </PageHeader>
 

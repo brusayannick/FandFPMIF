@@ -143,16 +143,18 @@ async def _seed_module_installs_for_test_user() -> None:
 
 
 @contextlib.asynccontextmanager
-async def _sample_mod_client(tmp_path: Path, *, seed: bool) -> AsyncIterator[AsyncClient]:
-    """Spin up the app with the `sample_mod` fixture as a default module.
+async def _sample_mod_client(
+    tmp_path: Path, *, seed: bool, mod: str = "sample_mod", admin: bool = False
+) -> AsyncIterator[AsyncClient]:
+    """Spin up the app with a fixture module (`mod`) as a default module.
 
     Copies the fixture into a tmp dir and points MODULES_DIR at it for the
-    duration so `sample_mod` is treated as a repo default (it lives under the
-    defaults root). ``seed`` pre-grants the test user ownership of every loaded
-    module (skip it to exercise the lazy default-seeding path).
+    duration so `mod` is treated as a repo default (it lives under the defaults
+    root). ``seed`` pre-grants the test user ownership of every loaded module
+    (skip it to exercise the lazy default-seeding path).
     """
-    src = Path(__file__).parent / "fixtures" / "modules" / "sample_mod"
-    dst = tmp_path / "modules" / "sample_mod"
+    src = Path(__file__).parent / "fixtures" / "modules" / mod
+    dst = tmp_path / "modules" / mod
     shutil.copytree(src, dst)
 
     prev_modules = os.environ.get("MODULES_DIR")
@@ -170,6 +172,21 @@ async def _sample_mod_client(tmp_path: Path, *, seed: bool) -> AsyncIterator[Asy
 
         app = create_app()
         _override_current_user_for_tests(app)
+        if admin:
+            from mate.api.auth.dependencies import CurrentUser, get_current_user
+
+            admin_user = CurrentUser(
+                id=TEST_USER_ID,
+                email=TEST_USER_EMAIL,
+                preferred_username="test",
+                name="Test User",
+                roles=("user", "admin"),
+            )
+
+            async def _admin_user() -> CurrentUser:
+                return admin_user
+
+            app.dependency_overrides[get_current_user] = _admin_user
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://testserver") as c:
             async with app.router.lifespan_context(app):
@@ -194,4 +211,13 @@ async def client_with_sample_mod(tmp_path: Path) -> AsyncIterator[AsyncClient]:
 async def client_with_sample_mod_fresh(tmp_path: Path) -> AsyncIterator[AsyncClient]:
     """Test user NOT pre-seeded - exercises lazy default seeding."""
     async with _sample_mod_client(tmp_path, seed=False) as c:
+        yield c
+
+
+@pytest.fixture
+async def admin_client_with_sample_cards(tmp_path: Path) -> AsyncIterator[AsyncClient]:
+    """Admin-role app with the `sample_cards` fixture (config + ai + model cards)
+    loaded - for the per-card admin-control tests. The admin user is also the
+    module owner, so it can both lock cards (admin API) and view them (/config)."""
+    async with _sample_mod_client(tmp_path, seed=True, mod="sample_cards", admin=True) as c:
         yield c

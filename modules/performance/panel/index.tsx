@@ -3,26 +3,51 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
-import { Activity, Clock, Gauge, TrendingUp, Workflow } from "lucide-react";
+import {
+  Activity,
+  CalendarRange,
+  Clock,
+  Gauge,
+  Layers3,
+  Route,
+  TrendingUp,
+  Workflow,
+  Zap,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDuration, formatNumber } from "@/lib/format";
+import { formatDateRange, formatDuration, formatNumber } from "@/lib/format";
 
 import { BottleneckTable } from "./bottleneck-table";
 import { CycleTimeHistogram } from "./cycle-time-histogram";
 import { InfoHint } from "./info-hint";
 import {
+  useLogSummary,
   usePerformanceBottlenecks,
   usePerformanceCycleTimeDistribution,
   usePerformanceKpis,
 } from "./queries";
 
+// Calendar span between the log's first and last event, in seconds.
+function spanSeconds(min: string | null, max: string | null): number | null {
+  if (!min || !max) return null;
+  const a = new Date(min).getTime();
+  const b = new Date(max).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return Math.max(0, (b - a) / 1000);
+}
+
 export function PerformancePanel({ logId }: { logId: string; moduleId: string }) {
+  const logSummary = useLogSummary(logId);
   const kpis = usePerformanceKpis(logId);
   const histo = usePerformanceCycleTimeDistribution(logId);
   const bottlenecks = usePerformanceBottlenecks(logId);
+
+  const span = logSummary.data
+    ? spanSeconds(logSummary.data.date_min, logSummary.data.date_max)
+    : null;
 
   // Preselect from `?activity=` – e.g. the discovery DFG's "view performance
   // metrics" jump passes the clicked activity along.
@@ -35,8 +60,51 @@ export function PerformancePanel({ logId }: { logId: string; moduleId: string })
 
   return (
     <div className="space-y-6">
-      {/* KPI strip */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+      {/* Log summary – process context (cases / events / variants / time span),
+          moved here from the process overview so it sits next to the metrics.
+          Inline auto-fit columns instead of a `grid-cols-N` utility: module-only
+          Tailwind classes aren't reliably emitted by the shared build (e.g. the
+          KPI strip's `md:grid-cols-5` silently collapses), so we size tracks in
+          CSS to stay independent of the app's generated class set. */}
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+        <KpiCard
+          icon={Layers3}
+          title="Cases"
+          value={logSummary.data ? formatNumber(logSummary.data.cases_count) : null}
+          loading={logSummary.isLoading}
+          subline="process instances"
+        />
+        <KpiCard
+          icon={Zap}
+          title="Events"
+          value={logSummary.data ? formatNumber(logSummary.data.events_count) : null}
+          loading={logSummary.isLoading}
+          subline="recorded activities"
+        />
+        <KpiCard
+          icon={Route}
+          title="Variants"
+          value={logSummary.data ? formatNumber(logSummary.data.variants_count) : null}
+          loading={logSummary.isLoading}
+          subline="distinct paths"
+        />
+        <KpiCard
+          icon={CalendarRange}
+          title="Time span"
+          value={
+            logSummary.data
+              ? formatDateRange(logSummary.data.date_min, logSummary.data.date_max)
+              : null
+          }
+          valueClassName="text-base"
+          loading={logSummary.isLoading}
+          subline={span !== null ? `over ${formatDuration(span)}` : "no timestamps"}
+        />
+      </div>
+
+      {/* KPI strip – same auto-fit sizing as the log summary above so both rows
+          stay responsive without depending on an emitted `grid-cols-5`. */}
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
         <KpiCard
           icon={TrendingUp}
           title="Throughput"
@@ -161,6 +229,7 @@ function KpiCard({
   subline,
   loading,
   info,
+  valueClassName,
 }: {
   icon: LucideIcon;
   title: string;
@@ -168,6 +237,7 @@ function KpiCard({
   subline?: string;
   loading?: boolean;
   info?: ReactNode;
+  valueClassName?: string;
 }) {
   return (
     <Card>
@@ -179,7 +249,9 @@ function KpiCard({
           </span>
           <Icon className="h-3.5 w-3.5" />
         </div>
-        <div className="mt-1.5 text-2xl font-semibold tabular-nums">
+        <div
+          className={`mt-1.5 truncate font-semibold tabular-nums ${valueClassName ?? "text-2xl"}`}
+        >
           {loading ? <Skeleton className="h-7 w-24" /> : (value ?? "–")}
         </div>
         {subline && <div className="mt-1 text-[11px] text-muted-foreground">{subline}</div>}

@@ -40,7 +40,11 @@ from mate.api.ingest.mapping import (
     resolve_roles,
 )
 from mate.api.ingest.ocel import parse_ocel
-from mate.api.ingest.parquet_coerce import coerce_object_columns, normalize_timestamps
+from mate.api.ingest.parquet_coerce import (
+    coerce_object_columns,
+    normalize_timestamps,
+    to_datetime_robust,
+)
 from mate.api.ingest.storage import LogPaths, log_paths
 from mate.api.ingest.xes import parse_xes
 from mate.api.ingest.xml_parser import parse_xml
@@ -165,9 +169,22 @@ async def _import_handler(handle: JobHandle) -> None:
     # winter-time events) collapse to a single tz-aware dtype instead of
     # pandas picking one offset and silently NaT-ing the rest. We then drop
     # the tz to keep the parquet / SQLite `DateTime` column shape unchanged.
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
+    df["timestamp"] = to_datetime_robust(df["timestamp"], utc=True)
     df = df.dropna(subset=["timestamp"])
     df["timestamp"] = df["timestamp"].dt.tz_localize(None)
+    # Rows whose timestamp still failed to parse are dropped — never silently:
+    # the count is surfaced in detected_schema (meta.json + the log row).
+    rows_dropped_invalid_timestamp = total_events - len(df)
+    if rows_dropped_invalid_timestamp > 0:
+        log.warning(
+            "ingest.rows_dropped_invalid_timestamp",
+            log_id=log_id,
+            dropped=rows_dropped_invalid_timestamp,
+            total=total_events,
+        )
+    if "end_timestamp" in df.columns:
+        end_ts = to_datetime_robust(df["end_timestamp"], utc=True)
+        df["end_timestamp"] = end_ts.dt.tz_localize(None)
     df = df.sort_values(["case_id", "timestamp"], kind="mergesort").reset_index(drop=True)
 
     # Guarantee no two columns collide case-insensitively before the frame is
@@ -206,6 +223,7 @@ async def _import_handler(handle: JobHandle) -> None:
         "columns": list(df.columns),
         "source_columns": source_columns,
         "row_count": len(df),
+        "rows_dropped_invalid_timestamp": rows_dropped_invalid_timestamp,
         "column_roles": column_roles,
         "mapping_needs_review": mapping_needs_review,
     }

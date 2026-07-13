@@ -266,9 +266,11 @@ async def resolve_dataset(
     *,
     filter_override: list[dict[str, Any]] | None = None,
     params: dict[str, Any] | None = None,
+    restrict_event_log: bool = False,
 ) -> DatasetEnvelope:
     """Resolve a module dataset to a canonical envelope by invoking its route
-    handler through the loader (reuses the module's result cache + filtering)."""
+    handler through the loader (reuses the module's result cache + filtering).
+    ``restrict_event_log=True`` walls off raw event rows (AI/MCP callers)."""
     loaded = loader.loaded.get(module_id)
     if loaded is None:
         raise ValueError(f"Module {module_id!r} is not loaded.")
@@ -276,6 +278,12 @@ async def resolve_dataset(
     if entry is None:
         raise ValueError(f"Module {module_id!r} has no dataset {dataset_id!r}.")
     raw = await loader.run_dataset_route(
-        module_id, entry.route, log_id, user_id, filter_override=filter_override, params=params
+        module_id,
+        entry.route,
+        log_id,
+        user_id,
+        filter_override=filter_override,
+        params=params,
+        restrict_event_log=restrict_event_log,
     )
     return adapt(entry.shape, raw)

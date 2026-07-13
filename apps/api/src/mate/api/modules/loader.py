@@ -569,6 +569,10 @@ class ModuleLoader:
         # a fire-and-forget `@on_event` with no `@job` would otherwise strand a
         # log in `processing` forever (no job ever reaches a terminal status).
         self._precompute_subscribers: dict[str, set[str]] = {}
+        # Per-module-id locks serialising concurrent install/reload of one id
+        # (see `id_lock`). Created lazily; never pruned (bounded by id count).
+        self._id_locks: dict[str, asyncio.Lock] = {}
+        self._id_locks_guard = asyncio.Lock()
 
     async def load_all(self) -> list[LoadedModule]:
         discovered = discover(self.modules_dir, self.uploaded_modules_dir)
@@ -647,6 +651,26 @@ class ModuleLoader:
         self._event_subscribers.clear()
         self._precompute_subscribers.clear()
         reset_finder()
+
+    async def id_lock(self, module_id: str) -> asyncio.Lock:
+        """Lock serialising install/reload of a single module id.
+
+        Two concurrent uploads of the same id (especially a brand-new one) would
+        otherwise race on the shared on-disk folder, the `uv venv` build, and the
+        route mount - `worker_concurrency` defaults to 2 and the `JobRuntime`
+        serialises nothing. The upload handler holds this across
+        stage-validate + `load_one` + record-owner, which also closes the
+        `module_owned_by_other` -> `record_install` check/record TOCTOU.
+
+        An `asyncio.Lock` suffices because we deploy single-process (no uvicorn
+        `--workers`); more than one worker would need a filesystem/DB lock.
+        """
+        async with self._id_locks_guard:
+            lock = self._id_locks.get(module_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._id_locks[module_id] = lock
+            return lock
 
     async def load_one(
         self,
@@ -1321,13 +1345,16 @@ class ModuleLoader:
         method: str = "get",
         filter_override: list[dict[str, Any]] | None = None,
         params: dict[str, Any] | None = None,
+        restrict_event_log: bool = False,
     ) -> Any:
         """Invoke a loaded module's ``@route`` handler programmatically.
 
         The public entry the dataset layer uses to produce a module's data
         without an HTTP round-trip - it reuses the module's result cache and the
         ephemeral filter exactly like a real request. Returns the raw handler
-        result (the dataset layer normalizes it into an envelope)."""
+        result (the dataset layer normalizes it into an envelope).
+        ``restrict_event_log=True`` wires the AI/MCP data wall: the handler sees
+        its result cache but every raw event-log accessor raises."""
         loaded = self.loaded.get(module_id)
         if loaded is None:
             raise ValueError(f"Module {module_id!r} is not loaded.")
@@ -1340,7 +1367,13 @@ class ModuleLoader:
                 break
         if handler is None:
             raise ValueError(f"No {method.upper()} route {route!r} on module {module_id!r}.")
-        ctx = await self._make_context(module_id, log_id, user_id, filter_override=filter_override)
+        ctx = await self._make_context(
+            module_id,
+            log_id,
+            user_id,
+            filter_override=filter_override,
+            restrict_event_log=restrict_event_log,
+        )
         return await self._invoke_handler(handler, ctx, **(params or {}))
 
     def _uses_worker_execution(self, module_id: str) -> bool:
@@ -1427,30 +1460,31 @@ class ModuleLoader:
         try:
             sm = get_sessionmaker()
             async with sm() as session:
-                # Admin-controlled module config (mate.api.policy) overrides the
-                # per-user ModuleConfig with one shared value for every user.
-                from mate.api.policy import SCOPE_MODULE, SCOPE_SETTING, resolve
+                # Per-user config is always the base; each admin-locked settings
+                # card (mate.api.modules.cards) overlays only the config_json
+                # slice it owns, so locking one card never drops another card's
+                # per-user value (the old whole-module lock replaced the entire
+                # blob and silently dropped the AI/model selection). A locked
+                # model card additionally gets the __model_admin_locked__
+                # sentinel so the module's /models route renders read-only. Each
+                # card resolves defensively inside resolve_card_overlays, so a
+                # single failed lookup degrades to the per-user value.
+                row = await session.get(ModuleConfig, (user_id, module_id))
+                if row is not None and row.config_json:
+                    cfg_json = dict(row.config_json)
+                loaded_mod = self.loaded.get(module_id)
+                if loaded_mod is not None:
+                    from mate.api.modules.cards import (
+                        CARD_MODEL,
+                        MODEL_LOCK_SENTINEL,
+                        resolve_card_overlays,
+                    )
 
-                admin_cfg, controlled = await resolve(session, SCOPE_MODULE, module_id, user_id)
-                if controlled:
-                    if isinstance(admin_cfg, dict):
-                        cfg_json = dict(admin_cfg)
-                else:
-                    row = await session.get(ModuleConfig, (user_id, module_id))
-                    if row is not None and row.config_json:
-                        cfg_json = dict(row.config_json)
-                # A module exposing a model_store (e.g. cv4cdd) can have its model
-                # *selection* pinned platform-wide via the `<module_id>.model`
-                # setting: when admin-controlled it overrides the per-user `model`
-                # config key for everyone, while the rest of the config (windows,
-                # thresholds) stays per-user. The sentinel lets the module's
-                # /models route render a read-only "administrator-controlled" state.
-                model_admin, model_locked = await resolve(
-                    session, SCOPE_SETTING, f"{module_id}.model", user_id
-                )
-                if model_locked and isinstance(model_admin, str) and model_admin:
-                    cfg_json["model"] = model_admin
-                    cfg_json["__model_admin_locked__"] = True
+                    cfg_json, controlled_cards = await resolve_card_overlays(
+                        session, loaded_mod.manifest, cfg_json, user_id
+                    )
+                    if controlled_cards.get(CARD_MODEL):
+                        cfg_json[MODEL_LOCK_SENTINEL] = True
                 # Modules this user has installed - scopes ctx.registry so
                 # cross-module RPC can only reach the user's own modules.
                 owned_ids = await user_module_ids(session, user_id)

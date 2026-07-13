@@ -34,6 +34,8 @@ export default function GeneralSettingsPage() {
   const setCsvDelimiter = useUi((s) => s.setCsvDelimiter);
   const csvTimestampFormat = useUi((s) => s.csvTimestampFormat);
   const setCsvTimestampFormat = useUi((s) => s.setCsvTimestampFormat);
+  const backButtonMode = useUi((s) => s.backButtonMode);
+  const setBackButtonMode = useUi((s) => s.setBackButtonMode);
 
   const onboardingQuery = useOnboardingState();
   const updateOnboarding = useUpdateOnboarding();
@@ -73,6 +75,28 @@ export default function GeneralSettingsPage() {
               ))}
             </RadioGroup>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card variant="glass">
+        <CardHeader>
+          <CardTitle className="text-base">Navigation</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Label className="flex items-center justify-between gap-3">
+            <span className="space-y-0.5">
+              <span className="block text-sm">Back button goes to parent page</span>
+              <span className="block text-xs text-muted-foreground">
+                When on, the topbar back arrow goes up one level in the page
+                hierarchy. When off, it returns to the last page you visited.
+              </span>
+            </span>
+            <Switch
+              checked={backButtonMode === "parent"}
+              onCheckedChange={(v) => setBackButtonMode(v ? "parent" : "history")}
+              className="cursor-pointer"
+            />
+          </Label>
         </CardContent>
       </Card>
 

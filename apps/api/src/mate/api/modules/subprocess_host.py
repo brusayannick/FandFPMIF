@@ -67,12 +67,44 @@ class SubprocessModule:
     """
 
     def __init__(
-        self, manifest_id: str, handlers_meta: list[dict[str, Any]], bridge: SubprocessBridge
+        self,
+        manifest_id: str,
+        handlers_meta: list[dict[str, Any]],
+        bridge: SubprocessBridge,
+        guidance_meta: dict[str, Any] | None = None,
     ) -> None:
         self.id = manifest_id
         self._bridge = bridge
         self._handlers_meta = handlers_meta
         self._install_stubs()
+        self._install_guidance(guidance_meta)
+
+    def _install_guidance(self, guidance_meta: dict[str, Any] | None) -> None:
+        """Forward ``guidance_payload`` when the worker's instance has one.
+
+        Instance-level only (never on the class): guidance is duck-typed via
+        ``getattr(loaded.instance, "guidance_payload", ...)`` in the AI/MCP
+        path, not collected by the loader's type-level handler walk - and a
+        class attribute would leak across every subprocess module sharing this
+        shim class. Bound to the bridge's generic ``call`` RPC, so the worker
+        dispatches it like any handler; ``build_ctx_meta`` already omits the
+        raw-log paths for a restricted ctx, keeping the data wall intact
+        across the process boundary (cache reads still work).
+        """
+        if guidance_meta is None:
+            return
+        bridge = self._bridge
+
+        async def guidance_payload(ctx: Any) -> Any:
+            return await bridge.call_handler("guidance_payload", ctx, (), {})
+
+        guidance_payload.__name__ = "guidance_payload"
+        guidance_payload.__qualname__ = f"SubprocessModule.{self.id}.guidance_payload"
+        self.guidance_payload = guidance_payload
+        if guidance_meta.get("system_prompt"):
+            self.guidance_system_prompt = str(guidance_meta["system_prompt"])
+        if guidance_meta.get("user_prefix"):
+            self.guidance_user_prefix = str(guidance_meta["user_prefix"])
 
     def _install_stubs(self) -> None:
         for entry in self._handlers_meta:
@@ -153,6 +185,7 @@ class SubprocessBridge:
         self._socket_path = self._socket_dir / "rpc.sock"
         self._ready_evt = asyncio.Event()
         self._handlers_meta: list[dict[str, Any]] = []
+        self._guidance_meta: dict[str, Any] | None = None
         self._ctx_registry: dict[str, Any] = {}
         # Soft-cancel bookkeeping. `_cancelled_job_ids` holds jobs asked to wind
         # down; `_token_job` maps a per-call RPC token → its job id so a ctx RPC
@@ -198,7 +231,9 @@ class SubprocessBridge:
                 f"Subprocess module {self.manifest.id!r} did not signal ready in 30s."
             ) from exc
 
-        return SubprocessModule(self.manifest.id, self._handlers_meta, self)
+        return SubprocessModule(
+            self.manifest.id, self._handlers_meta, self, guidance_meta=self._guidance_meta
+        )
 
     async def _spawn_worker(self) -> None:
         """Spawn (or respawn) the worker process against the live socket.
@@ -352,6 +387,7 @@ class SubprocessBridge:
 
     async def _on_ready(self, params: dict[str, Any]) -> Any:
         self._handlers_meta = params.get("handlers", [])
+        self._guidance_meta = params.get("guidance")
         self._ready_evt.set()
         return True
 

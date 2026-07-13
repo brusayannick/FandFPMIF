@@ -1,24 +1,20 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, ExternalLink, FileBox } from "lucide-react";
+import { FileBox } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
-import { ModuleAboutInfo } from "@/components/modules/module-about";
-import { PageContainer, PageTitle } from "@/components/page";
-import { useEventLog, useModules } from "@/lib/queries";
+import { PageContainer } from "@/components/page";
+import { useModules } from "@/lib/queries";
 import { getModulePanel } from "@/lib/module-panels";
 
 export default function ModulePage() {
   const params = useParams<{ logId: string; moduleId: string }>();
   const { logId, moduleId } = params;
 
-  const { data: log } = useEventLog(logId);
   const { data: modules, isLoading, isError } = useModules(logId);
 
   const mod = modules?.find((m) => m.id === moduleId);
@@ -58,51 +54,6 @@ export default function ModulePage() {
 
   return (
     <PageContainer>
-      <header className="flex items-start gap-3 pb-6">
-        <div className="space-y-1">
-          <Button asChild variant="ghost" size="sm" className="cursor-pointer -ml-2 gap-1">
-            <Link href={`/processes/${logId}`}>
-              <ArrowLeft className="h-3.5 w-3.5" />
-              <span>{log?.name ?? "Back"}</span>
-            </Link>
-          </Button>
-          <div className="flex items-center gap-2">
-            <PageTitle>{mod.name}</PageTitle>
-            {mod.author &&
-              (mod.author_url ? (
-                <Badge asChild variant="outline" className="border-0 bg-muted text-[10px]">
-                  <a
-                    href={mod.author_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="hover:underline"
-                  >
-                    {mod.author}
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="border-0 bg-muted text-[10px]">
-                  {mod.author}
-                </Badge>
-              ))}
-            <ModuleAboutInfo
-              name={mod.name}
-              description={mod.description}
-              about={mod.about}
-              author={mod.author}
-              authorUrl={mod.author_url}
-              paperUrl={mod.paper_url}
-              license={mod.license}
-              version={mod.version}
-            />
-          </div>
-          {mod.description && (
-            <p className="max-w-2xl text-sm text-muted-foreground">{mod.description}</p>
-          )}
-        </div>
-      </header>
-
       {/* Deep links can reach a module the grid renders grayed-out (disabled,
           or the log doesn't meet its manifest requirements). Mounting the
           panel would just fail on its first query – explain instead. */}

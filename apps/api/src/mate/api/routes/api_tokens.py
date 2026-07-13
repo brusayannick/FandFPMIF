@@ -20,8 +20,8 @@ from mate.api.config import get_settings
 from mate.api.db.models import ApiToken, UserSetting
 from mate.api.db.session import SessionDep
 from mate.api.mcp.consent import MCP_EGRESS_CONSENT_KEY
-from mate.api.mcp.governance import get_mint_policy, may_mint
-from mate.api.mcp.scopes import ALL_SCOPES, SCOPE_DESCRIPTIONS, sanitize_scopes
+from mate.api.mcp.governance import get_mint_policy, may_mint, mcp_read_only
+from mate.api.mcp.scopes import PAT_GRANTABLE_SCOPES, SCOPE_DESCRIPTIONS, sanitize_scopes
 from mate.api.schemas.common import utc_isoformat
 
 router = APIRouter(prefix="/api-tokens", tags=["api-tokens"])
@@ -70,6 +70,8 @@ class McpInfo(BaseModel):
     require_consent: bool
     consented: bool
     mint_allowed: bool
+    read_only: bool
+    toolsets: list[str]
     scopes_supported: list[ScopeInfo]
     oauth: OAuthInfo
 
@@ -168,6 +170,8 @@ async def set_consent(
 @router.get("/mcp-info", response_model=McpInfo)
 async def mcp_info(request: Request, session: SessionDep, user: CurrentUserDep) -> McpInfo:
     """MCP availability, endpoint, OAuth metadata, scopes, and this user's state."""
+    from mate.api.mcp.registry import registered_toolsets
+
     settings = get_settings()
     base = (settings.api_base_url or str(request.base_url)).rstrip("/")
     policy = await get_mint_policy(session)
@@ -177,8 +181,10 @@ async def mcp_info(request: Request, session: SessionDep, user: CurrentUserDep) 
         require_consent=settings.mcp_require_egress_consent,
         consented=await _consent_value(session, user.id),
         mint_allowed=may_mint(policy, ADMIN_ROLE in user.roles),
+        read_only=await mcp_read_only(),
+        toolsets=list(registered_toolsets()),
         scopes_supported=[
-            ScopeInfo(id=s, description=SCOPE_DESCRIPTIONS.get(s, "")) for s in ALL_SCOPES
+            ScopeInfo(id=s, description=SCOPE_DESCRIPTIONS.get(s, "")) for s in PAT_GRANTABLE_SCOPES
         ],
         oauth=OAuthInfo(
             authorization_server=settings.keycloak_issuer,

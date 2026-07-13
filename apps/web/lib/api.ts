@@ -15,6 +15,12 @@
  * refresh-failed session still has a valid cookie, so `auth()` keeps returning
  * it and the login page would bounce the user straight back. /logout expires
  * the cookies and deletes the server-side session entry, breaking the loop.
+ *
+ * An auth-401 *response* (stale/expired token — e.g. the first call after the
+ * tab sat idle past the access token's 15 min lifespan) self-heals: one forced
+ * session re-read (which rotates the token server-side) and one replay of the
+ * request. Only a confirmed-dead session signs out; a second 401 on the fresh
+ * token signs out too. See `authedFetch`.
  */
 
 import type { Session } from "next-auth";
@@ -54,11 +60,55 @@ function applyAmbientHeaders(headers: Headers): void {
   }
 }
 
+// Exact detail string the API's auth dependency returns for a missing,
+// malformed, expired, or otherwise invalid bearer token
+// (apps/api/src/mate/api/auth/dependencies.py, `_UNAUTH`). Other 401s exist —
+// ai_models.py forwards upstream AI-provider 401s with an *object* detail —
+// and those must never trigger a session refresh or a sign-out. If this
+// string ever drifts, the fail-safe is the old behavior: throw, no retry.
+// (`WWW-Authenticate` can't discriminate instead: the API is called
+// cross-origin and CORS doesn't expose the header.)
+const AUTH_401_DETAIL = "Missing or invalid bearer token";
+
+function isAuthDetail(body: unknown): boolean {
+  return (
+    typeof body === "object" && body !== null && (body as { detail?: unknown }).detail === AUTH_401_DETAIL
+  );
+}
+
+/** Is this response the API auth dependency rejecting the bearer token
+ * (as opposed to an app-level 401, e.g. an AI provider rejecting a key)? */
+async function isSessionAuth401(res: Response): Promise<boolean> {
+  if (res.status !== 401) return false;
+  try {
+    // clone(): keep the body readable for the caller's error handling.
+    return isAuthDetail(await res.clone().json());
+  } catch {
+    return false; // non-JSON 401 (proxy error page etc.) → not ours
+  }
+}
+
+/** Human-readable message for an error response. FastAPI wraps errors as
+ * `{"detail": ...}` — unwrap one level so toasts show `API 404: Event log
+ * not found.` instead of a JSON blob. The raw parsed body stays on `.detail`. */
+function apiErrorMessage(status: number, detail: unknown): string {
+  const inner =
+    detail && typeof detail === "object" && !Array.isArray(detail) && "detail" in detail
+      ? (detail as { detail: unknown }).detail
+      : detail;
+  if (status === 401 && inner === AUTH_401_DETAIL) {
+    return "Your session has expired. Please sign in again.";
+  }
+  if (typeof inner === "string" && inner) return `API ${status}: ${inner}`;
+  if (inner == null || inner === "") return `API ${status}`;
+  return `API ${status}: ${JSON.stringify(inner)}`;
+}
+
 export class ApiError extends Error {
   status: number;
   detail: unknown;
   constructor(status: number, detail: unknown) {
-    super(`API ${status}: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
+    super(apiErrorMessage(status, detail));
     this.status = status;
     this.detail = detail;
   }
@@ -70,8 +120,9 @@ export class ApiError extends Error {
 // queries paid six extra serial roundtrips before the first real byte left
 // the browser. Cache the session until shortly before its access token
 // expires (`session.expiresAt`), clamped to [5s, 60s] and single-flighted so
-// a burst of concurrent calls shares one fetch. A 401 from the backend
-// invalidates the cache so the next call re-reads (and, server-side, rotates).
+// a burst of concurrent calls shares one fetch. An auth-401 from the backend
+// forces a fresh re-read (rotating the token server-side) and one replay of
+// the failed request — see `sessionAfter401` / `authedFetch`.
 const SESSION_TTL_MIN_MS = 5_000;
 const SESSION_TTL_MAX_MS = 60_000;
 const TOKEN_EXPIRY_MARGIN_MS = 60_000;
@@ -140,6 +191,39 @@ async function cachedSession(): Promise<SessionResult> {
   return sessionInflight;
 }
 
+// ── Auth-401 recovery ──────────────────────────────────────────────────────
+let forced401Refresh: Promise<SessionResult> | null = null;
+
+/** Fresh session read after an auth-401. `sentAuth` is the Authorization
+ * header the failed request went out with (null if it went untokenized). If a
+ * concurrent caller already refreshed and the cache holds a *different*
+ * usable token, reuse it without another roundtrip; otherwise invalidate and
+ * single-flight exactly one `/api/auth/session` fetch (whose jwt callback
+ * rotates the token server-side). A burst of N concurrent 401s therefore
+ * costs one session fetch; stragglers whose 401 lands after the refresh
+ * replay straight from the cache. */
+async function sessionAfter401(sentAuth: string | null): Promise<SessionResult> {
+  if (sessionCache && Date.now() < sessionCache.validUntil) {
+    const s = sessionCache.session;
+    if (
+      s !== SESSION_FETCH_FAILED &&
+      s &&
+      !s.error &&
+      s.accessToken &&
+      `Bearer ${s.accessToken}` !== sentAuth
+    ) {
+      return s;
+    }
+  }
+  if (!forced401Refresh) {
+    invalidateSessionCache();
+    forced401Refresh = cachedSession().finally(() => {
+      forced401Refresh = null;
+    });
+  }
+  return forced401Refresh;
+}
+
 /** Current access token from the cached session (no per-call roundtrip).
  * `undefined` = no usable token (signed out, or refresh failed). */
 export async function sessionAccessToken(): Promise<string | undefined> {
@@ -205,6 +289,42 @@ async function attachAuth(headers: Headers): Promise<void> {
   await logoutToLogin();
 }
 
+/** Attach ambient headers + auth, fire the request, and self-heal auth-401s:
+ * one forced session re-read (rotating the token server-side), one replay.
+ * A second auth-401, or a confirmed-dead session, signs out via
+ * `logoutToLogin()`. SESSION_FETCH_FAILED never signs out (content-blocker
+ * loop protection — see `fetchSession`/`attachAuth`); app-level 401s (e.g. an
+ * AI provider rejecting a stored key) pass through untouched. Replaying a
+ * mutation is safe: the API's auth dependency runs before any route handler,
+ * so an auth-401 guarantees the handler never executed. */
+async function authedFetch(path: string, init: RequestInit, headers: Headers): Promise<Response> {
+  applyAmbientHeaders(headers);
+  await attachAuth(headers);
+  const doFetch = () => fetch(`${apiBase()}${path}`, { ...init, headers });
+  const res = await doFetch();
+  if (res.status !== 401 || typeof window === "undefined") return res;
+  if (signingOut) return res; // /logout navigation already underway
+  if (init.body instanceof ReadableStream) return res; // one-shot body – cannot replay
+  if (!(await isSessionAuth401(res))) return res; // app-level 401 – not ours
+  const session = await sessionAfter401(headers.get("Authorization"));
+  if (session === SESSION_FETCH_FAILED) return res; // auth unknown → surface the 401, never sign out
+  const token =
+    session && session.error !== "RefreshAccessTokenError" ? session.accessToken : undefined;
+  if (!token) {
+    await logoutToLogin(); // confirmed signed out / refresh dead
+    return res;
+  }
+  // Replaying with the same token is fine too: a transient JWKS failure inside
+  // the API raises this exact 401 and recovers on replay.
+  headers.set("Authorization", `Bearer ${token}`);
+  const retry = await doFetch();
+  if (retry.status === 401 && (await isSessionAuth401(retry))) {
+    invalidateSessionCache();
+    await logoutToLogin(); // fresh token still rejected → give up
+  }
+  return retry;
+}
+
 export async function api<T = unknown>(
   path: string,
   init: RequestInit & { json?: unknown } = {},
@@ -214,12 +334,8 @@ export async function api<T = unknown>(
     headers.set("Content-Type", "application/json");
     init.body = JSON.stringify(init.json);
   }
-  applyAmbientHeaders(headers);
-  await attachAuth(headers);
-  const res = await fetch(`${apiBase()}${path}`, { ...init, headers, cache: "no-store" });
+  const res = await authedFetch(path, { ...init, cache: "no-store" }, headers);
   if (!res.ok) {
-    // Stale/revoked token – drop the cached session so the next call re-reads.
-    if (res.status === 401) invalidateSessionCache();
     let detail: unknown = await res.text();
     try {
       detail = JSON.parse(detail as string);
@@ -253,34 +369,53 @@ export async function apiUpload<T = unknown>(
     await logoutToLogin();
     throw new ApiError(401, "Not authenticated");
   }
-  const body = new FormData();
-  body.append(opts.fieldName ?? "file", file);
-  return new Promise<T>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${apiBase()}${path}`);
-    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && opts.onProgress) {
-        opts.onProgress((e.loaded / e.total) * 100);
-      }
-    };
-    xhr.onload = () => {
-      let detail: unknown = xhr.responseText;
-      try {
-        detail = JSON.parse(xhr.responseText);
-      } catch {
-        /* keep as text */
-      }
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve((xhr.status === 204 ? undefined : detail) as T);
-      } else {
-        if (xhr.status === 401) invalidateSessionCache();
-        reject(new ApiError(xhr.status, detail));
-      }
-    };
-    xhr.onerror = () => reject(new ApiError(0, "Network error during upload"));
-    xhr.send(body);
-  });
+  const attempt = (bearer: string) =>
+    new Promise<T>((resolve, reject) => {
+      const body = new FormData();
+      body.append(opts.fieldName ?? "file", file);
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${apiBase()}${path}`);
+      xhr.setRequestHeader("Authorization", `Bearer ${bearer}`);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && opts.onProgress) {
+          opts.onProgress((e.loaded / e.total) * 100);
+        }
+      };
+      xhr.onload = () => {
+        let detail: unknown = xhr.responseText;
+        try {
+          detail = JSON.parse(xhr.responseText);
+        } catch {
+          /* keep as text */
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve((xhr.status === 204 ? undefined : detail) as T);
+        } else {
+          reject(new ApiError(xhr.status, detail));
+        }
+      };
+      xhr.onerror = () => reject(new ApiError(0, "Network error during upload"));
+      xhr.send(body);
+    });
+  try {
+    return await attempt(token);
+  } catch (err) {
+    // Auth-401 → same self-heal as authedFetch: one forced session refresh,
+    // one re-upload (progress restarts from 0 – acceptable for the rare
+    // mid-upload token expiry). Everything else rethrows untouched; the
+    // preflight ApiError(401, "Not authenticated") above has a string detail,
+    // so it can never re-enter this branch.
+    if (!(err instanceof ApiError) || err.status !== 401 || !isAuthDetail(err.detail)) throw err;
+    const session = await sessionAfter401(`Bearer ${token}`);
+    if (session === SESSION_FETCH_FAILED) throw err; // auth unknown – never sign out
+    const fresh =
+      session && session.error !== "RefreshAccessTokenError" ? session.accessToken : undefined;
+    if (!fresh) {
+      await logoutToLogin();
+      throw err;
+    }
+    return await attempt(fresh);
+  }
 }
 
 /** Raw fetch that returns the Response without JSON-parsing – use for SSE / streaming endpoints. */
@@ -293,11 +428,7 @@ export async function rawFetch(
     headers.set("Content-Type", "application/json");
     init.body = JSON.stringify(init.json);
   }
-  applyAmbientHeaders(headers);
-  await attachAuth(headers);
-  const res = await fetch(`${apiBase()}${path}`, { ...init, headers });
-  if (res.status === 401) invalidateSessionCache();
-  return res;
+  return authedFetch(path, init, headers);
 }
 
 /** Build an absolute URL pointing at the backend. Use for `<img src>`, `<a href>`,

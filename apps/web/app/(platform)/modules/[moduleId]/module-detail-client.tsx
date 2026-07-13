@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { ArrowLeft, FileBox, Lock, Trash2 } from "lucide-react";
+import { FileBox, Lock, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { toastError } from "@/lib/toast";
@@ -102,9 +101,16 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
   const update = useUpdateModuleConfig();
   const recreateIndex = useRecreateModuleIndex(moduleId);
 
-  // Admin-locked module config: every config surface (schema form, AI-model
-  // cards, enabled switch, Save) goes read-only and shows a banner.
-  const controlled = cfg?.controlled_by_admin ?? false;
+  // Per-card admin locks: each settings card (config / ai / model) can be
+  // locked independently, so each goes read-only on its own. `enabled` is
+  // per-user install state and stays editable regardless. controlled_by_admin
+  // is the back-compat "every card locked" flag.
+  const controlledCards = cfg?.controlled_cards ?? {};
+  const configLocked = controlledCards.config ?? false;
+  const aiLocked = controlledCards.ai ?? false;
+  const modelLocked = controlledCards.model ?? false;
+  const anyLocked = configLocked || aiLocked || modelLocked;
+  const allLocked = cfg?.controlled_by_admin ?? false;
 
   const schema = (manifest?.config_schema as ConfigSchema | undefined) ?? null;
   const properties = schema?.properties ?? {};
@@ -175,7 +181,6 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
   };
 
   const onToggleEnabled = async (val: boolean) => {
-    if (controlled) return;
     setEnabled(val);
     try {
       await update.mutateAsync({
@@ -195,7 +200,8 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
   };
 
   const onSaveConfig = async () => {
-    if (controlled) return;
+    // No client-side lock guard: the server strips any admin-locked card's
+    // slice from the payload, so saving from an unlocked card still works.
     try {
       await update.mutateAsync({
         id: moduleId,
@@ -214,7 +220,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
   };
 
   const onSelectModel = async (name: string) => {
-    if (controlled) return;
+    if (modelLocked) return;
     const next = { ...draft, [modelConfigKey]: name };
     setDraft(next);
     await update.mutateAsync({
@@ -256,18 +262,13 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
 
   return (
     <PageContainer className="space-y-4">
-      <Button asChild variant="ghost" size="sm" className="cursor-pointer -ml-2 gap-1">
-        <Link href="/modules">
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to modules
-        </Link>
-      </Button>
-
-      {controlled && (
+      {anyLocked && (
         <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           <Lock className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            This module is controlled by your administrator. Its settings
-            cannot be changed.
+            {allLocked
+              ? "This module is controlled by your administrator. Its settings cannot be changed."
+              : "Some settings on this module are controlled by your administrator and are read-only."}
           </span>
         </div>
       )}
@@ -292,13 +293,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
                 version={m.version}
               />
             </CardTitle>
-            <div
-              className={
-                controlled
-                  ? "flex items-center gap-2 shrink-0 opacity-60"
-                  : "flex items-center gap-2 shrink-0"
-              }
-            >
+            <div className="flex items-center gap-2 shrink-0">
               {cfgLoading ? (
                 <Skeleton className="h-6 w-24" />
               ) : (
@@ -310,7 +305,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
                     id="module-enabled"
                     checked={enabled}
                     onCheckedChange={onToggleEnabled}
-                    disabled={update.isPending || controlled}
+                    disabled={update.isPending}
                   />
                 </>
               )}
@@ -340,6 +335,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
                 embeddingSlot={aiManifest.embedding}
                 value={moduleAiDraft}
                 onChange={setModuleAiDraft}
+                disabled={aiLocked}
               />
             ) : (
               <>
@@ -350,6 +346,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
                     description={aiManifest.llm.description}
                     value={aiDraft.llm}
                     onChange={(next) => setAiDraft((d) => ({ ...d, llm: next }))}
+                    disabled={aiLocked}
                   />
                 )}
                 {aiManifest.embedding && (
@@ -361,6 +358,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
                     allowProviders={EMBEDDING_PROVIDERS}
                     preferEmbeddingModels
                     showDimensions
+                    disabled={aiLocked}
                   />
                 )}
               </>
@@ -419,7 +417,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
                 onClick={onSaveConfig}
                 isPending={update.isPending}
                 isSuccess={update.isSuccess}
-                disabled={cfgLoading || controlled}
+                disabled={cfgLoading || aiLocked}
                 className="cursor-pointer"
               >
                 Save AI models
@@ -454,17 +452,17 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
             ) : (
               <>
                 {hasSchema && (
-                  <div className={controlled ? "opacity-60" : undefined}>
+                  <div className={configLocked ? "opacity-60" : undefined}>
                     <ModuleConfigForm
                       properties={properties}
                       values={draft}
                       onChange={(key, val) => setDraft((d) => ({ ...d, [key]: val }))}
-                      disabled={controlled}
+                      disabled={configLocked}
                     />
                   </div>
                 )}
-                {hasSchema && !controlled && <Separator />}
-                {!controlled && (
+                {hasSchema && !configLocked && <Separator />}
+                {!configLocked && (
                   <div className="flex justify-end">
                     <ActionButton
                       size="sm"

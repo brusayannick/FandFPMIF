@@ -43,6 +43,13 @@ import {
   type ConfigSchema,
 } from "@/components/modules/module-config-form";
 import { AiSettingsEditor } from "@/components/ai/ai-settings-editor";
+import { AiModelPicker, type AiModelSelection } from "@/components/ai/ai-model-picker";
+import {
+  ModuleOpenAiCard,
+  EMPTY_MODULE_AI_DRAFT,
+  readModuleAiDraft,
+  type ModuleAiDraft,
+} from "@/components/ai/module-openai-card";
 import { UploadProgress } from "@/components/settings/upload-progress";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
@@ -52,12 +59,14 @@ import {
   useFetchAdminProviderModels,
   usePricingCatalog,
   useUpdateAdminAiConfig,
+  type AiProvider,
 } from "@/lib/ai-queries";
 import { useControlItems, useSetControl } from "@/lib/control-queries";
 import {
   useDeleteModuleModel,
   useModuleModels,
   useUploadModuleModel,
+  type AiModelsManifest,
 } from "@/lib/queries";
 import { toastError } from "@/lib/toast";
 
@@ -68,13 +77,27 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+/** Group per-card control items by their module, preserving card order. */
+function groupCardsByModule(
+  items: ControlItem[],
+): { moduleId: string; label: string; items: ControlItem[] }[] {
+  const map = new Map<string, { label: string; items: ControlItem[] }>();
+  for (const it of items) {
+    const mid = it.module_id ?? it.key.split(":")[0];
+    const g = map.get(mid) ?? { label: it.label || mid, items: [] };
+    g.items.push(it);
+    map.set(mid, g);
+  }
+  return [...map.entries()].map(([moduleId, g]) => ({ moduleId, ...g }));
+}
+
 export default function AdminControlsPage() {
   const settings = useControlItems("setting");
-  const modules = useControlItems("module");
+  const cards = useControlItems("card");
 
   const forbidden =
     (settings.error instanceof ApiError && settings.error.status === 403) ||
-    (modules.error instanceof ApiError && modules.error.status === 403);
+    (cards.error instanceof ApiError && cards.error.status === 403);
 
   if (forbidden) {
     return (
@@ -88,16 +111,8 @@ export default function AdminControlsPage() {
     );
   }
 
-  // The CV4CDD detection model is a `setting`-scope control, but it belongs with
-  // the module (upload + pin + lock) rather than buried in the generic server
-  // settings list. Pull it out here and render it inside the Modules section,
-  // attached to the cv4cdd card.
-  const settingItems = settings.data?.items ?? [];
-  const modelSetting = settingItems.find((i) => i.key === "cv4cdd.model");
-  const serverSettings = settingItems.filter((i) => i.key !== "cv4cdd.model");
-
-  const moduleItems = modules.data?.items ?? [];
-  const hasCv4cdd = moduleItems.some((i) => i.key === "cv4cdd");
+  const serverSettings = settings.data?.items ?? [];
+  const groups = groupCardsByModule(cards.data?.items ?? []);
 
   return (
     <div className="space-y-6">
@@ -122,33 +137,23 @@ export default function AdminControlsPage() {
         <div>
           <h2 className="text-sm font-semibold">Modules</h2>
           <p className="text-xs text-muted-foreground">
-            Lock a module to set one shared configuration used by every user who
-            has it installed.
+            Lock an individual settings card (Configuration, AI models, detection
+            model) to pin it for every user who has the module installed. Each
+            card is independent; the others stay per-user.
           </p>
         </div>
-        {modules.isLoading ? (
+        {cards.isLoading ? (
           <Skeleton className="h-40 w-full" />
-        ) : modules.isError ? (
+        ) : cards.isError ? (
           <p className="text-xs text-destructive">Failed to load modules.</p>
+        ) : groups.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No installed module exposes lockable settings.
+          </p>
         ) : (
-          <>
-            {moduleItems.map((item) =>
-              item.key === "cv4cdd" ? (
-                <div key={item.key} className="space-y-3">
-                  {modelSetting && <Cv4cddModelManager item={modelSetting} />}
-                  <ModuleRow item={item} />
-                </div>
-              ) : (
-                <ModuleRow key={item.key} item={item} />
-              ),
-            )}
-            {/* cv4cdd installed by nobody yet, but the shared-model pin still
-                lives here so an admin can manage it once it's installed. */}
-            {!hasCv4cdd && modelSetting && <Cv4cddModelManager item={modelSetting} />}
-            {moduleItems.length === 0 && !modelSetting && (
-              <p className="text-xs text-muted-foreground">No modules installed.</p>
-            )}
-          </>
+          groups.map((g) => (
+            <ModuleCardGroup key={g.moduleId} moduleId={g.moduleId} label={g.label} items={g.items} />
+          ))
         )}
       </section>
     </div>
@@ -424,36 +429,48 @@ function AnalyticsEditor({ item }: { item: ControlItem }) {
   );
 }
 
-/** Full CV4CDD detection-model manager: upload (with progress), pick the shared
- *  model, lock it platform-wide. Lives in the Modules section attached to the
- *  cv4cdd card rather than in the generic server-settings list. The lock toggle
- *  + pin write the `cv4cdd.model` setting control; uploads/deletes hit the
- *  module's own `/models` route (platform-shared storage). */
-function Cv4cddModelManager({ item }: { item: ControlItem }) {
-  const set = useSetControl("setting");
-  const modelsQ = useModuleModels("cv4cdd");
-  const upload = useUploadModuleModel("cv4cdd");
-  const remove = useDeleteModuleModel("cv4cdd");
+/** Generalized model-store card manager: upload (with progress), pick the
+ *  shared model, lock it for every user. Driven by the module's `model_store`
+ *  manifest; the lock toggle + pin write the module's model card control
+ *  ("<module_id>:model") as `{ [config_key]: name }`, while uploads/deletes hit
+ *  the module's own `/models` route (platform-shared storage). */
+function ModelCardControl({ item }: { item: ControlItem }) {
+  const set = useSetControl("card");
+  const moduleId = item.module_id ?? item.key.split(":")[0];
+  const store = item.model_store ?? null;
+  const configKey = store?.config_key ?? "model";
+  const accept = store?.accept ?? ".tar.zst";
+  const title = item.title ?? store?.title ?? "Model files";
+
+  const modelsQ = useModuleModels(moduleId);
+  const upload = useUploadModuleModel(moduleId);
+  const remove = useDeleteModuleModel(moduleId);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const locked = item.control_mode === "admin";
-  const pinned = typeof item.admin_value === "string" ? item.admin_value : "";
+  const av =
+    item.admin_value && typeof item.admin_value === "object"
+      ? (item.admin_value as Record<string, unknown>)
+      : {};
+  const pinned = typeof av[configKey] === "string" ? (av[configKey] as string) : "";
   const [value, setValue] = useState(pinned);
   useEffect(() => setValue(pinned), [pinned]);
 
   const onToggleLock = async (next: boolean) => {
     try {
+      const chosen = value || pinned;
       await set.mutateAsync({
-        key: "cv4cdd.model",
+        key: item.key,
         control_mode: next ? "admin" : "user",
-        // Locking keeps the current pin (or the in-progress selection); the
-        // picker + Apply below is how the admin changes it.
-        admin_value: next ? value || pinned || undefined : undefined,
+        // Locking keeps the current pin (or in-progress selection); the picker
+        // + Apply below is how the admin changes it. Locking with nothing chosen
+        // stores no value yet (the module then reports read-only, no pin).
+        admin_value: next ? (chosen ? { [configKey]: chosen } : undefined) : undefined,
       });
       toast.success(
         next
-          ? "Detection model locked for all users"
-          : "Detection model unlocked – each user picks their own",
+          ? "Model locked for all users"
+          : "Model unlocked – each user picks their own",
       );
     } catch (e) {
       toastError(`Failed: ${(e as Error).message}`);
@@ -462,8 +479,12 @@ function Cv4cddModelManager({ item }: { item: ControlItem }) {
 
   const onApply = async () => {
     try {
-      await set.mutateAsync({ key: "cv4cdd.model", control_mode: "admin", admin_value: value });
-      toast.success("Shared detection model pinned");
+      await set.mutateAsync({
+        key: item.key,
+        control_mode: "admin",
+        admin_value: { [configKey]: value },
+      });
+      toast.success("Shared model pinned");
     } catch (e) {
       toastError(`Save failed: ${(e as Error).message}`);
     }
@@ -507,11 +528,11 @@ function Cv4cddModelManager({ item }: { item: ControlItem }) {
               ) : (
                 <Unlock className="h-3.5 w-3.5 text-muted-foreground" />
               )}
-              CV4CDD detection model
+              {title}
             </CardTitle>
             <p className="mt-1 text-xs text-muted-foreground">
-              Upload and pin one shared detection model for every user. Unlocked,
-              each user picks their own on the module&apos;s settings page.
+              Upload and pin one shared model for every user. Unlocked, each user
+              picks their own on the module&apos;s settings page.
             </p>
           </div>
           <div
@@ -528,7 +549,7 @@ function Cv4cddModelManager({ item }: { item: ControlItem }) {
       <CardContent className="space-y-4">
         {notInstalled ? (
           <p className="text-xs text-muted-foreground">
-            Install the CV4CDD module to manage its shared model.
+            Install this module to manage its shared model.
           </p>
         ) : (
           <>
@@ -537,7 +558,7 @@ function Cv4cddModelManager({ item }: { item: ControlItem }) {
                 <input
                   ref={fileRef}
                   type="file"
-                  accept=".tar.zst"
+                  accept={accept}
                   className="hidden"
                   onChange={(e) => onFilePicked(e.target.files?.[0])}
                 />
@@ -556,7 +577,7 @@ function Cv4cddModelManager({ item }: { item: ControlItem }) {
                   {upload.isPending ? "Uploading…" : "Upload model"}
                 </Button>
                 <span className="text-xs text-muted-foreground">
-                  Accepts <code className="rounded bg-muted px-1 py-0.5">.tar.zst</code> ·
+                  Accepts <code className="rounded bg-muted px-1 py-0.5">{accept}</code> ·
                   shared platform-wide
                 </span>
               </div>
@@ -567,7 +588,7 @@ function Cv4cddModelManager({ item }: { item: ControlItem }) {
               <Skeleton className="h-20 w-full" />
             ) : models.length === 0 ? (
               <p className="rounded-md border border-dashed py-6 text-center text-xs text-muted-foreground">
-                No models installed yet. Upload a .tar.zst archive to get started.
+                No models installed yet. Upload a {accept} archive to get started.
               </p>
             ) : (
               <RadioGroup
@@ -582,9 +603,9 @@ function Cv4cddModelManager({ item }: { item: ControlItem }) {
                     className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
                   >
                     <div className="flex items-center gap-3">
-                      <RadioGroupItem id={`pin-${m.name}`} value={m.name} disabled={!locked} />
+                      <RadioGroupItem id={`pin-${moduleId}-${m.name}`} value={m.name} disabled={!locked} />
                       <Label
-                        htmlFor={`pin-${m.name}`}
+                        htmlFor={`pin-${moduleId}-${m.name}`}
                         className="cursor-pointer font-mono text-xs"
                       >
                         {m.name}
@@ -659,10 +680,87 @@ function Cv4cddModelManager({ item }: { item: ControlItem }) {
   );
 }
 
-// ── Module rows ─────────────────────────────────────────────────────────────
+// ── Module card groups ──────────────────────────────────────────────────────
 
-function ModuleRow({ item }: { item: ControlItem }) {
-  const set = useSetControl("module");
+const CARD_HINTS: Record<string, string> = {
+  config: "Pins the module's configuration parameters for every user.",
+  ai: "Pins the AI provider/model (and key for self-hosted modules) for every user.",
+  model: "Pins one shared uploaded model for every user.",
+};
+
+/** Present a card control item to the shared shell with the card's title as the
+ *  header label and a short per-card hint as the description. */
+function displayItem(item: ControlItem): ControlItem {
+  return {
+    ...item,
+    label: item.title ?? item.card_id ?? item.key,
+    description: CARD_HINTS[item.card_id ?? ""] ?? null,
+  };
+}
+
+/** One module, with its per-card lock rows and a bulk "Unlock all". */
+function ModuleCardGroup({
+  moduleId,
+  label,
+  items,
+}: {
+  moduleId: string;
+  label: string;
+  items: ControlItem[];
+}) {
+  const set = useSetControl("card");
+  const anyLocked = items.some((it) => it.control_mode === "admin");
+
+  const onUnlockAll = async () => {
+    try {
+      await Promise.all(
+        items
+          .filter((it) => it.control_mode === "admin")
+          .map((it) => set.mutateAsync({ key: it.key, control_mode: "user" })),
+      );
+      toast.success(`${label} unlocked for all users`);
+    } catch (e) {
+      toastError(`Failed: ${(e as Error).message}`);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border/60 p-3">
+      <div className="flex items-center justify-between gap-4 px-1">
+        <h3 className="text-sm font-medium" title={moduleId}>
+          {label}
+        </h3>
+        {anyLocked && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onUnlockAll}
+            disabled={set.isPending}
+            className="cursor-pointer gap-2 text-xs"
+          >
+            {set.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Unlock all
+          </Button>
+        )}
+      </div>
+      <div className="space-y-2">
+        {items.map((it) => (
+          <CardControlRow key={it.key} item={it} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CardControlRow({ item }: { item: ControlItem }) {
+  if (item.card_id === "model") return <ModelCardControl item={item} />;
+  if (item.card_id === "ai") return <AiCardControl item={item} />;
+  return <ConfigCardControl item={item} />;
+}
+
+/** The Configuration card: lock + edit the module's config_schema props. */
+function ConfigCardControl({ item }: { item: ControlItem }) {
+  const set = useSetControl("card");
   const locked = item.control_mode === "admin";
   const schema = (item.config_schema as ConfigSchema | null) ?? null;
   const properties = useMemo(() => schema?.properties ?? {}, [schema]);
@@ -693,7 +791,7 @@ function ModuleRow({ item }: { item: ControlItem }) {
   const onSave = async () => {
     try {
       await set.mutateAsync({ key: item.key, control_mode: "admin", admin_value: draft });
-      toast.success(`${item.label} configuration saved`);
+      toast.success("Configuration saved");
     } catch (e) {
       toastError(`Save failed: ${(e as Error).message}`);
     }
@@ -701,7 +799,7 @@ function ModuleRow({ item }: { item: ControlItem }) {
 
   return (
     <CollapsibleControlCard
-      item={item}
+      item={displayItem(item)}
       locked={locked}
       onToggleLock={onToggle}
       saving={set.isPending}
@@ -715,8 +813,7 @@ function ModuleRow({ item }: { item: ControlItem }) {
         />
       ) : (
         <p className="text-xs text-muted-foreground">
-          This module has no configurable parameters; locking simply pins its
-          empty config for all users.
+          This module has no configurable parameters.
         </p>
       )}
       {hasSchema && (
@@ -732,6 +829,132 @@ function ModuleRow({ item }: { item: ControlItem }) {
           </Button>
         </div>
       )}
+    </CollapsibleControlCard>
+  );
+}
+
+function readPlatformAi(
+  ai: Record<string, unknown> | undefined,
+): { llm: AiModelSelection; embedding: AiModelSelection } {
+  const a = ai ?? {};
+  const llm = (a.llm as Partial<AiModelSelection> | undefined) ?? {};
+  const emb = (a.embedding as Partial<AiModelSelection> | undefined) ?? {};
+  return {
+    llm: { provider: llm.provider ?? null, model: llm.model ?? null },
+    embedding: {
+      provider: emb.provider ?? null,
+      model: emb.model ?? null,
+      dimensions: emb.dimensions ?? null,
+    },
+  };
+}
+
+const EMBEDDING_PROVIDERS: AiProvider[] = ["openai", "unigpt", "custom"];
+
+/** The AI models card: lock + edit the shared AI selection. Mirrors the user
+ *  settings page (self-hosted key card vs platform-keyed pickers) and stores
+ *  the same `config_json.ai` shape the module reads. */
+function AiCardControl({ item }: { item: ControlItem }) {
+  const set = useSetControl("card");
+  const moduleId = item.module_id ?? item.key.split(":")[0];
+  const locked = item.control_mode === "admin";
+  const ai = (item.ai_models as AiModelsManifest | null) ?? null;
+  const selfHosted = Boolean(ai?.self_hosted);
+  const savedAi =
+    item.admin_value && typeof item.admin_value === "object"
+      ? ((item.admin_value as Record<string, unknown>).ai as Record<string, unknown> | undefined)
+      : undefined;
+
+  const [moduleDraft, setModuleDraft] = useState<ModuleAiDraft>(EMPTY_MODULE_AI_DRAFT);
+  const [platformDraft, setPlatformDraft] = useState(() => readPlatformAi(savedAi));
+  useEffect(() => {
+    setModuleDraft(readModuleAiDraft({ ai: savedAi ?? {} }));
+    setPlatformDraft(readPlatformAi(savedAi));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.admin_value]);
+
+  const aiValue = (): Record<string, unknown> =>
+    selfHosted
+      ? {
+          api_key: moduleDraft.api_key,
+          llm_model: moduleDraft.llm_model,
+          embedding_model: moduleDraft.embedding_model,
+          embedding_dimensions: moduleDraft.embedding_dimensions,
+        }
+      : { llm: platformDraft.llm, embedding: platformDraft.embedding };
+
+  const onToggle = async (next: boolean) => {
+    try {
+      await set.mutateAsync({
+        key: item.key,
+        control_mode: next ? "admin" : "user",
+        admin_value: next ? { ai: aiValue() } : undefined,
+      });
+    } catch (e) {
+      toastError(`Failed: ${(e as Error).message}`);
+    }
+  };
+
+  const onSave = async () => {
+    try {
+      await set.mutateAsync({ key: item.key, control_mode: "admin", admin_value: { ai: aiValue() } });
+      toast.success("AI models saved");
+    } catch (e) {
+      toastError(`Save failed: ${(e as Error).message}`);
+    }
+  };
+
+  return (
+    <CollapsibleControlCard
+      item={displayItem(item)}
+      locked={locked}
+      onToggleLock={onToggle}
+      saving={set.isPending}
+      contentClassName="space-y-4"
+    >
+      {selfHosted ? (
+        <ModuleOpenAiCard
+          moduleId={moduleId}
+          savedApiKey={moduleDraft.api_key}
+          llmSlot={ai?.llm ?? null}
+          embeddingSlot={ai?.embedding ?? null}
+          value={moduleDraft}
+          onChange={setModuleDraft}
+        />
+      ) : (
+        <>
+          {ai?.llm && (
+            <AiModelPicker
+              title={ai.llm.title}
+              description={ai.llm.description}
+              value={platformDraft.llm}
+              onChange={(next) => setPlatformDraft((d) => ({ ...d, llm: next }))}
+            />
+          )}
+          {ai?.embedding && (
+            <AiModelPicker
+              title={ai.embedding.title}
+              description={ai.embedding.description}
+              value={platformDraft.embedding}
+              onChange={(next) => setPlatformDraft((d) => ({ ...d, embedding: next }))}
+              allowProviders={EMBEDDING_PROVIDERS}
+              preferEmbeddingModels
+              showDimensions
+            />
+          )}
+        </>
+      )}
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          onClick={onSave}
+          disabled={set.isPending}
+          className="cursor-pointer gap-2"
+        >
+          {set.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Save shared AI models
+        </Button>
+      </div>
     </CollapsibleControlCard>
   );
 }

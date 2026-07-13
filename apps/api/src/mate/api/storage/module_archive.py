@@ -26,8 +26,9 @@ from mate.api.storage.config import get_storage_settings, is_s3
 log = structlog.get_logger(__name__)
 
 # Derived build artifacts excluded from the source archive - the loader rebuilds
-# them per VM (venvs are ABI/machine-specific; bundles are esbuilt on load).
-_EXCLUDE = {".venv", ".dist", "node_modules", ".installed-hash", "__pycache__", ".git"}
+# them per VM (venvs are ABI/machine-specific; bundles are esbuilt on load). Public
+# so the module content-hash reuses the exact same set (single source of truth).
+BUILD_ARTIFACT_NAMES = {".venv", ".dist", "node_modules", ".installed-hash", "__pycache__", ".git"}
 
 
 def _archive_key(module_id: str) -> str:
@@ -43,7 +44,7 @@ def _modules_prefix() -> str:
 
 def _excluded(tarinfo: tarfile.TarInfo) -> tarfile.TarInfo | None:
     parts = set(Path(tarinfo.name).parts)
-    return None if parts & _EXCLUDE else tarinfo
+    return None if parts & BUILD_ARTIFACT_NAMES else tarinfo
 
 
 def archive_module_sync(folder: Path, module_id: str) -> bool:

@@ -197,17 +197,19 @@ async def test_module_manifest_endpoint(client_with_sample_mod: AsyncClient) -> 
 
 @pytest.mark.asyncio
 async def test_module_config_get_put(client_with_sample_mod: AsyncClient) -> None:
+    # sample_mod exposes no cards, so controlled_cards is always empty.
+    empty = {"controlled_by_admin": False, "controlled_cards": {}}
     initial = await client_with_sample_mod.get("/api/v1/modules/sample_mod/config")
     assert initial.status_code == 200
-    assert initial.json() == {"config": {}, "enabled": True, "controlled_by_admin": False}
+    assert initial.json() == {"config": {}, "enabled": True, **empty}
 
     payload = {"config": {"threshold": 0.5}, "enabled": True}
     put = await client_with_sample_mod.put("/api/v1/modules/sample_mod/config", json=payload)
     assert put.status_code == 200
-    assert put.json() == {**payload, "controlled_by_admin": False}
+    assert put.json() == {**payload, **empty}
 
     again = await client_with_sample_mod.get("/api/v1/modules/sample_mod/config")
-    assert again.json() == {**payload, "controlled_by_admin": False}
+    assert again.json() == {**payload, **empty}
 
 
 @pytest.mark.asyncio

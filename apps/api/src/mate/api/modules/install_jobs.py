@@ -8,8 +8,11 @@ bottom-left dock and the jobs drawer just like an event-log import:
   (`POST /api/v1/modules/install`). The route writes the bytes to a staging
   tmpdir and submits a job carrying the file path.
 
-The handler ends with `loader.load_one(folder, manifest)` so the module
-becomes available without a restart.
+The handler normally ends with `loader.load_one(folder, manifest)` so the module
+becomes available without a restart. When another user already owns a
+byte-identical module under the same id, it instead reuses the loaded code and
+just records this user's ownership (content-addressed sharing - see
+`_stage_validated_upload`).
 """
 
 from __future__ import annotations
@@ -26,6 +29,11 @@ import structlog
 
 from mate.api.db.engine import get_sessionmaker
 from mate.api.jobs.runtime import JobHandle, JobRuntime
+from mate.api.modules.content_hash import (
+    module_content_hash,
+    read_content_hash,
+    write_content_hash,
+)
 from mate.api.modules.installs import module_owned_by_other, record_install
 from mate.api.storage.module_archive import archive_module_sync
 from mate.sdk.errors import ModuleManifestError
@@ -77,13 +85,28 @@ def _install_from_upload(loader: ModuleLoader):
             try:
                 await asyncio.to_thread(_extract_archive, archive_path, staging)
                 await handle.progress(35, 100, stage="validating", message="Validating manifest")
-                folder, manifest = await _stage_validated_upload(loader, handle.user_id, staging)
-                await handle.progress(60, 100, stage="installing", message="Resolving dependencies")
-                await loader.load_one(folder, manifest)
-                await _record_owner(handle.user_id, manifest.id, "upload")
-                # S3 mode: archive the source so a fresh VM can re-materialise it
-                # (best-effort + local-mode no-op, inside the helper).
-                await asyncio.to_thread(archive_module_sync, folder, manifest.id)
+                # Read the manifest up front so we can serialise the whole
+                # stage->load->record section behind this id's lock (two uploads
+                # of the same new id would otherwise race the folder/venv/mount).
+                inner, manifest = _read_staged_manifest(staging)
+                lock = await loader.id_lock(manifest.id)
+                async with lock:
+                    folder, reused = await _stage_validated_upload(
+                        loader, handle.user_id, inner, manifest
+                    )
+                    await handle.progress(
+                        60, 100, stage="installing", message="Resolving dependencies"
+                    )
+                    # `reused` means the identical module is already loaded (and
+                    # already archived) under this id by another owner - skip the
+                    # disruptive reload + re-archive and only grant ownership.
+                    if not reused:
+                        await loader.load_one(folder, manifest)
+                    await _record_owner(handle.user_id, manifest.id, "upload")
+                    if not reused:
+                        # S3 mode: archive the source so a fresh VM can
+                        # re-materialise it (best-effort + local-mode no-op).
+                        await asyncio.to_thread(archive_module_sync, folder, manifest.id)
                 await handle.progress(100, 100, stage="ready", message="Module installed")
                 handle.payload["module_id"] = manifest.id
                 await handle.bus.publish(
@@ -161,35 +184,72 @@ def _read_staged_manifest(staging: Path) -> tuple[Path, Manifest]:
 
 
 async def _stage_validated_upload(
-    loader: ModuleLoader, user_id: str, staging: Path
-) -> tuple[Path, Manifest]:
-    """Validate a staged upload, then move it into the uploads root.
+    loader: ModuleLoader, user_id: str, inner: Path, manifest: Manifest
+) -> tuple[Path, bool]:
+    """Validate a staged upload and decide reuse vs (re)stage.
 
-    Rejects (before touching disk) an id that collides with a built-in default
-    - uploads must never overwrite repo code - or one already owned by another
-    user, since module code is shared in-process under a single id. Re-uploading
-    an id the same user already owns replaces it (hot-reload).
+    Returns ``(folder, reused)``. ``reused=True`` means the byte-identical module
+    is already loaded under this id by another owner - the caller shares it (skips
+    ``load_one`` + archiving) and only records this user's ownership row. This is
+    content-addressed sharing: module code is shared in-process under a single id,
+    so two users can co-own the *same* code, but two *different* code bodies can't
+    coexist under one id.
+
+    Rejections (before mutating disk):
+    - an id that collides with a built-in default (uploads must never shadow repo
+      code);
+    - an id owned by another user whose on-disk content *differs* from this upload
+      (or can't be verified) - the uploader must rename. Once an id is co-owned,
+      this also blocks the original owner from changing its code out from under the
+      co-owner (they must have the other owner(s) uninstall first).
+
+    Re-uploading an id the same user solely owns replaces it (hot-reload).
     """
-    inner, manifest = _read_staged_manifest(staging)
     if manifest.id in loader.default_module_ids:
         raise ModuleManifestError(
             f"Module id {manifest.id!r} is a built-in default module and cannot be "
             "overwritten by an upload. Choose a different id."
         )
+    target = loader.uploaded_modules_dir / manifest.id
+    # Hash the *pristine* staging tree, before any move/install synthesises a
+    # pyproject.toml into it - the persisted sidecar is pristine too, so every
+    # comparison is pristine-vs-pristine.
+    staged_hash = await asyncio.to_thread(module_content_hash, inner)
+
     sm = get_sessionmaker()
     async with sm() as session:
-        if await module_owned_by_other(session, user_id, manifest.id):
+        owned_by_other = await module_owned_by_other(session, user_id, manifest.id)
+
+    if owned_by_other:
+        existing_hash = read_content_hash(target)
+        if existing_hash is None or existing_hash != staged_hash:
             raise ModuleManifestError(
-                f"Module id {manifest.id!r} is already in use by another user. Choose a unique id."
+                f"Module id {manifest.id!r} is already used by a different module owned by "
+                "another user. Shared module code can't diverge under one id - rename yours "
+                "(change `id` in manifest.yaml), or have the other owner(s) uninstall it first."
             )
-    target = loader.uploaded_modules_dir / manifest.id
+        # Verified-identical content owned by someone else.
+        if manifest.id in loader.loaded:
+            return target, True  # already loaded - just share it (caller records owner)
+        # Identical but not currently loaded (failed import, or missing after an
+        # S3 restore): materialise this user's copy to repair the shared install.
+        _restage(inner, target, staged_hash)
+        return target, False
+
+    # Not owned by another user: a brand-new id, or this user re-uploading their
+    # own module (hot-reload). Replace whatever is there with the fresh upload.
+    _restage(inner, target, staged_hash)
+    return target, False
+
+
+def _restage(inner: Path, target: Path, content_hash: str) -> None:
+    """Move a validated staged module into the uploads root, replacing any prior
+    copy, and persist its pristine content hash alongside for later comparisons."""
     if target.exists():
-        # Replace prior install - keeps the operator's expectations simple
-        # ("re-uploading the same id updates it"). The loader will hot-reload.
         shutil.rmtree(target, ignore_errors=True)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(inner), str(target))
-    return target, manifest
+    write_content_hash(target, content_hash)
 
 
 def _resolve_archive_root(staging: Path) -> Path:

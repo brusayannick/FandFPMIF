@@ -20,7 +20,9 @@ export function JobsDock() {
   const active = useJobsStore(useShallow(selectActiveJobs));
   const counts = useJobsStore(useShallow(selectCounts));
   const setOpen = useJobsStore((s) => s.setDrawerOpen);
-  const collapsed = useUi((s) => s.sidebarCollapsed);
+  // Follow the sidebar's persistent layout footprint, not its hover-peek:
+  // auto mode keeps a w-14 rail (peek overlays content), pinned takes w-56.
+  const collapsed = !useUi((s) => s.sidebarPinned);
   const [hover, setHover] = useState(false);
   const cancel = useCancelJob();
 

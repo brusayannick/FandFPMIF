@@ -380,8 +380,78 @@ def _prefix_tree_worker(path: str) -> dict[str, Any]:
     return serialize_prefix_tree(cases)
 
 
+def _top_counts(counts: Any, n: int) -> dict[str, int]:
+    """Top-``n`` entries of an ``{activity: frequency}`` mapping, by frequency."""
+    if not isinstance(counts, dict):
+        return {}
+    ordered = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:n]
+    return {str(k): int(v) for k, v in ordered}
+
+
 class DiscoveryModule(Module):
     id = "discovery"
+
+    guidance_system_prompt = (
+        "You are a process-mining analyst interpreting a discovered process "
+        "map (directly-follows graph) and model-size statistics for an event "
+        "log. Cite specific activity names, edge frequencies, and start/end "
+        "activities. Point out dominant paths, rework loops (edges leading "
+        "back to earlier activities) and unusually rare transitions. Suggest "
+        "concrete next steps when relevant."
+    )
+    guidance_user_prefix = "Interpret this discovered process map:"
+
+    async def guidance_payload(self, ctx: ModuleContext) -> dict[str, Any] | None:
+        """Compact summary of the cached discovery artifacts for AI guidance.
+
+        Derived exclusively from ``ctx.cache`` - never touches
+        ``ctx.event_log``, so it works under the restricted AI/MCP context
+        (where every raw event-log accessor raises). Returns ``None`` until
+        the import precompute (or a panel visit) has cached a DFG or a Petri
+        net.
+        """
+        dfg = await ctx.cache.get("dfg") if await ctx.cache.exists("dfg") else None
+        petri = (
+            await ctx.cache.get("petri_net_inductive")
+            if await ctx.cache.exists("petri_net_inductive")
+            else None
+        )
+        if not isinstance(dfg, dict) and not isinstance(petri, dict):
+            return None
+
+        payload: dict[str, Any] = {}
+        if isinstance(dfg, dict):
+            activities = [a for a in dfg.get("activities", []) if isinstance(a, dict)]
+            edges = [e for e in dfg.get("edges", []) if isinstance(e, dict)]
+            top_activities = sorted(activities, key=lambda a: a.get("frequency", 0), reverse=True)[
+                :10
+            ]
+            top_edges = sorted(edges, key=lambda e: e.get("frequency", 0), reverse=True)[:15]
+            payload["process_map"] = {
+                "activity_count": len(activities),
+                "edge_count": len(edges),
+                "top_activities_by_frequency": [
+                    {"activity": a.get("label") or a.get("id"), "frequency": a.get("frequency")}
+                    for a in top_activities
+                ],
+                "top_edges_by_frequency": [
+                    {
+                        "source": e.get("source"),
+                        "target": e.get("target"),
+                        "frequency": e.get("frequency"),
+                    }
+                    for e in top_edges
+                ],
+                "start_activities": _top_counts(dfg.get("start_activities"), 10),
+                "end_activities": _top_counts(dfg.get("end_activities"), 10),
+            }
+        if isinstance(petri, dict):
+            payload["petri_net_inductive"] = {
+                "places": len(petri.get("places", [])),
+                "transitions": len(petri.get("transitions", [])),
+                "arcs": len(petri.get("arcs", [])),
+            }
+        return payload
 
     # -- compute helpers (reusable from routes + precompute). Each offloads to a
     # process-pool core via `_offload` + the top-level `_*_worker` fns above; the

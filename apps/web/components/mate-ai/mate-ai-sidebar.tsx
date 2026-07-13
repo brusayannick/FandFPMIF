@@ -432,7 +432,9 @@ export function MateAiSidebar() {
       case "confidential_only":
         return s.setConfidentialOnly(value as boolean);
       case "sidebar_collapsed":
-        return s.setSidebarCollapsed(value as boolean);
+        // External contract stays "collapsed"; internally that maps to unpinned
+        // (auto mode). collapsed=false → pin the sidebar open.
+        return s.setSidebarPinned(!(value as boolean));
       case "show_unavailable_modules":
         return s.setShowUnavailableModules(value as boolean);
       case "show_disabled_modules":

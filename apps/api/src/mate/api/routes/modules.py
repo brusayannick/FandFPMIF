@@ -7,9 +7,7 @@ router; this router covers the platform's own module-meta surface.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Annotated, Any
@@ -26,26 +24,32 @@ from mate.api.db.session import SessionDep
 from mate.api.jobs.runtime import get_job_runtime
 from mate.api.modules import get_module_loader
 from mate.api.modules.availability import Availability
+from mate.api.modules.cards import (
+    MODEL_LOCK_SENTINEL,
+    card_key,
+    card_owned_keys,
+    derive_cards,
+    resolve_card_overlays,
+)
+from mate.api.modules.defaults import DEFAULTS_SEEDED_KEY, get_admin_default_ids
 from mate.api.modules.install_jobs import JOB_TYPE_UPLOAD
-from mate.api.modules.installer import remove_module_artifacts
 from mate.api.modules.installs import (
-    owner_count,
-    remove_install,
     seed_default_modules,
     user_module_ids,
     user_owns_module,
 )
-from mate.api.policy import SCOPE_MODULE, resolve
+from mate.api.modules.uninstall import uninstall_for_user
+from mate.api.policy import SCOPE_CARD, resolve
 from mate.api.schemas.event_logs import LogModel
-from mate.api.storage.module_archive import delete_module_archive_sync
 
 # UserSetting key holding the per-user record of which default module ids have
 # already been offered to a user (a JSON list). Seeding grants only the defaults
 # that are new since the last visit, so a freshly bundled module reaches
 # existing users automatically while a default the user intentionally removed
 # stays gone (its id is already in the recorded set). Legacy rows hold a bare
-# `true` (the old one-shot "seeded at least once" flag).
-_DEFAULTS_SEEDED_KEY = "modules_defaults_seeded"
+# `true` (the old one-shot "seeded at least once" flag). Shared with the admin
+# default-declaration path via `modules.defaults`.
+_DEFAULTS_SEEDED_KEY = DEFAULTS_SEEDED_KEY
 
 router = APIRouter(prefix="/modules", tags=["modules"])
 
@@ -115,9 +119,14 @@ class ModuleSummary(BaseModel):
 class ModuleConfigPayload(BaseModel):
     config: dict[str, Any] = {}
     enabled: bool = True
-    # Set by GET when an admin has locked this module's config for all users;
-    # the detail page then renders read-only. Ignored on PUT input.
+    # Set by GET/PUT: True only when *every* settings card the module exposes is
+    # admin-locked (back-compat "whole module is controlled" flag). Ignored on
+    # PUT input.
     controlled_by_admin: bool = False
+    # Set by GET/PUT: per-card lock state, ``{card_id: locked}`` for each card
+    # the module exposes (config / ai / model). The detail page disables each
+    # card independently from this. Ignored on PUT input.
+    controlled_cards: dict[str, bool] = {}
 
 
 @router.get("", response_model=list[ModuleSummary])
@@ -136,8 +145,12 @@ async def list_modules(
 
     # Lazily reconcile the per-user default set. We do it here (not in the auth
     # layer) because this is the path that already holds both the loader and a
-    # session, and it runs on every visit to the modules surface.
-    await _reconcile_default_modules(session, user.id, loader.default_module_ids)
+    # session, and it runs on every visit to the modules surface. Effective
+    # defaults = bundled ids + admin-declared ids (the latter filtered to
+    # actually-loaded modules so we never seed an id that can't be listed).
+    admin_ids = await get_admin_default_ids(session)
+    effective_defaults = loader.default_module_ids | (admin_ids & set(loader.loaded))
+    await _reconcile_default_modules(session, user.id, effective_defaults)
 
     # Per-user visibility: only modules this user has installed. The loader
     # holds every module loaded into the process (shared), so we intersect.
@@ -300,24 +313,25 @@ async def get_config(
     module_id: str, session: SessionDep, user: CurrentUserDep
 ) -> ModuleConfigPayload:
     await _assert_owns_module(session, user.id, module_id)
-    # Admin-controlled? Return the shared config (module config is not secret)
-    # and flag it read-only - mirrors the AI-config control path.
-    admin_cfg, controlled = await resolve(session, SCOPE_MODULE, module_id, user.id)
-    if controlled:
-        loaded = get_module_loader().loaded.get(module_id)
-        default_enabled = loaded.manifest.default_enabled if loaded else True
-        cfg = admin_cfg if isinstance(admin_cfg, dict) else {}
-        return ModuleConfigPayload(config=cfg, enabled=default_enabled, controlled_by_admin=True)
+    loaded = get_module_loader().loaded.get(module_id)
+    default_enabled = loaded.manifest.default_enabled if loaded else True
     row = await session.get(ModuleConfig, (user.id, module_id))
-    if row is None:
-        # No saved config → fall back to the manifest's default_enabled, the
-        # same fallback list_modules uses. Hardcoding True here made modules
-        # shipping default_enabled=false (e.g. cv4cdd) read "Disabled" in the
-        # process grid but "Enabled" on the detail toggle.
-        loaded = get_module_loader().loaded.get(module_id)
-        default_enabled = loaded.manifest.default_enabled if loaded else True
-        return ModuleConfigPayload(config={}, enabled=default_enabled)
-    return ModuleConfigPayload(config=row.config_json, enabled=row.enabled)
+    # Always return the user's real enabled state (falling back to the
+    # manifest's default_enabled only when there's no saved row) - a locked card
+    # no longer forces default_enabled the way the old whole-module lock did.
+    base_cfg = dict(row.config_json) if (row is not None and row.config_json) else {}
+    enabled = row.enabled if row is not None else default_enabled
+    if loaded is None:
+        return ModuleConfigPayload(config=base_cfg, enabled=enabled)
+    # Per-user config with each admin-locked card's shared value overlaid, plus
+    # the per-card lock map the detail page uses to disable cards independently.
+    cfg, controlled = await resolve_card_overlays(session, loaded.manifest, base_cfg, user.id)
+    return ModuleConfigPayload(
+        config=cfg,
+        enabled=enabled,
+        controlled_by_admin=bool(controlled) and all(controlled.values()),
+        controlled_cards=controlled,
+    )
 
 
 @router.put("/{module_id}/config", response_model=ModuleConfigPayload)
@@ -328,26 +342,55 @@ async def put_config(
     user: CurrentUserDep,
 ) -> ModuleConfigPayload:
     await _assert_owns_module(session, user.id, module_id)
-    _, controlled = await resolve(session, SCOPE_MODULE, module_id, user.id)
-    if controlled:
-        raise HTTPException(
-            status_code=403,
-            detail="This module's configuration is controlled by your administrator.",
-        )
+    loaded = get_module_loader().loaded.get(module_id)
     row = await session.get(ModuleConfig, (user.id, module_id))
+    existing = dict(row.config_json) if (row is not None and row.config_json) else {}
+
+    # No blanket 403: a user may still edit unlocked cards. Each admin-locked
+    # card is read-only, so keep the user's stored slice for it and ignore the
+    # incoming change (the shared admin value wins at runtime via _make_context)
+    # - locking a card never destroys the user's saved value for it.
+    result = dict(payload.config or {})
+    controlled: dict[str, bool] = {}
+    if loaded is not None:
+        cards = derive_cards(loaded.manifest)
+        for card in cards:
+            _, locked = await resolve(
+                session, SCOPE_CARD, card_key(module_id, card.card_id), user.id
+            )
+            controlled[card.card_id] = bool(locked)
+            if not locked:
+                continue
+            for k in card_owned_keys(card, cards, {**existing, **result}):
+                if k in existing:
+                    result[k] = existing[k]
+                else:
+                    result.pop(k, None)
+    # The loader-runtime sentinel is never persisted, even if a client echoes it.
+    result.pop(MODEL_LOCK_SENTINEL, None)
+
     if row is None:
         row = ModuleConfig(
             user_id=user.id,
             module_id=module_id,
-            config_json=payload.config,
+            config_json=result,
             enabled=payload.enabled,
         )
         session.add(row)
     else:
-        row.config_json = payload.config
+        row.config_json = result
         row.enabled = payload.enabled
     await session.commit()
-    return payload
+
+    if loaded is None:
+        return ModuleConfigPayload(config=result, enabled=payload.enabled)
+    cfg, controlled = await resolve_card_overlays(session, loaded.manifest, result, user.id)
+    return ModuleConfigPayload(
+        config=cfg,
+        enabled=payload.enabled,
+        controlled_by_admin=bool(controlled) and all(controlled.values()),
+        controlled_cards=controlled,
+    )
 
 
 class InstallJobResponse(BaseModel):
@@ -443,6 +486,25 @@ async def put_module_layout(
     return payload
 
 
+@router.get("/readme")
+async def get_modules_readme(user: CurrentUserDep) -> FileResponse:
+    """Serve the live ``modules/README.md`` (the module-authoring contract).
+
+    Read straight from disk on every request - the download always mirrors the
+    checked-in guide, no bundled snapshot. ``filename`` makes it an attachment.
+    """
+    loader = get_module_loader()
+    readme = (loader.modules_dir / "README.md").resolve()
+    if not readme.is_file():
+        raise HTTPException(status_code=404, detail="README not found.")
+    return FileResponse(
+        readme,
+        media_type="text/markdown",
+        filename="README.md",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.get("/{module_id}/assets/{asset_path:path}")
 async def get_module_asset(
     module_id: str, asset_path: str, request: Request, user: CurrentUserDep
@@ -510,8 +572,10 @@ async def restore_defaults(session: SessionDep, user: CurrentUserDep) -> Restore
     # a default that failed to install or import is in that set but absent from
     # `loaded`. Restrict to actually-loaded modules - otherwise we'd write an
     # install row and report "restored" for a module that never appears in the
-    # listing (which only shows loaded manifests).
-    default_ids = {mid for mid in loader.default_module_ids if mid in loader.loaded}
+    # listing (which only shows loaded manifests). Admin-declared defaults are
+    # restored too.
+    admin_ids = await get_admin_default_ids(session)
+    default_ids = {mid for mid in (loader.default_module_ids | admin_ids) if mid in loader.loaded}
     owned = await user_module_ids(session, user.id)
     missing = sorted(default_ids - owned)
     if missing:
@@ -529,26 +593,10 @@ async def restore_defaults(session: SessionDep, user: CurrentUserDep) -> Restore
 async def uninstall(module_id: str, session: SessionDep, user: CurrentUserDep) -> None:
     # Per-user uninstall: drop this user's ownership record. The shared
     # on-disk artifact and in-process load are only torn down once the last
-    # owner removes it - other users keep using it untouched.
+    # owner removes it - other users keep using it untouched. Bundled and
+    # admin-declared defaults are protected from teardown (their shared code
+    # must survive for everyone else).
     await _assert_owns_module(session, user.id, module_id)
     loader = get_module_loader()
-    await remove_install(session, user.id, module_id)
-    await session.commit()
-
-    # Never tear down a default's shared repo code - only the user's install row
-    # is removed above. Uploads live under uploaded_modules_dir and are removed
-    # only once their last owner uninstalls. Entry-point/registry modules live
-    # in neither root, so the existence check below leaves them alone.
-    if module_id not in loader.default_module_ids and await owner_count(session, module_id) == 0:
-        target = get_settings().uploaded_modules_dir.resolve() / module_id
-        await loader.unload_one(module_id)
-        if target.exists():
-            remove_module_artifacts(target)
-            shutil.rmtree(target, ignore_errors=True)
-        # Drop the S3 source archive too (no-op in local mode) so a later boot
-        # doesn't re-materialise a module the last owner just removed.
-        await asyncio.to_thread(delete_module_archive_sync, module_id)
-
-    # Scope the event to this user so the WS only notifies their sessions -
-    # other owners' module lists are unaffected.
-    await loader.bus.publish("module.uninstalled", {"id": module_id, "user_id": user.id})
+    protected = loader.default_module_ids | await get_admin_default_ids(session)
+    await uninstall_for_user(session, loader, user.id, module_id, protected_ids=protected)

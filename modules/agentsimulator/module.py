@@ -77,6 +77,58 @@ def _parse_log_index(kw: dict[str, Any]) -> int:
 class AgentSimulatorModule(Module):
     id = "agentsimulator"
 
+    guidance_system_prompt = (
+        "You are a process-mining analyst interpreting an AgentSimulator run: "
+        "a multi-agent simulation trained on an event log and scored against "
+        "it with distance measures (lower is better, 0 = identical) such as "
+        "NGD (n-gram distance) and cycle-time / arrival-time distances. "
+        "Relate the fidelity scores to the run parameters and log sizes. Only "
+        "aggregate run statistics are available here - never individual "
+        "simulated events."
+    )
+    guidance_user_prefix = "Interpret this simulation run summary:"
+
+    async def guidance_payload(self, ctx: ModuleContext) -> dict[str, Any] | None:
+        """Compact, cache-only simulation run summary for AI guidance.
+
+        Whitelists aggregate fields from the cached ``result``: run params,
+        input / simulated log sizes and per-measure fidelity scores. The
+        distribution arrays, the row ``preview`` and the ``download_csv*``
+        entries are deliberately excluded - the AI data wall forbids event
+        rows, simulated or real. Reads only ``ctx.cache`` (restricted-context
+        safe). Returns ``None`` until a current-schema run is cached.
+        """
+        cached = await ctx.cache.get("result")
+        if not _result_is_current(cached):
+            return None
+
+        fidelity: dict[str, Any] = {}
+        metrics_raw = cached.get("metrics")
+        if isinstance(metrics_raw, dict):
+            for measure, stats in metrics_raw.items():
+                if isinstance(stats, dict):
+                    fidelity[str(measure)] = {
+                        k: stats.get(k) for k in ("mean", "std") if k in stats
+                    }
+
+        runs: list[dict[str, Any]] = []
+        downloads = cached.get("downloads")
+        if isinstance(downloads, list):
+            for entry in downloads:
+                if isinstance(entry, dict):
+                    runs.append({k: entry.get(k) for k in ("index", "cases", "events")})
+
+        return {
+            "generated_at": cached.get("generated_at"),
+            "runtime_seconds": cached.get("runtime_seconds"),
+            "params": cached.get("params"),
+            "input": cached.get("input"),
+            "test": cached.get("test"),
+            "simulation": cached.get("simulation"),
+            "fidelity": fidelity,
+            "simulated_runs": runs,
+        }
+
     # ── results the panel reads ────────────────────────────────────────────
 
     @route.get("/results")

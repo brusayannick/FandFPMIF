@@ -7,6 +7,10 @@ single atomic write and export is a passthrough.
 
 Every row is keyed by the Keycloak `sub` (``user.id``); a dashboard and its
 bound log are both validated against the current user on every access.
+
+The ownership/validation/share helpers here are plain ``(session, ...)``
+functions rather than FastAPI dependencies so the MCP dashboards toolset can
+reuse them verbatim - keep them framework-free.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mate.api.auth import CurrentUserDep, get_owned_event_log
 from mate.api.db.models import Dashboard, DashboardShare, Team, User
@@ -49,7 +54,7 @@ def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _items_of(row: Dashboard) -> list[DashboardItem]:
+def dashboard_items(row: Dashboard) -> list[DashboardItem]:
     raw = (row.layout_json or {}).get("items", [])
     items: list[DashboardItem] = []
     for entry in raw:
@@ -61,7 +66,7 @@ def _items_of(row: Dashboard) -> list[DashboardItem]:
     return items
 
 
-def _settings_of(row: Dashboard) -> CanvasSettings:
+def dashboard_settings(row: Dashboard) -> CanvasSettings:
     raw = (row.layout_json or {}).get("settings")
     if not raw:
         return CanvasSettings()
@@ -73,34 +78,35 @@ def _settings_of(row: Dashboard) -> CanvasSettings:
         return CanvasSettings()
 
 
-def _layout_blob(items: list[DashboardItem], settings: CanvasSettings) -> dict[str, Any]:
+def layout_blob(items: list[DashboardItem], settings: CanvasSettings) -> dict[str, Any]:
     return {"items": [it.model_dump() for it in items], "settings": settings.model_dump()}
 
 
-def _detail(row: Dashboard, *, is_owner: bool = True) -> DashboardDetail:
+def dashboard_detail(row: Dashboard, *, is_owner: bool = True) -> DashboardDetail:
     return DashboardDetail(
         id=row.id,
         name=row.name,
         description=row.description,
         event_log_id=row.event_log_id,
         log_model=row.log_model,  # type: ignore[arg-type]
-        items=_items_of(row),
-        settings=_settings_of(row),
+        items=dashboard_items(row),
+        settings=dashboard_settings(row),
         created_at=row.created_at,
         updated_at=row.updated_at,
         is_owner=is_owner,
     )
 
 
-async def _get_owned(session: SessionDep, dashboard_id: str, user_id: str) -> Dashboard:
+async def get_owned_dashboard(session: AsyncSession, dashboard_id: str, user_id: str) -> Dashboard:
+    """Owner-only gate for mutations: 404 for missing AND foreign boards."""
     row = await session.get(Dashboard, dashboard_id)
     if row is None or row.user_id != user_id:
         raise HTTPException(status_code=404, detail="Dashboard not found.")
     return row
 
 
-async def _validate_log(
-    session: SessionDep, log_id: str | None, user_id: str, log_model: str | None = None
+async def validate_dashboard_log(
+    session: AsyncSession, log_id: str | None, user_id: str, log_model: str | None = None
 ) -> None:
     """A bound log must belong to the user and (when ``log_model`` is given)
     match the board's data model. ``None`` (unbound) is always allowed."""
@@ -112,6 +118,33 @@ async def _validate_log(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Log is {row.log_model}; this dashboard is {log_model}.",
         )
+
+
+async def apply_dashboard_update(
+    session: AsyncSession, row: Dashboard, payload: DashboardUpdate, user_id: str
+) -> None:
+    """Apply a partial update to an owned board (no commit).
+
+    Only fields present in ``payload.model_fields_set`` are touched, so a field
+    can be explicitly cleared (``None``) without clobbering the rest.
+    """
+    fields = payload.model_fields_set
+
+    if "name" in fields and payload.name is not None:
+        row.name = payload.name
+    if "description" in fields:
+        row.description = payload.description
+    if "event_log_id" in fields:
+        await validate_dashboard_log(session, payload.event_log_id, user_id, row.log_model)
+        row.event_log_id = payload.event_log_id
+    # Items and settings share one blob, so rewrite it whenever either is
+    # touched, keeping the untouched sibling as-is.
+    if ("items" in fields and payload.items is not None) or (
+        "settings" in fields and payload.settings is not None
+    ):
+        items = payload.items if payload.items is not None else dashboard_items(row)
+        settings = payload.settings if payload.settings is not None else dashboard_settings(row)
+        row.layout_json = layout_blob(items, settings)
 
 
 @router.get("", response_model=list[DashboardSummary])
@@ -140,7 +173,7 @@ async def list_dashboards(session: SessionDep, user: CurrentUserDep) -> list[Das
 async def create_dashboard(
     payload: DashboardCreate, session: SessionDep, user: CurrentUserDep
 ) -> DashboardDetail:
-    await _validate_log(session, payload.event_log_id, user.id, payload.log_model)
+    await validate_dashboard_log(session, payload.event_log_id, user.id, payload.log_model)
     row = Dashboard(
         id=uuid7_str(),
         user_id=user.id,
@@ -148,13 +181,13 @@ async def create_dashboard(
         description=payload.description,
         event_log_id=payload.event_log_id,
         log_model=payload.log_model,
-        layout_json=_layout_blob(payload.items, payload.settings),
+        layout_json=layout_blob(payload.items, payload.settings),
         created_at=_utcnow(),
     )
     session.add(row)
     await session.commit()
     log.info("dashboard.created", dashboard_id=row.id)
-    return _detail(row)
+    return dashboard_detail(row)
 
 
 @router.get("/{dashboard_id}", response_model=DashboardDetail)
@@ -163,7 +196,7 @@ async def get_dashboard(
 ) -> DashboardDetail:
     # Owner or share recipient may view; recipients get a read-only board.
     row = await get_accessible_dashboard(session, dashboard_id, user.id)
-    return _detail(row, is_owner=row.user_id == user.id)
+    return dashboard_detail(row, is_owner=row.user_id == user.id)
 
 
 @router.patch("/{dashboard_id}", response_model=DashboardDetail)
@@ -173,32 +206,15 @@ async def update_dashboard(
     session: SessionDep,
     user: CurrentUserDep,
 ) -> DashboardDetail:
-    row = await _get_owned(session, dashboard_id, user.id)
-    fields = payload.model_fields_set
-
-    if "name" in fields and payload.name is not None:
-        row.name = payload.name
-    if "description" in fields:
-        row.description = payload.description
-    if "event_log_id" in fields:
-        await _validate_log(session, payload.event_log_id, user.id, row.log_model)
-        row.event_log_id = payload.event_log_id
-    # Items and settings share one blob, so rewrite it whenever either is
-    # touched, keeping the untouched sibling as-is.
-    if ("items" in fields and payload.items is not None) or (
-        "settings" in fields and payload.settings is not None
-    ):
-        items = payload.items if payload.items is not None else _items_of(row)
-        settings = payload.settings if payload.settings is not None else _settings_of(row)
-        row.layout_json = _layout_blob(items, settings)
-
+    row = await get_owned_dashboard(session, dashboard_id, user.id)
+    await apply_dashboard_update(session, row, payload, user.id)
     await session.commit()
-    return _detail(row)
+    return dashboard_detail(row)
 
 
 @router.delete("/{dashboard_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_dashboard(dashboard_id: str, session: SessionDep, user: CurrentUserDep) -> None:
-    row = await _get_owned(session, dashboard_id, user.id)
+    row = await get_owned_dashboard(session, dashboard_id, user.id)
     await session.delete(row)
     await session.commit()
     log.info("dashboard.deleted", dashboard_id=dashboard_id)
@@ -213,13 +229,13 @@ async def export_dashboard(
     Intentionally drops the bound `event_log_id` - logs are per-user and the
     importer rebinds on the target machine.
     """
-    row = await _get_owned(session, dashboard_id, user.id)
+    row = await get_owned_dashboard(session, dashboard_id, user.id)
     return DashboardExport(
         name=row.name,
         description=row.description,
         log_model=row.log_model,  # type: ignore[arg-type]
-        items=_items_of(row),
-        settings=_settings_of(row),
+        items=dashboard_items(row),
+        settings=dashboard_settings(row),
     )
 
 
@@ -227,7 +243,7 @@ async def export_dashboard(
 async def import_dashboard(
     payload: DashboardImport, session: SessionDep, user: CurrentUserDep
 ) -> DashboardDetail:
-    await _validate_log(session, payload.event_log_id, user.id, payload.log_model)
+    await validate_dashboard_log(session, payload.event_log_id, user.id, payload.log_model)
     row = Dashboard(
         id=uuid7_str(),
         user_id=user.id,
@@ -235,19 +251,19 @@ async def import_dashboard(
         description=payload.description,
         event_log_id=payload.event_log_id,
         log_model=payload.log_model,
-        layout_json=_layout_blob(payload.items, payload.settings),
+        layout_json=layout_blob(payload.items, payload.settings),
         created_at=_utcnow(),
     )
     session.add(row)
     await session.commit()
     log.info("dashboard.imported", dashboard_id=row.id, cards=len(payload.items))
-    return _detail(row)
+    return dashboard_detail(row)
 
 
 # --- Sharing (owner-managed) -------------------------------------------------
 
 
-async def _share_out(session: SessionDep, share: DashboardShare) -> DashboardShareOut:
+async def share_out(session: AsyncSession, share: DashboardShare) -> DashboardShareOut:
     if share.target_team_id is not None:
         team = await session.get(Team, share.target_team_id)
         label = team.name if team is not None else "Deleted team"
@@ -270,46 +286,23 @@ async def _share_out(session: SessionDep, share: DashboardShare) -> DashboardSha
     )
 
 
-@router.get("/{dashboard_id}/shares", response_model=list[DashboardShareOut])
-async def list_shares(
-    dashboard_id: str, session: SessionDep, user: CurrentUserDep
-) -> list[DashboardShareOut]:
-    await _get_owned(session, dashboard_id, user.id)
-    rows = (
-        (
-            await session.execute(
-                select(DashboardShare)
-                .where(DashboardShare.dashboard_id == dashboard_id)
-                .order_by(DashboardShare.created_at.asc())
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return [await _share_out(session, r) for r in rows]
+async def create_share_for_owner(
+    session: AsyncSession, dashboard_id: str, payload: ShareCreate, user_id: str
+) -> DashboardShare:
+    """Validate + stage a new share for a board *user_id* owns (no commit).
 
+    Owner-only (404 on foreign), target must exist and be reachable - you can
+    only share with a teammate or a team you belong to (the same scope
+    ``/sharing/targets`` offers) - and a duplicate target is a 409.
+    """
+    await get_owned_dashboard(session, dashboard_id, user_id)
 
-@router.post(
-    "/{dashboard_id}/shares",
-    response_model=DashboardShareOut,
-    status_code=status.HTTP_201_CREATED,
-)
-async def add_share(
-    dashboard_id: str,
-    payload: ShareCreate,
-    session: SessionDep,
-    user: CurrentUserDep,
-) -> DashboardShareOut:
-    await _get_owned(session, dashboard_id, user.id)
-
-    # Validate the target exists and is reachable: you can only share with a
-    # teammate or a team you belong to (the same scope /sharing/targets offers).
     if payload.target_user_id is not None:
-        if payload.target_user_id == user.id:
+        if payload.target_user_id == user_id:
             raise HTTPException(status_code=400, detail="You already own this dashboard.")
         if await session.get(User, payload.target_user_id) is None:
             raise HTTPException(status_code=404, detail="User not found.")
-        if not await can_share_with_user(session, payload.target_user_id, user.id):
+        if not await can_share_with_user(session, payload.target_user_id, user_id):
             raise HTTPException(
                 status_code=403, detail="You can only share with members of your teams."
             )
@@ -324,7 +317,7 @@ async def add_share(
     else:
         if await session.get(Team, payload.target_team_id) is None:
             raise HTTPException(status_code=404, detail="Team not found.")
-        if not await can_share_with_team(session, payload.target_team_id or "", user.id):
+        if not await can_share_with_team(session, payload.target_team_id or "", user_id):
             raise HTTPException(
                 status_code=403, detail="You can only share with teams you belong to."
             )
@@ -345,23 +338,65 @@ async def add_share(
         dashboard_id=dashboard_id,
         target_user_id=payload.target_user_id,
         target_team_id=payload.target_team_id,
-        created_by=user.id,
+        created_by=user_id,
         created_at=_utcnow(),
     )
     session.add(share)
+    return share
+
+
+async def resolve_share_for_owner(
+    session: AsyncSession, dashboard_id: str, share_id: str, user_id: str
+) -> DashboardShare:
+    """Look up a share on a board *user_id* owns; 404 on foreign board/share."""
+    await get_owned_dashboard(session, dashboard_id, user_id)
+    share = await session.get(DashboardShare, share_id)
+    if share is None or share.dashboard_id != dashboard_id:
+        raise HTTPException(status_code=404, detail="Share not found.")
+    return share
+
+
+@router.get("/{dashboard_id}/shares", response_model=list[DashboardShareOut])
+async def list_shares(
+    dashboard_id: str, session: SessionDep, user: CurrentUserDep
+) -> list[DashboardShareOut]:
+    await get_owned_dashboard(session, dashboard_id, user.id)
+    rows = (
+        (
+            await session.execute(
+                select(DashboardShare)
+                .where(DashboardShare.dashboard_id == dashboard_id)
+                .order_by(DashboardShare.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [await share_out(session, r) for r in rows]
+
+
+@router.post(
+    "/{dashboard_id}/shares",
+    response_model=DashboardShareOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_share(
+    dashboard_id: str,
+    payload: ShareCreate,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> DashboardShareOut:
+    share = await create_share_for_owner(session, dashboard_id, payload, user.id)
     await session.commit()
     log.info("dashboard.shared", dashboard_id=dashboard_id, share_id=share.id)
-    return await _share_out(session, share)
+    return await share_out(session, share)
 
 
 @router.delete("/{dashboard_id}/shares/{share_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_share(
     dashboard_id: str, share_id: str, session: SessionDep, user: CurrentUserDep
 ) -> None:
-    await _get_owned(session, dashboard_id, user.id)
-    share = await session.get(DashboardShare, share_id)
-    if share is None or share.dashboard_id != dashboard_id:
-        raise HTTPException(status_code=404, detail="Share not found.")
+    share = await resolve_share_for_owner(session, dashboard_id, share_id, user.id)
     await session.delete(share)
     await session.commit()
     log.info("dashboard.unshared", dashboard_id=dashboard_id, share_id=share_id)

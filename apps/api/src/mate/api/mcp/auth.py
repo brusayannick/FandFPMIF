@@ -9,8 +9,9 @@ reads the principal back via ``ctx.request_context.request.scope`` - robust
 across the session manager's task boundaries (a ``ContextVar`` would not be).
 
 A token is either a Mate PAT (``mate_pat_…``, with its own granted scopes) or a
-Keycloak JWT (OAuth, granted all read scopes for now). The middleware also
-enforces the live admin enable toggle and the per-user rate limit.
+Keycloak JWT (OAuth, scopes mapped from the token's ``scope`` claim - read-only
+fallback when it carries none of ours). The middleware also enforces the live
+admin enable toggle, an Origin allowlist and the per-user rate limit.
 """
 
 from __future__ import annotations
@@ -25,13 +26,13 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from mate.api.auth import (
     TOKEN_PREFIX,
     CurrentUser,
-    get_current_user_from_token,
     verify_token_row,
 )
-from mate.api.auth.dependencies import DEMO_ACCESS_TOKEN
+from mate.api.auth.dependencies import DEMO_ACCESS_TOKEN, get_current_user_and_claims
+from mate.api.config import get_settings
 from mate.api.db.engine import get_sessionmaker
 from mate.api.db.models import User
-from mate.api.mcp.scopes import effective_scopes
+from mate.api.mcp.scopes import effective_scopes, scopes_from_oauth_claims
 
 log = structlog.get_logger("mcp.audit")
 SCOPE_PRINCIPAL_KEY = "mate_principal"
@@ -69,12 +70,18 @@ async def resolve_mcp_principal(token: str, session: AsyncSession) -> MCPPrincip
             user=cu, token_id=row.id, scopes=effective_scopes(row.scopes), auth_type="pat"
         )
     try:
-        cu = await get_current_user_from_token(token, session)
+        cu, claims = await get_current_user_and_claims(token, session)
     except Exception:
         return None
-    # OAuth/JWT principals get all read scopes; per-scope OAuth mapping is a
-    # later increment (Keycloak client-scope → MCP scope).
-    return MCPPrincipal(user=cu, token_id=None, scopes=effective_scopes(None), auth_type="oauth")
+    # The token's `scope` claim maps onto the MCP taxonomy; a token carrying
+    # none of our scopes falls back to the read scopes (pre-scope clients).
+    # `admin` survives only when the same token also carries the admin role.
+    return MCPPrincipal(
+        user=cu,
+        token_id=None,
+        scopes=scopes_from_oauth_claims(claims, cu.roles),
+        auth_type="oauth",
+    )
 
 
 def _bearer(scope: Scope) -> str | None:
@@ -103,6 +110,15 @@ class MCPAuthMiddleware:
         if not await mcp_runtime_enabled():
             log.info("mcp.rejected", reason="disabled", client=_client(scope))
             await _send_json(send, 503, {"error": "unavailable", "detail": "MCP is disabled."})
+            return
+
+        # DNS-rebinding guard (MCP spec recommendation): a browser-borne request
+        # carries an Origin header - only same-app origins may pass. Non-browser
+        # clients (Claude Code, Codex, server-side connectors) send no Origin.
+        origin = _origin(scope)
+        if origin is not None and not _origin_allowed(origin):
+            log.info("mcp.rejected", reason="bad_origin", origin=origin, client=_client(scope))
+            await _send_json(send, 403, {"error": "forbidden", "detail": "Origin not allowed."})
             return
 
         token = _bearer(scope)
@@ -154,6 +170,27 @@ class MCPAuthMiddleware:
 def _plausible_token(token: str) -> bool:
     """A PAT or a 3-segment JWT - anything else is rejected before any DB/JWKS hit."""
     return token.startswith(TOKEN_PREFIX) or token.count(".") == 2
+
+
+def _origin(scope: Scope) -> str | None:
+    for key, value in scope.get("headers", []):
+        if key == b"origin":
+            return value.decode("latin-1").strip().rstrip("/").lower() or None
+    return None
+
+
+def _origin_allowed(origin: str) -> bool:
+    """Same-app origins (CORS list + the public base URL) and loopback only."""
+    if origin.startswith(("http://localhost", "http://127.0.0.1", "https://localhost")):
+        return True
+    settings = get_settings()
+    allowed = {o.rstrip("/").lower() for o in settings.cors_origins}
+    base = settings.api_base_url
+    if base:
+        parts = base.split("/")
+        if len(parts) >= 3:
+            allowed.add(f"{parts[0]}//{parts[2]}".lower())
+    return origin in allowed
 
 
 def _client(scope: Scope) -> str | None:

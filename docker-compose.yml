@@ -92,6 +92,21 @@ services:
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/flows-funds}
       KEYCLOAK_JWKS_URL: ${KEYCLOAK_JWKS_URL:-http://keycloak:8080/realms/flows-funds/protocol/openid-connect/certs}
       KEYCLOAK_AUDIENCE: ${KEYCLOAK_AUDIENCE:-flows-funds-api}
+      # MCP server (opt-in). The api image doesn't bake .env, so every MCP
+      # knob must be interpolated through here to reach the container.
+      MCP_ENABLED: ${MCP_ENABLED:-false}
+      API_BASE_URL: ${API_BASE_URL:-}
+      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-}
+      MCP_READ_ONLY: ${MCP_READ_ONLY:-false}
+      MCP_TOOLSETS: ${MCP_TOOLSETS:-}
+      MCP_REQUIRE_EGRESS_CONSENT: ${MCP_REQUIRE_EGRESS_CONSENT:-true}
+      MCP_RATE_LIMIT_PER_MINUTE: ${MCP_RATE_LIMIT_PER_MINUTE:-120}
+      MCP_RATE_LIMIT_BURST: ${MCP_RATE_LIMIT_BURST:-40}
+      MCP_WRITE_RATE_LIMIT_PER_MINUTE: ${MCP_WRITE_RATE_LIMIT_PER_MINUTE:-30}
+      MCP_WRITE_RATE_LIMIT_BURST: ${MCP_WRITE_RATE_LIMIT_BURST:-10}
+      MCP_MAX_CONCURRENCY_PER_USER: ${MCP_MAX_CONCURRENCY_PER_USER:-4}
+      MCP_MAX_CONCURRENCY_GLOBAL: ${MCP_MAX_CONCURRENCY_GLOBAL:-32}
+      MCP_TOOL_TIMEOUT_SECONDS: ${MCP_TOOL_TIMEOUT_SECONDS:-30}
     ports:
       - "8000:8000"
     depends_on:

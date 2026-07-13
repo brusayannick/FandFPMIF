@@ -31,6 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ScopeBadges, TokenScopePicker } from "@/components/settings/token-scopes";
 import { ApiError } from "@/lib/api";
 import {
   useAdminApiTokens,
@@ -110,10 +111,35 @@ function McpServerCard({ info, loading }: { info: McpInfo | undefined; loading: 
           ) : (
             <Badge variant="outline">disabled</Badge>
           )}
+          {info?.enabled && info.read_only && (
+            <Badge
+              variant="outline"
+              title="Write tools are disabled platform-wide; MCP clients can only read."
+            >
+              read-only
+            </Badge>
+          )}
         </div>
 
         {info?.enabled && (
           <>
+            {info.toolsets.length > 0 && (
+              <div className="space-y-1">
+                <Label>Enabled toolsets</Label>
+                <div className="flex flex-wrap gap-1">
+                  {info.toolsets.map((t) => (
+                    <Badge
+                      key={t}
+                      variant="secondary"
+                      className="px-1.5 font-mono text-[10px] font-normal"
+                    >
+                      {t}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1">
               <Label>Endpoint</Label>
               <div className="flex items-center gap-2">
@@ -194,15 +220,6 @@ function TokensCard({ info }: { info: McpInfo | undefined }) {
   const supported = info?.scopes_supported ?? [];
   const mintAllowed = info?.mint_allowed ?? true;
 
-  function toggleScope(id: string) {
-    setScopes((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
   async function onCreate() {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -222,8 +239,7 @@ function TokensCard({ info }: { info: McpInfo | undefined }) {
       <CardHeader>
         <CardTitle>Personal access tokens</CardTitle>
         <CardDescription>
-          Each token acts as you and reads only your own data. Treat it like a password. Leave
-          scopes unchecked to grant full read access.
+          Each token acts as you and reads only your own data. Treat it like a password.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -252,21 +268,14 @@ function TokensCard({ info }: { info: McpInfo | undefined }) {
               {create.isPending ? "Creating…" : "Create token"}
             </Button>
           </div>
-          {supported.length > 0 && (
-            <div className="flex flex-wrap gap-3 pt-1">
-              {supported.map((s) => (
-                <label key={s.id} className="flex items-center gap-1.5 text-xs" title={s.description}>
-                  <input
-                    type="checkbox"
-                    checked={scopes.has(s.id)}
-                    disabled={!mintAllowed}
-                    onChange={() => toggleScope(s.id)}
-                  />
-                  <code>{s.id}</code>
-                </label>
-              ))}
-            </div>
-          )}
+          <div className="pt-1">
+            <TokenScopePicker
+              supported={supported}
+              selected={scopes}
+              disabled={!mintAllowed}
+              onChange={setScopes}
+            />
+          </div>
         </div>
 
         {created && (
@@ -307,8 +316,8 @@ function TokensCard({ info }: { info: McpInfo | undefined }) {
                   <TableCell>
                     <code className="text-xs">{t.token_prefix}…</code>
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {t.scopes.length ? t.scopes.join(", ") : "all read"}
+                  <TableCell>
+                    <ScopeBadges scopes={t.scopes} />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">{fmt(t.last_used_at)}</TableCell>
                   <TableCell>
@@ -379,6 +388,27 @@ function AdminCard() {
           />
         </div>
 
+        <div className="flex items-center justify-between rounded-md border border-border p-3">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">Read-only mode</p>
+            <p className="text-xs text-muted-foreground">
+              Blocks all MCP write tools platform-wide. Live toggle (no restart).
+              {cfg.data.boot_read_only &&
+                " Currently forced on by MCP_READ_ONLY (set by env, needs restart to lift)."}
+            </p>
+          </div>
+          <Switch
+            checked={cfg.data.boot_read_only || cfg.data.read_only}
+            disabled={cfg.data.boot_read_only || update.isPending}
+            onCheckedChange={(v) =>
+              update
+                .mutateAsync({ read_only: v })
+                .then(() => toast.success(`MCP is now ${v ? "read-only" : "read-write"}.`))
+                .catch((e) => toast.error(errMessage(e)))
+            }
+          />
+        </div>
+
         <div className="flex items-center justify-between">
           <Label>Who can create tokens</Label>
           <Select
@@ -399,6 +429,30 @@ function AdminCard() {
               <SelectItem value="disabled">Nobody</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label>Toolsets</Label>
+            <p className="text-xs text-muted-foreground">
+              Registered at boot — configure via the MCP_TOOLSETS env variable (needs restart).
+            </p>
+          </div>
+          <div className="flex max-w-[50%] flex-wrap justify-end gap-1">
+            {cfg.data.toolsets.length > 0 ? (
+              cfg.data.toolsets.map((t) => (
+                <Badge
+                  key={t}
+                  variant="secondary"
+                  className="px-1.5 font-mono text-[10px] font-normal"
+                >
+                  {t}
+                </Badge>
+              ))
+            ) : (
+              <span className="text-xs text-muted-foreground">none</span>
+            )}
+          </div>
         </div>
 
         <Separator />

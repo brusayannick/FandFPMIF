@@ -32,6 +32,7 @@ from mate.api.modules.ctx_rpc import (
     jsonify,
     make_ctx_dispatcher,
 )
+from mate.api.modules.job_logs import get_job_log_buffer
 from mate.api.modules.subprocess_worker import RPC_STREAM_LIMIT, WireConnection
 from mate.sdk.decorators import (
     _ATTR_JOB,
@@ -356,12 +357,23 @@ class SubprocessBridge:
             line = await stream.readline()
             if not line:
                 break
+            text = line.decode("utf-8", errors="replace").rstrip()
             log.info(
                 "modules.subprocess.worker_output",
                 module_id=self.manifest.id,
                 stream=label,
-                line=line.decode("utf-8", errors="replace").rstrip(),
+                line=text,
             )
+            # Mirror into the per-job ring too (module authors' compute code
+            # usually talks to stdout/stderr directly, not `ctx.logger`), same as
+            # JobWorker's one-shot path. This worker is shared across calls, so
+            # attribute the line to whichever job(s) currently have a call in
+            # flight (`_token_job`) - unambiguous in practice, since heavy
+            # subprocess runs are exclusive (see `cancel_active`). Idle output
+            # (e.g. import-time chatter before any call) has no job to attach to.
+            level = "warning" if label == "stderr" else "info"
+            for job_id in {*self._token_job.values()}:
+                get_job_log_buffer().append(job_id, level, text, {"stream": label})
 
     async def _on_connect(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         conn = WireConnection(reader, writer)

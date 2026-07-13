@@ -60,14 +60,9 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
       aria-disabled={isUnavailable || isDisabled || isJobRunning}
     >
       <CardContent className="flex h-full flex-col gap-3 p-4">
-        {/* Header: Name, version, author */}
+        {/* Header: Name */}
         <div className="min-w-0">
           <h3 className="truncate text-sm font-semibold leading-tight">{module.name}</h3>
-          <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-            {module.version && <span className="shrink-0">{module.version}</span>}
-            {module.author && module.version && <span className="shrink-0 text-muted-foreground/50">·</span>}
-            {module.author && <span className="truncate">by {module.author}</span>}
-          </div>
         </div>
 
         {/* Status */}

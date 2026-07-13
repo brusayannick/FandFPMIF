@@ -1574,7 +1574,13 @@ class ModuleLoader:
             bus=_SdkBusAdapter(self.bus, user_id, log_id),  # type: ignore[arg-type]
             registry=_UserScopedRegistry(self.registry, frozenset(owned_ids)),  # type: ignore[arg-type]
             cache=(  # type: ignore[arg-type]
-                ResultCache(log_id, module_id, user_id, variant=cache_variant)
+                # storage_user_id (not user_id): a shared dashboard's viewer must
+                # land on the *owner's* result cache, same as event_log/object_log
+                # above - the owner's precompute already wrote there. Keying on the
+                # viewer's own id instead pointed at an always-empty directory, so
+                # every card on a shared dashboard read as uncomputed for anyone
+                # but the owner.
+                ResultCache(log_id, module_id, storage_user_id, variant=cache_variant)
                 if log_id
                 else _UnboundCache()
             ),

@@ -33,6 +33,7 @@ import structlog
 
 from mate.api.jobs.supervisor import ChildHandle, get_child_supervisor
 from mate.api.modules.ctx_rpc import build_ctx_meta, jsonify, make_ctx_dispatcher
+from mate.api.modules.job_logs import get_job_log_buffer
 from mate.api.modules.subprocess_worker import RPC_STREAM_LIMIT, WireConnection
 from mate.sdk import Cancelled as SdkCancelled
 
@@ -103,12 +104,23 @@ class JobWorker:
             line = await stream.readline()
             if not line:
                 break
+            text = line.decode("utf-8", errors="replace").rstrip()
             log.info(
                 "modules.job_worker.output",
                 module_id=self.module_id,
                 job_id=self.job_id,
                 stream=label,
-                line=line.decode("utf-8", errors="replace").rstrip(),
+                line=text,
+            )
+            # Most module authors' compute code talks to stdout/stderr directly
+            # (print, TF/joblib chatter) rather than `ctx.logger` - mirror it into
+            # the per-job ring too, or the admin Jobs tab log panel stays empty
+            # for exactly the modules worth watching mid-run.
+            get_job_log_buffer().append(
+                self.job_id,
+                "warning" if label == "stderr" else "info",
+                text,
+                {"stream": label},
             )
 
     async def run(

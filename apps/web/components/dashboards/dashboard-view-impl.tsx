@@ -3,7 +3,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowLeft,
   Check,
   Download,
   Eye,
@@ -394,13 +393,9 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
       <div className="flex h-full flex-col">
       {/* Toolbar */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5 sm:px-6 lg:px-8">
-        <Button asChild variant="ghost" size="icon" className="h-8 w-8" aria-label="Back">
-          <Link href="/dashboards">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-
-        {editing ? (
+        {/* View-mode name lives in the global topbar breadcrumb now; only the
+            rename field remains, and only while editing. */}
+        {editing && (
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -408,13 +403,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
             placeholder="Dashboard name"
             aria-label="Dashboard name"
           />
-        ) : (
-          <h1 className="truncate text-sm font-semibold tracking-tight">{name}</h1>
         )}
-
-        <Badge variant="secondary" className="shrink-0 font-normal">
-          {dashboard.log_model === "object_centric" ? "Object-centric" : "Case-centric"}
-        </Badge>
 
         {isOwner && (
           <div className="ml-2 flex items-center gap-1.5">

@@ -1083,6 +1083,40 @@ class JobRuntime:
                 cancelled += 1
         return cancelled
 
+    async def cancel_for_user(self, user_id: str) -> int:
+        """Cancel every queued/running job owned by *user_id* and drop any
+        parked queue state for them. Returns the count cancelled.
+
+        Used by the admin user-deletion flow: workers must stop before the
+        user's on-disk data is removed (the ordering `cancel_for_logs` relies
+        on). `Job.user_id` is a real indexed column, so unlike `cancel_for_logs`
+        this filters in SQL.
+        """
+        sm = get_sessionmaker()
+        async with sm() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(Job.id).where(
+                            Job.user_id == user_id,
+                            Job.status.in_(("queued", "running")),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        cancelled = 0
+        for job_id in rows:
+            if await self.cancel(job_id):
+                cancelled += 1
+        # Drop parked queue state so a re-created account (same sub) never
+        # inherits the deleted user's paused flag or deferred job ids.
+        self._paused_users.discard(user_id)
+        self._deferred.pop(user_id, None)
+        return cancelled
+
     async def retry(self, job_id: str) -> str | None:
         """Re-enqueue a failed job with the same payload. Returns the new job id."""
         sm = get_sessionmaker()

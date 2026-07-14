@@ -31,7 +31,11 @@ from mate.api.modules.cards import (
     derive_cards,
     resolve_card_overlays,
 )
-from mate.api.modules.defaults import DEFAULTS_SEEDED_KEY, get_admin_default_ids
+from mate.api.modules.defaults import (
+    DEFAULTS_SEEDED_KEY,
+    get_admin_default_ids,
+    get_excluded_default_ids,
+)
 from mate.api.modules.install_jobs import JOB_TYPE_UPLOAD
 from mate.api.modules.installs import (
     seed_default_modules,
@@ -155,7 +159,8 @@ async def list_modules(
     # defaults = bundled ids + admin-declared ids (the latter filtered to
     # actually-loaded modules so we never seed an id that can't be listed).
     admin_ids = await get_admin_default_ids(session)
-    effective_defaults = loader.default_module_ids | (admin_ids & set(loader.loaded))
+    withheld = await get_excluded_default_ids(session)
+    effective_defaults = (loader.default_module_ids | (admin_ids & set(loader.loaded))) - withheld
     await _reconcile_default_modules(session, user.id, effective_defaults)
 
     # Per-user visibility: only modules this user has installed. The loader
@@ -583,7 +588,10 @@ async def restore_defaults(session: SessionDep, user: CurrentUserDep) -> Restore
     # listing (which only shows loaded manifests). Admin-declared defaults are
     # restored too.
     admin_ids = await get_admin_default_ids(session)
-    default_ids = {mid for mid in (loader.default_module_ids | admin_ids) if mid in loader.loaded}
+    withheld = await get_excluded_default_ids(session)
+    default_ids = {
+        mid for mid in (loader.default_module_ids | admin_ids) if mid in loader.loaded
+    } - withheld
     owned = await user_module_ids(session, user.id)
     missing = sorted(default_ids - owned)
     if missing:

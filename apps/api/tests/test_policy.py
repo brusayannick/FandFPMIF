@@ -491,6 +491,36 @@ async def test_model_card_lock_sets_sentinel(
 
 
 @pytest.mark.asyncio
+async def test_ai_card_lock_sets_sentinel(
+    admin_client_with_sample_cards: AsyncClient,
+) -> None:
+    """Locking the ai card injects __ai_admin_locked__ into the module's runtime
+    config (never into /config) so action routes gated on it - e.g. CDE's
+    Pinecone rebuild - can refuse."""
+    c = admin_client_with_sample_cards
+    await c.put(
+        f"/api/v1/modules/{_MID}/config",
+        json={"config": {"threshold": 0.5, "ai": {"llm": {"model": "user-llm"}}}, "enabled": True},
+    )
+    await _lock_card(c, "ai", {"ai": {"llm": {"model": "pinned-llm"}}})
+
+    body = (await c.get(f"/api/v1/modules/{_MID}/config")).json()
+    assert body["controlled_cards"]["ai"] is True
+    assert body["config"]["ai"] == {"llm": {"model": "pinned-llm"}}
+    # Runtime-only marker, never leaked to the settings body.
+    assert "__ai_admin_locked__" not in body["config"]
+
+    # The module context receives the sentinel + the pinned ai slice.
+    echo = (await c.get(f"/api/v1/modules/{_MID}/echo-config")).json()
+    assert echo["config"]["__ai_admin_locked__"] is True
+    assert echo["config"]["ai"] == {"llm": {"model": "pinned-llm"}}
+
+    # Locks persist in the shared fixture DB; unlock so later tests see the ai
+    # card unlocked again (mirrors the config-card tests' cleanup).
+    await _unlock_card(c, "ai")
+
+
+@pytest.mark.asyncio
 async def test_put_ignores_locked_card_keeps_user_slice(
     admin_client_with_sample_cards: AsyncClient,
 ) -> None:

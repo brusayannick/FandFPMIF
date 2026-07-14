@@ -218,5 +218,16 @@ async def require_admin(user: CurrentUserDep) -> CurrentUser:
 AdminUserDep = Annotated[CurrentUser, Depends(require_admin)]
 
 
+def evict_user_from_jit_cache(user_id: str) -> None:
+    """Forget *user_id* from the JIT-sync cache.
+
+    ``_jit_sync_user`` short-circuits on a cached id, so after a user's row is
+    deleted their id MUST be evicted - otherwise a re-login with the same
+    Keycloak ``sub`` skips re-creating the ``users`` row (and its on-disk dirs),
+    leaving a valid-token user with no row that 500s on every insert.
+    """
+    _seen_user_ids.discard(user_id)
+
+
 def reset_user_cache_for_tests() -> None:  # pragma: no cover - test helper
     _seen_user_ids.clear()

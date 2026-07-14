@@ -742,6 +742,10 @@ export interface AdminModuleRow {
   /** In the effective default set (bundled or admin-declared) – every user gets it. */
   is_default: boolean;
   default_locked: boolean;
+  /** Withheld from new seeding: existing owners keep it, but users who don't have
+   * it yet are no longer auto-seeded it. The only way to stop a bundled default
+   * reaching future users. */
+  withheld_from_new_users: boolean;
   owner_count: number;
   /** Earliest source="upload" owner – best-effort "who uploaded this". */
   uploaded_by: AdminModuleOwner | null;

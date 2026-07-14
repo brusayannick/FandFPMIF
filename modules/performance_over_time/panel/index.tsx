@@ -104,10 +104,12 @@ function fmtMetric(key: string, v: number | null): string {
 
 // ── Concept-drift overlay styling (colour by drift type) ──────────────────────
 // Colours mirror cv4cdd's CATEGORY_INDEX in modules/cv4cdd/cv4cdd_core.py so the
-// bands + legend match cv4cdd's own similarity-matrix overlay exactly.
+// bands + legend match cv4cdd's own similarity-matrix overlay — except `sudden`,
+// which cv4cdd renders white. White vanishes on this panel's light-mode (white)
+// chart background at these low band opacities, so we override it to red here.
 
 const DRIFT_COLORS: Record<string, string> = {
-  sudden: "rgb(255, 255, 255)", // white
+  sudden: "rgb(220, 38, 38)", // red – high contrast on both light and dark
   gradual: "rgb(30, 144, 255)", // dodgerblue
   incremental: "rgb(255, 0, 255)", // magenta
   recurring: "rgb(0, 255, 255)", // aqua

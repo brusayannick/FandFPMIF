@@ -17,6 +17,7 @@ from tests.conftest import TEST_USER_ID, _sample_mod_client
 from tests.test_modules_per_user import (
     OTHER_USER_ID,
     _install_row_source,
+    _reset_user_modules,
     _upload,
 )
 
@@ -39,6 +40,15 @@ async def _admin_default_ids() -> set[str]:
     sm = get_sessionmaker()
     async with sm() as s:
         return await get_admin_default_ids(s)
+
+
+async def _excluded_default_ids() -> set[str]:
+    from mate.api.db.engine import get_sessionmaker
+    from mate.api.modules.defaults import get_excluded_default_ids
+
+    sm = get_sessionmaker()
+    async with sm() as s:
+        return await get_excluded_default_ids(s)
 
 
 def _row(rows: list[dict], module_id: str) -> dict | None:
@@ -147,3 +157,69 @@ async def test_declare_uploaded_module_default_seeds_all_users(admin_client: Asy
     assert resp.json()["is_default"] is False
     assert await _install_row_source(OTHER_USER_ID, "extra_mod") == "default"
     assert "extra_mod" not in await _admin_default_ids()
+
+
+@pytest.mark.asyncio
+async def test_withhold_bundled_default_from_new_users(admin_client: AsyncClient) -> None:
+    """A withheld bundled default is not auto-seeded to a not-yet-seeded user,
+    while staying a platform default (still ``is_default``/``default_locked``)."""
+    resp = await admin_client.put(
+        "/api/v1/admin/modules/sample_mod/withhold", json={"withheld": True}
+    )
+    assert resp.status_code == 200, resp.text
+    row = resp.json()
+    assert row["withheld_from_new_users"] is True
+    assert row["is_default"] is True and row["default_locked"] is True
+    assert "sample_mod" in await _excluded_default_ids()
+
+    # A fresh user (no install rows, no seeded record) is NOT seeded the withheld
+    # default when they list modules.
+    await _reset_user_modules()
+    resp = await admin_client.get("/api/v1/modules")
+    assert resp.status_code == 200
+    assert "sample_mod" not in [m["id"] for m in resp.json()]
+    assert await _install_row_source(TEST_USER_ID, "sample_mod") is None
+
+    # Un-withholding lets the next list seed it again.
+    resp = await admin_client.put(
+        "/api/v1/admin/modules/sample_mod/withhold", json={"withheld": False}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["withheld_from_new_users"] is False
+    assert "sample_mod" not in await _excluded_default_ids()
+
+    resp = await admin_client.get("/api/v1/modules")
+    assert resp.status_code == 200
+    assert "sample_mod" in [m["id"] for m in resp.json()]
+    assert await _install_row_source(TEST_USER_ID, "sample_mod") == "default"
+
+
+@pytest.mark.asyncio
+async def test_withhold_keeps_existing_owner(admin_client: AsyncClient) -> None:
+    """Withholding never removes the module from a user who already owns it."""
+    # The current user already owns sample_mod (pre-seeded by the fixture).
+    assert (await admin_client.get("/api/v1/modules")).status_code == 200
+    owned_before = await _install_row_source(TEST_USER_ID, "sample_mod")
+    assert owned_before is not None
+
+    resp = await admin_client.put(
+        "/api/v1/admin/modules/sample_mod/withhold", json={"withheld": True}
+    )
+    assert resp.status_code == 200
+
+    # Existing owner keeps it (same ownership row) after withholding + re-listing.
+    resp = await admin_client.get("/api/v1/modules")
+    assert resp.status_code == 200
+    assert "sample_mod" in [m["id"] for m in resp.json()]
+    assert await _install_row_source(TEST_USER_ID, "sample_mod") == owned_before
+
+
+@pytest.mark.asyncio
+async def test_withhold_non_default_rejected(admin_client: AsyncClient) -> None:
+    """Only default modules can be withheld; a plain uploaded module 400s."""
+    body = await _upload(admin_client, "plain_mod")
+    assert body["status"] == "completed", body
+    resp = await admin_client.put(
+        "/api/v1/admin/modules/plain_mod/withhold", json={"withheld": True}
+    )
+    assert resp.status_code == 400

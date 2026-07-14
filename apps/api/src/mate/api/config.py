@@ -191,6 +191,33 @@ class Settings(BaseSettings):
     )
     keycloak_jwks_ttl_seconds: int = Field(default=3600, ge=60)
 
+    # Keycloak admin REST client (server-to-server). Used ONLY by the admin
+    # "delete user" flow to remove the account from Keycloak after the local
+    # data purge - distinct from the validation config above. Needs a
+    # confidential client whose service account holds the realm-management role
+    # ``manage-users``. When base_url/client_secret are unset (dev, demo, tests,
+    # or a prod misconfig) the admin client is a logged no-op: the Mate-side
+    # purge still succeeds and the caller is told KC was not touched, so a
+    # misconfiguration fails SAFE instead of silently half-deleting. ``keycloak_realm``
+    # is the realm segment of the admin REST path (the issuer/JWKS URLs above
+    # embed it, but the admin API needs it explicitly).
+    keycloak_admin_base_url: str | None = Field(
+        default=None,
+        description="KEYCLOAK_ADMIN_BASE_URL - internal Keycloak base (e.g. http://keycloak:8080/auth).",
+    )
+    keycloak_realm: str = Field(
+        default="flows-funds",
+        description="KEYCLOAK_REALM - realm segment for the admin REST path.",
+    )
+    keycloak_admin_client_id: str | None = Field(
+        default=None,
+        description="KEYCLOAK_ADMIN_CLIENT_ID - confidential client with a manage-users service account.",
+    )
+    keycloak_admin_client_secret: str | None = Field(
+        default=None,
+        description="KEYCLOAK_ADMIN_CLIENT_SECRET - secret for the admin client.",
+    )
+
     # Demo/dev login bypass. When true, a request whose bearer token equals the
     # demo sentinel (see auth/dependencies.DEMO_ACCESS_TOKEN) is resolved to a
     # fixed, non-admin demo user WITHOUT any Keycloak/JWKS validation. Pairs with

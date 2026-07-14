@@ -41,6 +41,18 @@ export function useSetModuleDefault() {
   });
 }
 
+export function useSetModuleWithheld() {
+  const patch = useRowUpdater();
+  return useMutation({
+    mutationFn: ({ moduleId, withheld }: { moduleId: string; withheld: boolean }) =>
+      api<AdminModuleRow>(`/api/v1/admin/modules/${encodeURIComponent(moduleId)}/withhold`, {
+        method: "PUT",
+        json: { withheld },
+      }),
+    onSuccess: patch,
+  });
+}
+
 export function useForceInstallModule() {
   const patch = useRowUpdater();
   return useMutation({

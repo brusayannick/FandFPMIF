@@ -324,6 +324,15 @@ class ConceptDriftExplainerModule(Module):
     @route.post("/pinecone/recreate-index")
     async def recreate_pinecone_index(self, ctx: ModuleContext) -> dict[str, Any]:
         cfg = ctx.config.value or {}
+        # The AI card owns the embedding dimension this rebuild provisions, so an
+        # admin lock on that card also blocks the destructive recreate. The
+        # platform injects this sentinel into runtime config when the card is
+        # locked (mirrors cv4cdd's __model_admin_locked__ read-only guard).
+        if cfg.get("__ai_admin_locked__"):
+            raise HTTPException(
+                status_code=403,
+                detail="AI models are administrator-controlled; index rebuild is disabled.",
+            )
         result = await asyncio.to_thread(recreate_index, cfg)
         return {"ok": True, **result}
 

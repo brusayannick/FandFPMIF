@@ -37,10 +37,12 @@ CARD_AI = "ai"
 CARD_MODEL = "model"
 
 # The ``config_json`` key the AI card owns, and the loader-injected runtime
-# marker that tells a module's ``/models`` route to render read-only. Both are
+# markers that tell a module's route to render/act read-only when its card is
+# admin-locked (``/models`` for model, the Pinecone rebuild for ai). All are
 # excluded from the config card's namespace so the cards stay disjoint.
 AI_KEY = "ai"
 MODEL_LOCK_SENTINEL = "__model_admin_locked__"
+AI_LOCK_SENTINEL = "__ai_admin_locked__"
 
 
 @dataclass(frozen=True)
@@ -104,8 +106,8 @@ def derive_cards(manifest: Manifest) -> list[CardSpec]:
 
 def _reserved_top_level_keys(cards: list[CardSpec]) -> set[str]:
     """The ``config_json`` top-level keys owned by the ai/model cards (plus the
-    runtime sentinel) - everything else belongs to the config card."""
-    reserved = {MODEL_LOCK_SENTINEL}
+    runtime sentinels) - everything else belongs to the config card."""
+    reserved = {MODEL_LOCK_SENTINEL, AI_LOCK_SENTINEL}
     for c in cards:
         if c.card_id == CARD_AI:
             reserved.add(AI_KEY)

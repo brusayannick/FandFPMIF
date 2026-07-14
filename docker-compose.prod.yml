@@ -111,6 +111,14 @@ services:
       # Internal (container -> container) fetch of the signing keys. Note the
       # /auth prefix – it must match KC_HTTP_RELATIVE_PATH or every token fails.
       KEYCLOAK_JWKS_URL: http://keycloak:8080/auth/realms/flows-funds/protocol/openid-connect/certs
+      # Admin REST client for the "delete user" flow (removes the Keycloak
+      # account too). Provisioned by infra/keycloak/configure-admin-client.sh;
+      # the secret lives in .env. Unset secret => the delete's KC step no-ops
+      # (Mate data is still purged). Same internal /auth base as JWKS above.
+      KEYCLOAK_ADMIN_BASE_URL: http://keycloak:8080/auth
+      KEYCLOAK_REALM: flows-funds
+      KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-flows-funds-admin}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
     # Stated explicitly for the VM. The CV4CDD model is uploaded at runtime into
     # modules/cv4cdd/model/ (covered by the ./modules mount). Only add a separate
     # host mount here if you keep the model outside the repo, e.g.

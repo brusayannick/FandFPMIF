@@ -50,6 +50,7 @@ import {
   useForceInstallModule,
   useForceUninstallModule,
   useSetModuleDefault,
+  useSetModuleWithheld,
 } from "@/lib/module-admin-queries";
 import { type AdminUser, useAdminUsers } from "@/lib/sharing-queries";
 import { toastError } from "@/lib/toast";
@@ -153,6 +154,14 @@ function ModuleRow({ m, users }: { m: AdminModuleRow; users: AdminUser[] }) {
             </div>
             {m.is_bundled && <Badge variant="secondary">Bundled</Badge>}
             {m.is_default && !m.is_bundled && <Badge variant="secondary">Default</Badge>}
+            {m.withheld_from_new_users && (
+              <Badge
+                variant="outline"
+                className="border-amber-500/40 text-amber-600 dark:text-amber-400"
+              >
+                Withheld
+              </Badge>
+            )}
             {!m.has_frontend && (
               <Badge variant="outline" className="text-muted-foreground">
                 No panel
@@ -211,6 +220,7 @@ function ModuleRow({ m, users }: { m: AdminModuleRow; users: AdminUser[] }) {
 
 function ModuleDetail({ m, users }: { m: AdminModuleRow; users: AdminUser[] }) {
   const forceInstall = useForceInstallModule();
+  const setWithheld = useSetModuleWithheld();
   const [pick, setPick] = useState("");
 
   const ownerIds = new Set(m.owners.map((o) => o.user_id));
@@ -218,6 +228,39 @@ function ModuleDetail({ m, users }: { m: AdminModuleRow; users: AdminUser[] }) {
 
   return (
     <div className="space-y-4 px-4 py-3">
+      {m.is_default && (
+        <div className="flex items-start justify-between gap-3 rounded-md border border-border bg-background px-3 py-2">
+          <div className="min-w-0">
+            <div className="text-xs font-medium">Withhold from new users</div>
+            <p className="text-[11px] text-muted-foreground">
+              Keep this default for current owners, but stop auto-seeding it to users who
+              don&apos;t have it yet
+              {m.default_locked
+                ? " — the only way to stop a bundled default reaching new users."
+                : "."}
+            </p>
+          </div>
+          <Switch
+            checked={m.withheld_from_new_users}
+            disabled={setWithheld.isPending}
+            onCheckedChange={(v) =>
+              setWithheld.mutate(
+                { moduleId: m.id, withheld: v },
+                {
+                  onSuccess: () =>
+                    toast.success(
+                      v
+                        ? `"${m.name || m.id}" will no longer be seeded to new users.`
+                        : `"${m.name || m.id}" will be seeded to new users again.`,
+                    ),
+                  onError: (e) => toastError(`Could not update: ${(e as Error).message}`),
+                },
+              )
+            }
+          />
+        </div>
+      )}
+
       <div className="space-y-2">
         <h3 className="text-xs font-semibold text-muted-foreground">
           Owners ({m.owners.length})

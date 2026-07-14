@@ -1483,6 +1483,8 @@ class ModuleLoader:
                 loaded_mod = self.loaded.get(module_id)
                 if loaded_mod is not None:
                     from mate.api.modules.cards import (
+                        AI_LOCK_SENTINEL,
+                        CARD_AI,
                         CARD_MODEL,
                         MODEL_LOCK_SENTINEL,
                         resolve_card_overlays,
@@ -1493,6 +1495,11 @@ class ModuleLoader:
                     )
                     if controlled_cards.get(CARD_MODEL):
                         cfg_json[MODEL_LOCK_SENTINEL] = True
+                    # AI card locked → inject the ai sentinel so a module's
+                    # action routes (e.g. CDE's Pinecone rebuild, which uses the
+                    # admin-pinned embedding dimension) can refuse.
+                    if controlled_cards.get(CARD_AI):
+                        cfg_json[AI_LOCK_SENTINEL] = True
                 # Modules this user has installed - scopes ctx.registry so
                 # cross-module RPC can only reach the user's own modules.
                 owned_ids = await user_module_ids(session, user_id)

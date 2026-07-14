@@ -7,6 +7,7 @@ from mate.api.routes.admin_modules import router as admin_modules_router
 from mate.api.routes.admin_policies import router as admin_policies_router
 from mate.api.routes.admin_storage import router as admin_storage_router
 from mate.api.routes.admin_teams import router as admin_teams_router
+from mate.api.routes.admin_users import router as admin_users_router
 from mate.api.routes.ai import router as ai_router
 from mate.api.routes.ai_guidance import router as ai_guidance_router
 from mate.api.routes.analytics import router as analytics_router
@@ -35,6 +36,7 @@ v1.include_router(admin_modules_router)
 v1.include_router(admin_policies_router)
 v1.include_router(admin_storage_router)
 v1.include_router(admin_teams_router)
+v1.include_router(admin_users_router)
 v1.include_router(event_logs_router)
 v1.include_router(watched_folders_router)
 v1.include_router(event_log_data_router)

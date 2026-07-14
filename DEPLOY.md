@@ -568,6 +568,42 @@ codex mcp add mate -- npx mcp-remote https://pm-mate.uni-muenster.de/mcp \
   tool unregistration), rate/concurrency/timeout numbers. Live, no restart:
   enable/disable, read-only, mint policy (admin UI).
 
+## Admin user deletion (removing the Keycloak account)
+
+Admin → **Users** lists every account; opening one shows everything it owns and
+a **Delete user** action. Delete purges the user's DB rows (FK cascade), on-disk
+`data/users/{id}/`, the S3 subtree (S3 mode), and — when configured — the
+Keycloak account.
+
+The API has no Keycloak admin credentials by default, so the Keycloak step
+**no-ops** (the delete report says `keycloak account not removed: not
+configured`); all Mate-side data is still purged. To let a delete also remove
+the Keycloak account, provision a confidential service-account client:
+
+```bash
+# On the VM, against the running Keycloak (serves under /auth in prod):
+KC_SERVER=http://localhost:8080/auth ./infra/keycloak/configure-admin-client.sh
+```
+
+It creates `flows-funds-admin` (service account, `client_credentials`, no
+browser flow, `fullScopeAllowed=false`), grants its service account **only**
+`realm-management:manage-users`, and prints the four env vars. Add them to
+`.env` (the secret is powerful — `.env` only, never git) and recreate the api
+container (`restart` does **not** re-read `.env`):
+
+```bash
+KEYCLOAK_ADMIN_BASE_URL=http://keycloak:8080/auth
+KEYCLOAK_REALM=flows-funds
+KEYCLOAK_ADMIN_CLIENT_ID=flows-funds-admin
+KEYCLOAK_ADMIN_CLIENT_SECRET=<printed secret>
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api
+```
+
+Notes: an admin cannot delete their own account (self-delete is refused, which
+also guarantees the realm never loses its last admin here). For a **WWU-brokered**
+user, deleting the Keycloak account is clean but not a permanent ban — a later
+university login mints a **new** `sub` = a fresh empty account.
+
 ## Backup
 
 `./data/` (SQLite metadata + Parquet logs + module results + cached runtimes)

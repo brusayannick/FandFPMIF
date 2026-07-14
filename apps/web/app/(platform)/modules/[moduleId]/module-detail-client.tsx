@@ -377,7 +377,7 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
                       size="sm"
                       variant="outline"
                       className="cursor-pointer text-destructive hover:bg-destructive/10"
-                      disabled={recreateIndex.isPending}
+                      disabled={recreateIndex.isPending || aiLocked}
                     >
                       Recreate Pinecone index
                     </Button>

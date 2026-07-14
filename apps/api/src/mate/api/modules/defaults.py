@@ -23,6 +23,14 @@ from mate.api.modules.installs import seed_default_modules
 # SystemSetting key holding the admin-declared default module ids (a JSON list).
 ADMIN_DEFAULTS_KEY = "modules.default_ids"
 
+# SystemSetting key holding default ids withheld from *new* seeding (a JSON list).
+# An id here stays a platform default in every other respect - existing owners
+# keep it and its shared code is still protected from teardown - but the per-user
+# reconcile and restore-defaults paths stop auto-seeding it. This is the only way
+# to stop a *bundled* module (always-default, un-un-defaultable) from reaching
+# users who haven't been seeded yet.
+EXCLUDED_DEFAULTS_KEY = "modules.default_excluded_ids"
+
 # UserSetting key: per-user record of which default ids have already been
 # offered (a JSON list). Mirrors the constant the modules route uses for its
 # lazy reconcile; kept here so both the route and the admin toggle share one
@@ -44,6 +52,24 @@ async def set_admin_default_ids(session: AsyncSession, ids: set[str]) -> None:
     row = await session.get(SystemSetting, ADMIN_DEFAULTS_KEY)
     if row is None:
         session.add(SystemSetting(key=ADMIN_DEFAULTS_KEY, value_json=value))
+    else:
+        row.value_json = value
+
+
+async def get_excluded_default_ids(session: AsyncSession) -> set[str]:
+    """Return the default ids withheld from new seeding (empty if never set)."""
+    row = await session.get(SystemSetting, EXCLUDED_DEFAULTS_KEY)
+    if row is None or not isinstance(row.value_json, list):
+        return set()
+    return {str(x) for x in row.value_json}
+
+
+async def set_excluded_default_ids(session: AsyncSession, ids: set[str]) -> None:
+    """Persist the withheld-from-new-users default set (does not commit)."""
+    value = sorted(ids)
+    row = await session.get(SystemSetting, EXCLUDED_DEFAULTS_KEY)
+    if row is None:
+        session.add(SystemSetting(key=EXCLUDED_DEFAULTS_KEY, value_json=value))
     else:
         row.value_json = value
 

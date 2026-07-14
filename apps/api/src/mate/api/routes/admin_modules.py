@@ -26,8 +26,10 @@ from mate.api.db.session import SessionDep
 from mate.api.modules import get_module_loader
 from mate.api.modules.defaults import (
     get_admin_default_ids,
+    get_excluded_default_ids,
     mandate_default_for_all_users,
     set_admin_default_ids,
+    set_excluded_default_ids,
 )
 from mate.api.modules.installs import record_install, user_owns_module
 from mate.api.modules.uninstall import uninstall_for_user
@@ -58,6 +60,9 @@ class AdminModuleRow(BaseModel):
     # In the effective default set (bundled OR admin-declared) - every user gets it.
     is_default: bool
     default_locked: bool
+    # Withheld from *new* seeding: stays a default for existing owners and stays
+    # teardown-protected, but is not auto-seeded to users who don't have it yet.
+    withheld_from_new_users: bool = False
     owner_count: int
     # Earliest owner with source="upload" - best-effort "who uploaded this".
     # Null for purely bundled/default modules. Ambiguous only when two users
@@ -68,6 +73,10 @@ class AdminModuleRow(BaseModel):
 
 class SetDefaultBody(BaseModel):
     is_default: bool
+
+
+class SetWithholdBody(BaseModel):
+    withheld: bool
 
 
 class ForceInstallBody(BaseModel):
@@ -90,6 +99,7 @@ def _make_row(
     owners: list[AdminModuleOwner],
     fs_defaults: set[str],
     admin_ids: set[str],
+    excluded_ids: set[str],
 ) -> AdminModuleRow:
     uploaded = [o for o in owners if o.source == "upload"]
     uploaded_by = min(uploaded, key=lambda o: o.installed_at) if uploaded else None
@@ -103,6 +113,7 @@ def _make_row(
         is_bundled=is_bundled,
         is_default=is_bundled or module_id in admin_ids,
         default_locked=is_bundled,
+        withheld_from_new_users=module_id in excluded_ids,
         owner_count=len(owners),
         uploaded_by=uploaded_by,
         owners=owners,
@@ -124,10 +135,13 @@ async def _owners_for(session: SessionDep, module_id: str) -> list[AdminModuleOw
 async def _single_row(session: SessionDep, module_id: str) -> AdminModuleRow:
     loader = get_module_loader()
     admin_ids = await get_admin_default_ids(session)
+    excluded_ids = await get_excluded_default_ids(session)
     loaded = loader.loaded.get(module_id)
     manifest = loaded.manifest if loaded else None
     owners = await _owners_for(session, module_id)
-    return _make_row(module_id, manifest, owners, loader.default_module_ids, admin_ids)
+    return _make_row(
+        module_id, manifest, owners, loader.default_module_ids, admin_ids, excluded_ids
+    )
 
 
 @router.get("", response_model=list[AdminModuleRow])
@@ -140,6 +154,7 @@ async def list_admin_modules(session: SessionDep, user: AdminUserDep) -> list[Ad
         return []
 
     admin_ids = await get_admin_default_ids(session)
+    excluded_ids = await get_excluded_default_ids(session)
     fs_defaults = loader.default_module_ids
     loaded = loader.loaded
 
@@ -159,7 +174,11 @@ async def list_admin_modules(session: SessionDep, user: AdminUserDep) -> list[Ad
     for mid in sorted(all_ids):
         loaded_mod = loaded.get(mid)
         manifest = loaded_mod.manifest if loaded_mod else None
-        out.append(_make_row(mid, manifest, owners_by_mod.get(mid, []), fs_defaults, admin_ids))
+        out.append(
+            _make_row(
+                mid, manifest, owners_by_mod.get(mid, []), fs_defaults, admin_ids, excluded_ids
+            )
+        )
     return out
 
 
@@ -194,6 +213,43 @@ async def set_module_default(
         if module_id in admin_ids:
             await set_admin_default_ids(session, admin_ids - {module_id})
             await session.commit()
+
+    return await _single_row(session, module_id)
+
+
+@router.put("/{module_id}/withhold", response_model=AdminModuleRow)
+async def set_module_withheld(
+    module_id: str, body: SetWithholdBody, session: SessionDep, user: AdminUserDep
+) -> AdminModuleRow:
+    """Withhold (or un-withhold) a default module from *new* users.
+
+    A withheld id stays a platform default: existing owners keep it and its
+    shared code is still protected from teardown, but the per-user reconcile and
+    restore-defaults paths stop auto-seeding it. This is the only way to stop a
+    *bundled* module (always default, cannot be un-defaulted) from reaching users
+    who haven't been seeded yet. Admin-declared defaults can be withheld too, or
+    simply un-defaulted.
+    """
+    loader = get_module_loader()
+    if module_id not in loader.loaded:
+        raise HTTPException(status_code=404, detail=f"Module {module_id!r} is not loaded.")
+
+    admin_ids = await get_admin_default_ids(session)
+    is_default = module_id in loader.default_module_ids or module_id in admin_ids
+    excluded = await get_excluded_default_ids(session)
+
+    if body.withheld:
+        if not is_default:
+            raise HTTPException(
+                status_code=400,
+                detail="Only default modules can be withheld from new users.",
+            )
+        if module_id not in excluded:
+            await set_excluded_default_ids(session, excluded | {module_id})
+            await session.commit()
+    elif module_id in excluded:
+        await set_excluded_default_ids(session, excluded - {module_id})
+        await session.commit()
 
     return await _single_row(session, module_id)
 

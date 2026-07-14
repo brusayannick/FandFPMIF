@@ -28,7 +28,15 @@ log = structlog.get_logger(__name__)
 # Derived build artifacts excluded from the source archive - the loader rebuilds
 # them per VM (venvs are ABI/machine-specific; bundles are esbuilt on load). Public
 # so the module content-hash reuses the exact same set (single source of truth).
-BUILD_ARTIFACT_NAMES = {".venv", ".dist", "node_modules", ".installed-hash", "__pycache__", ".git"}
+BUILD_ARTIFACT_NAMES = {
+    ".venv",
+    ".dist",
+    "node_modules",
+    ".installed-hash",
+    "__pycache__",
+    ".git",
+    ".gradle",
+}
 
 
 def _archive_key(module_id: str) -> str:

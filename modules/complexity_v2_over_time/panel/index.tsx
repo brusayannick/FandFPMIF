@@ -106,6 +106,37 @@ function kpiLabel(key: string): string {
   return KPI_LABELS[key] ?? key;
 }
 
+// Unit-bearing metric keys: `avg_td_e` is a duration in seconds, `perc_unique_seq`
+// a percentage (0–100); every other Table 3.3 metric is a count or a
+// dimensionless index.
+const DURATION_KEYS = new Set(["avg_td_e"]);
+const PERCENT_KEYS = new Set(["perc_unique_seq"]);
+
+function isDurationKey(key: string): boolean {
+  return DURATION_KEYS.has(key);
+}
+
+function isPercentKey(key: string): boolean {
+  return PERCENT_KEYS.has(key);
+}
+
+// Human-readable seconds (mirrors complexity_v2's formatSeconds).
+function formatSeconds(s: number): string {
+  if (s < 60) return `${s.toFixed(1)} s`;
+  if (s < 3600) return `${(s / 60).toFixed(1)} min`;
+  if (s < 86400) return `${(s / 3600).toFixed(1)} h`;
+  return `${(s / 86400).toFixed(1)} d`;
+}
+
+// Format one metric value for its key with its real unit (durations, percentages),
+// everything else as a plain number (integers verbatim, else 3 dp).
+function fmtMetricValue(key: string, v: number | null): string {
+  if (v === null || !Number.isFinite(v)) return "–";
+  if (isDurationKey(key)) return formatSeconds(v);
+  if (isPercentKey(key)) return `${v.toFixed(2)} %`;
+  return Number.isInteger(v) ? String(v) : v.toFixed(3);
+}
+
 // ── Concept-drift overlay styling (colour by drift type) ──────────────────────
 // Colours mirror cv4cdd's CATEGORY_INDEX in modules/cv4cdd/cv4cdd_core.py so the
 // bands + legend match cv4cdd's own similarity-matrix overlay exactly.
@@ -236,6 +267,10 @@ export function ComplexityV2OverTimePanel({ logId }: { logId: string; moduleId: 
   // One row per slice carrying, per selected metric, both the raw value (for the
   // tooltip) and the display value (raw, or normalised when `normalize` is on).
   const chartData = useMemo<ChartDatum[]>(() => {
+    // Only min-max normalise when *comparing* two or more metrics. A single
+    // metric is always plotted raw so the Y-axis keeps its real scale + unit –
+    // normalising one series would silently collapse the axis to a unitless 0–1.
+    const applyNorm = selectedKpis.length > 1 && normalize;
     const pts = q.data?.slices ?? [];
     const ranges: Record<string, { min: number; max: number }> = {};
     for (const key of selectedKpis) {
@@ -259,7 +294,7 @@ export function ComplexityV2OverTimePanel({ logId }: { logId: string; moduleId: 
         raw[key] = num;
         if (num === null) {
           disp[key] = null;
-        } else if (normalize) {
+        } else if (applyNorm) {
           const { min, max } = ranges[key];
           disp[key] = max > min ? (num - min) / (max - min) : 0.5;
         } else {
@@ -635,6 +670,19 @@ function ChartBody({
   }
 
   const multiScale = selectedKpis.length > 1 && normalize;
+  // A raw single-metric axis carries that metric's own unit; only unit-format the
+  // ticks when every plotted line shares it (mixed raw units → plain numbers).
+  const durationAxis = !multiScale && selectedKpis.every(isDurationKey);
+  const percentAxis = !multiScale && selectedKpis.every(isPercentKey);
+  // Y-axis title: names the normalisation when lines are rescaled to 0–1, else
+  // the shared unit (the tooltip always shows each metric's real value + unit).
+  const yAxisLabel = multiScale
+    ? "normalized 0–1"
+    : durationAxis
+      ? "duration"
+      : percentAxis
+        ? "%"
+        : undefined;
   const heading =
     selectedKpis.length === 1
       ? `${kpiLabel(selectedKpis[0])} over time`
@@ -676,8 +724,29 @@ function ChartBody({
             <YAxis
               tick={{ fill: "var(--muted-foreground)", fontSize: 10 }}
               stroke="var(--border)"
-              width={56}
+              width={yAxisLabel ? (durationAxis ? 92 : 72) : durationAxis ? 76 : 56}
               domain={multiScale ? [0, 1] : undefined}
+              tickFormatter={
+                durationAxis
+                  ? (v: number) => formatSeconds(v)
+                  : percentAxis
+                    ? (v: number) => `${v}%`
+                    : undefined
+              }
+              label={
+                yAxisLabel
+                  ? {
+                      value: yAxisLabel,
+                      angle: -90,
+                      position: "insideLeft",
+                      style: {
+                        fill: "var(--muted-foreground)",
+                        fontSize: 11,
+                        textAnchor: "middle",
+                      },
+                    }
+                  : undefined
+              }
               allowDecimals
             />
             <Tooltip content={<KpiTooltip selectedKpis={selectedKpis} />} />
@@ -792,7 +861,7 @@ function KpiTooltip({
               style={{ backgroundColor: lineColor(i) }}
             />
             <span className="text-muted-foreground">{kpiLabel(key)}:</span>
-            <span className="ml-auto pl-3">{fmt(datum.raw[key] ?? null)}</span>
+            <span className="ml-auto pl-3">{fmtMetricValue(key, datum.raw[key] ?? null)}</span>
           </div>
         ))}
       </div>
@@ -801,9 +870,4 @@ function KpiTooltip({
       </div>
     </div>
   );
-}
-
-function fmt(v: number | null): string {
-  if (v === null || !Number.isFinite(v)) return "–";
-  return Number.isInteger(v) ? String(v) : v.toFixed(3);
 }

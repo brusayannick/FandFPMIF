@@ -12,6 +12,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { clearAmbientHeaders, setAmbientHeaders } from "@/lib/api";
+import { EVENT_FILTER_HEADER, encodeFilterHeader } from "@/components/dashboards/widget-filter";
 import type { FilterEntry } from "@/lib/api-types";
 
 /**
@@ -32,8 +33,6 @@ import type { FilterEntry } from "@/lib/api-types";
  * to its loading state and refetches, now carrying the new header. The blast
  * radius is the dashboard only; the rest of the app's query cache is untouched.
  */
-
-const EVENT_FILTER_HEADER = "X-FF-Event-Filter";
 
 interface DashboardFilterContextValue {
   /** Global column filters (the top bar). */
@@ -56,13 +55,10 @@ export function useDashboardFilter(): DashboardFilterContextValue {
   return ctx;
 }
 
-/** UTF-8-safe base64 – `btoa` alone breaks on non-Latin1 filter values. */
-function encodeFilterHeader(entries: FilterEntry[]): string {
-  const json = JSON.stringify({ filter: entries });
-  const bytes = new TextEncoder().encode(json);
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary);
+/** Non-throwing variant for code that may run outside a dashboard (e.g. the
+ * shared dataset-fetch hook). Returns `null` when no provider is mounted. */
+export function useDashboardFilterOptional(): DashboardFilterContextValue | null {
+  return useContext(DashboardFilterContext);
 }
 
 export function DashboardFilterProvider({

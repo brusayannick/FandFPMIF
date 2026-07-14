@@ -2,6 +2,7 @@
 
 import { BookOpen, ExternalLink, Info, User } from "lucide-react";
 
+import type { ManifestAuthor, ManifestPaper } from "@/lib/api-types";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -11,6 +12,9 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/cn";
+
+/** Hard ceiling mirroring the manifest schema (`MAX_AUTHORS`/`MAX_PAPERS`). */
+const MAX_CREDITS = 20;
 
 export interface ModuleAboutProps {
   name: string;
@@ -23,9 +27,38 @@ export interface ModuleAboutProps {
   authorUrl?: string | null;
   /** DOI / paper link the module implements (manifest `paper_url`). */
   paperUrl?: string | null;
+  /** All credited authors (manifest `authors[]`); preferred over `author`. */
+  authors?: ManifestAuthor[] | null;
+  /** All cited papers (manifest `papers[]`); preferred over `paperUrl`. */
+  papers?: ManifestPaper[] | null;
   license?: string | null;
   version?: string | null;
   className?: string;
+}
+
+/**
+ * Resolve the authors/papers to render: prefer the plural manifest lists, fall
+ * back to the singular `author`/`paperUrl` (which the server also folds into the
+ * lists) so this works whether the caller passes one form or the other. Capped
+ * at 20 each to mirror the manifest schema.
+ */
+export function resolveCredits({
+  author,
+  authorUrl,
+  authors,
+  paperUrl,
+  papers,
+}: Pick<ModuleAboutProps, "author" | "authorUrl" | "authors" | "paperUrl" | "papers">): {
+  authorList: ManifestAuthor[];
+  paperList: ManifestPaper[];
+} {
+  const authorList = (
+    authors?.length ? authors : author ? [{ name: author, url: authorUrl ?? null }] : []
+  ).slice(0, MAX_CREDITS);
+  const paperList = (
+    papers?.length ? papers : paperUrl ? [{ title: null, url: paperUrl }] : []
+  ).slice(0, MAX_CREDITS);
+  return { authorList, paperList };
 }
 
 /**
@@ -36,9 +69,10 @@ export interface ModuleAboutProps {
  * `author_url`, and `paper_url` (the cited paper, DOI link preferred).
  */
 export function ModuleAboutInfo({ name, className, ...content }: ModuleAboutProps) {
-  const { description, about, author, paperUrl } = content;
+  const { description, about } = content;
+  const { authorList, paperList } = resolveCredits(content);
   const hasBody = Boolean(about || description);
-  if (!hasBody && !author && !paperUrl) return null;
+  if (!hasBody && authorList.length === 0 && paperList.length === 0) return null;
 
   return (
     <Popover>
@@ -67,13 +101,12 @@ export function ModuleAboutInfo({ name, className, ...content }: ModuleAboutProp
 export function ModuleAboutContent({
   description,
   about,
-  author,
-  authorUrl,
-  paperUrl,
   license,
   version,
+  ...credits
 }: Omit<ModuleAboutProps, "name" | "className">) {
   const meta = [version ? `v${version}` : null, license].filter(Boolean).join(" · ");
+  const { authorList, paperList } = resolveCredits(credits);
 
   return (
     <>
@@ -93,40 +126,46 @@ export function ModuleAboutContent({
         </div>
       )}
 
-      {(author || paperUrl) && (
+      {(authorList.length > 0 || paperList.length > 0) && (
         <div className="space-y-1.5 border-t border-white/10 pt-2.5 text-xs">
-          {author && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
+          {authorList.map((a, i) => (
+            <div
+              key={`${a.name}-${i}`}
+              className="flex items-center gap-1.5 text-muted-foreground"
+            >
               <User className="h-3 w-3 shrink-0" />
-              {authorUrl ? (
+              {a.url ? (
                 <a
-                  href={authorUrl}
+                  href={a.url}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
                 >
-                  {author}
+                  {a.name}
                   <ExternalLink className="h-2.5 w-2.5" />
                 </a>
               ) : (
-                <span>{author}</span>
+                <span>{a.name}</span>
               )}
             </div>
-          )}
-          {paperUrl && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
+          ))}
+          {paperList.map((p, i) => (
+            <div
+              key={`${p.url}-${i}`}
+              className="flex items-center gap-1.5 text-muted-foreground"
+            >
               <BookOpen className="h-3 w-3 shrink-0" />
               <a
-                href={paperUrl}
+                href={p.url}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
               >
-                Read the paper
+                {p.title ?? "Read the paper"}
                 <ExternalLink className="h-2.5 w-2.5" />
               </a>
             </div>
-          )}
+          ))}
         </div>
       )}
 

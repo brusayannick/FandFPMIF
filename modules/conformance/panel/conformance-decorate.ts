@@ -238,14 +238,17 @@ export function locateActivity(modeler: BpmnModelerLike, query: string): boolean
   return true;
 }
 
-// diagram-js-minimap ships a top-right, light-only panel. Restyle it to match
-// the React Flow minimap (bottom-right, card surface, rounded) and let the
-// canvas fade it via the `ff-minimap-hidden` class (opacity gate). We drive
-// open/close ourselves, so the built-in toggle is hidden.
+// diagram-js-minimap ships a top-right, light-only panel with an orange
+// viewport box. Restyle it to match the React Flow minimap: bottom-right at
+// 15px, 200x150 card surface, rounded, neutral viewport stroke (themed for
+// dark to mirror the RF mask). The canvas fades it via the `ff-minimap-hidden`
+// class (opacity gate); we drive open/close ourselves, so the toggle is hidden.
 const MINIMAP_CSS = `
-.djs-minimap{top:auto!important;bottom:12px!important;right:12px!important;background:var(--card)!important;border:1px solid var(--border)!important;border-radius:6px!important;box-shadow:0 1px 2px rgba(0,0,0,.08)!important;transition:opacity .3s ease!important;}
-.djs-minimap .map{width:200px;height:140px;}
+.djs-minimap{top:auto!important;bottom:15px!important;right:15px!important;background:var(--card)!important;border:1px solid var(--border)!important;border-radius:6px!important;box-shadow:0 1px 2px rgba(0,0,0,.08)!important;transition:opacity .3s ease!important;}
+.djs-minimap .map{width:200px;height:150px;}
 .djs-minimap .toggle{display:none!important;}
+.djs-minimap .viewport-dom{border:2px solid rgba(0,0,0,.4)!important;border-radius:3px!important;}
+.dark .djs-minimap .viewport-dom{border-color:rgba(255,255,255,.5)!important;}
 .djs-minimap.ff-minimap-hidden{opacity:0!important;pointer-events:none!important;}
 `;
 

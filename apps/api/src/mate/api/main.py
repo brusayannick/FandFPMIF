@@ -219,12 +219,18 @@ async def _watched_folder_poll_loop(runtime: JobRuntime) -> None:
 
 
 def _configure_logging(level: str) -> None:
+    # Local import: this module's top-level imports already trip E402 (they sit
+    # after ``sys.setrecursionlimit`` above), and the renderer is only needed here.
+    from mate.api.system.log_buffer import ring_buffer_renderer
+
     logging.basicConfig(level=level.upper())
     structlog.configure(
         processors=[
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.JSONRenderer(),
+            # Renders JSON to stdout exactly like ``JSONRenderer()`` and also tees
+            # each line into a bounded ring buffer for the diagnostics log tail.
+            ring_buffer_renderer,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(
             getattr(logging, level.upper(), logging.INFO)

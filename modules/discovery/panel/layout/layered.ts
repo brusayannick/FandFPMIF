@@ -54,9 +54,12 @@ const DIRECTION_HANDLES: Record<NonNullable<LayeredOptions["direction"]>, { sour
  * with proper port placement, channelled edge routing, and Brandes-Köpf
  * crossing minimisation.
  *
- * Returns a Promise – ELK runs in a Web Worker on browsers that support it
- * and falls back to the main thread otherwise. Either way the call is
- * non-blocking from the caller's point of view.
+ * Returns a Promise, but the work is NOT off the main thread: `new ELK()`
+ * (`elk.bundled.js`, below) uses elkjs' bundled "fake worker", which runs the
+ * GWT solver *synchronously on the main thread* — a real Web Worker needs
+ * `workerUrl`/`workerFactory`. So awaiting this still blocks for the solve;
+ * callers defer the first call past first paint (see `runAfterPaint`) so the
+ * loading skeleton stays responsive on large nets.
  */
 export async function elkLayout<TNodeData extends Record<string, unknown>, TEdgeData extends Record<string, unknown>>(
   nodes: Node<TNodeData>[],
@@ -97,16 +100,40 @@ export async function elkLayout<TNodeData extends Record<string, unknown>, TEdge
       ? { "elk.layered.cycleBreaking.strategy": "GREEDY" }
       : {};
 
+  // Crossing minimisation. LAYER_SWEEP is ELK's global barycenter optimiser and
+  // the correct default. `semiInteractive` additionally pins the sweep to the
+  // INPUT node order — meaningful only when the caller supplies an intentional
+  // order via `nodeOrderHint`. Petri/Heuristics feed an arbitrary "all places
+  // then all transitions" order; imposing that as a within-layer constraint on a
+  // bipartite net manufactures crossings, so enable it ONLY alongside a hint.
+  // Higher thoroughness keeps more sweep candidates (fewer crossings) at
+  // negligible cost for the ≤200-node graphs these canvases produce.
+  const crossingMin: ElkOptions = {
+    "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+    "elk.layered.thoroughness": "30",
+    ...(opts.nodeOrderHint ? { "elk.layered.crossingMinimization.semiInteractive": "true" } : {}),
+  };
+
+  // Give parallel edges and edge/node channels breathing room so orthogonal
+  // segments don't coincide — directly targets the overlapping-edges symptom.
+  const edgeSpacing: ElkOptions = {
+    "elk.spacing.edgeEdge": "12",
+    "elk.spacing.edgeNode": "16",
+    "elk.layered.spacing.edgeEdgeBetweenLayers": "12",
+    "elk.layered.spacing.edgeNodeBetweenLayers": "20",
+  };
+
   const layoutOptions: ElkOptions = {
     "elk.algorithm": "layered",
     "elk.direction": direction,
     "elk.layered.spacing.nodeNodeBetweenLayers": String(opts.nodeNodeBetweenLayers ?? 80),
     "elk.spacing.nodeNode": String(opts.nodeNode ?? 40),
-    "elk.layered.crossingMinimization.semiInteractive": "true",
     "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
     "elk.layered.feedbackEdges": "true",
     "elk.portConstraints": "FIXED_SIDE",
     "elk.edgeRouting": opts.edgeRouting ?? "ORTHOGONAL",
+    ...crossingMin,
+    ...edgeSpacing,
     ...celonisOpts,
     ...cycleBreaking,
     ...opts.extra,

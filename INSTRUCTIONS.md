@@ -161,7 +161,7 @@ name: Performance                   # human-readable
 version: 1.2.0
 category: foundation                # foundation | attribute | external_input | advanced | other
 description: Throughput, lead time, waiting / sojourn time, bottleneck detection.
-author: Mate Core
+author: Mate Core                   # or plural authors:/papers: lists (max 20 each) – see modules/README.md §3
 license: MIT
 
 requirements:

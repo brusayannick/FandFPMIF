@@ -445,6 +445,38 @@ def to_download_csv(sim_df: pd.DataFrame, max_rows: int = 20000) -> str:
     return d.to_csv(index=False)
 
 
+def to_download_xes(sim_df: pd.DataFrame, max_rows: int = 20000) -> str:
+    """A trimmed, normalised XES of one simulated log for the download button.
+
+    Maps the common frame to XES-standard attributes and serialises it with
+    ``pm4py.write_xes``. ``time:timestamp`` is the activity's completion; the
+    start is kept as a ``start_timestamp`` attribute so the interval information
+    the CSV also carries isn't lost. Returns the ``.xes`` document as text.
+    pm4py is imported lazily (heavy, and only present in the worker venv).
+    """
+    import tempfile
+
+    import pm4py
+
+    d = _normalize(sim_df).head(max_rows)
+    # pm4py's DataFrame guard needs >=2 string columns (case id + activity) and a
+    # datetime column; case:concept:name must be non-null strings. `_normalize`
+    # already guarantees a parseable start and a non-null case_id, so these hold.
+    xes_df = pd.DataFrame(
+        {
+            "case:concept:name": d["case_id"].astype(str),
+            "concept:name": d["activity"].astype(str),
+            "org:resource": d["resource"].astype(str),
+            "time:timestamp": d["end"],
+            "start_timestamp": d["start"],
+        }
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "simulated_log.xes"
+        pm4py.write_xes(xes_df, str(out), case_id_key="case:concept:name")
+        return out.read_text(encoding="utf-8")
+
+
 def compute_summaries(test_df: pd.DataFrame, sim_dfs: list[pd.DataFrame]) -> dict[str, Any]:
     """All the real-vs-simulated distributions the panel renders."""
     test = _normalize(test_df)

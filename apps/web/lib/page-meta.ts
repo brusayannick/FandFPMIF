@@ -8,6 +8,8 @@
 // generic label until the data lands. Keep this in sync with the routes under
 // apps/web/app/(platform).
 
+import type { ManifestAuthor, ManifestPaper } from "@/lib/api-types";
+
 /** Rich module "About" payload — manifest-sourced, rendered by the topbar ⓘ. */
 export interface ModuleAbout {
   name: string;
@@ -16,6 +18,10 @@ export interface ModuleAbout {
   author?: string | null;
   authorUrl?: string | null;
   paperUrl?: string | null;
+  /** All credited authors (max 20); preferred over the singular `author`. */
+  authors?: ManifestAuthor[] | null;
+  /** All cited papers (max 20); preferred over the singular `paperUrl`. */
+  papers?: ManifestPaper[] | null;
   license?: string | null;
   version?: string | null;
 }

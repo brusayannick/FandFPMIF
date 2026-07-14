@@ -118,6 +118,8 @@ export function Topbar() {
         author: m.author,
         authorUrl: m.author_url,
         paperUrl: m.paper_url,
+        authors: m.authors,
+        papers: m.papers,
         license: m.license,
         version: m.version,
       },

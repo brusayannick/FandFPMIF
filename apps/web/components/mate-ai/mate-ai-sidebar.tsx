@@ -8,7 +8,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowUp,
-  FileText,
+  Compass,
   Lightbulb,
   ListChecks,
   RotateCcw,
@@ -60,21 +60,23 @@ interface Starter {
 }
 
 // Starters shown when there's no process context (landing, settings, etc.).
+// These are stated GOALS: each routes through /api/v1/ai/route to the matching
+// module/view, so picking one drops the user where the work happens.
 const DEFAULT_STARTERS: Starter[] = [
   {
-    icon: FileText,
-    title: "Summarize this process",
-    subtitle: "Get a quick overview of variants and bottlenecks",
-  },
-  {
-    icon: Lightbulb,
-    title: "Explain a variant",
-    subtitle: "Walk me through how a specific path flows",
-  },
-  {
     icon: Zap,
-    title: "Find bottlenecks",
-    subtitle: "Highlight the slowest steps across cases",
+    title: "Show me a bottleneck",
+    subtitle: "Open the module that finds the slowest steps",
+  },
+  {
+    icon: Workflow,
+    title: "Discover my process model",
+    subtitle: "See how your process actually flows",
+  },
+  {
+    icon: Compass,
+    title: "Suggest a module for me",
+    subtitle: "Not sure where to start? Get a recommendation",
   },
 ];
 

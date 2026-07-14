@@ -58,20 +58,30 @@ def _parse_log_index(kw: dict[str, Any]) -> int:
 
     A subprocess route stub's FastAPI signature is derived from the stub's own
     ``(ctx, *args, **kwargs)``, so the only query params that reach the handler
-    are the two literal passthroughs ``args`` and ``kwargs``. The panel sends
-    the index as ``?args=<i>`` (``kwargs`` accepted as an alias). Defaults to 0,
-    clamped to the manifest's ``num_simulations`` ceiling (10). Pure (no ctx)
-    so it's unit-testable.
+    are the two literal passthroughs ``args`` and ``kwargs``. The panel sends the
+    run index as ``?args=<i>`` and the export format as ``?kwargs=<fmt>`` (see
+    ``_parse_format``). Defaults to 0, clamped to the manifest's
+    ``num_simulations`` ceiling (10). Pure (no ctx) so it's unit-testable.
     """
-    for key in ("args", "kwargs"):
-        v = kw.get(key)
-        if v is None:
-            continue
-        try:
-            return max(0, min(9, int(str(v).strip())))
-        except (TypeError, ValueError):
-            continue
-    return 0
+    v = kw.get("args")
+    try:
+        return max(0, min(9, int(str(v).strip())))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _parse_format(kw: dict[str, Any]) -> str:
+    """Requested export format from a subprocess route's query params.
+
+    Shares the ``args``/``kwargs`` passthrough channel with the run index: the
+    panel sends the format as ``?kwargs=<csv|xes>``. Anything other than ``xes``
+    (a missing value, ``csv``, junk) falls back to ``csv`` so callers predating
+    the format param keep receiving CSV. Pure (no ctx) so it's unit-testable.
+    """
+    v = kw.get("kwargs")
+    if v is not None and str(v).strip().lower() == "xes":
+        return "xes"
+    return "csv"
 
 
 class AgentSimulatorModule(Module):
@@ -144,24 +154,29 @@ class AgentSimulatorModule(Module):
 
     @route.get("/simulated-log")
     async def simulated_log(self, ctx: ModuleContext, **_kw: Any) -> dict[str, Any]:
-        """One simulated log as CSV text (per-run download buttons).
+        """One simulated log as CSV or XES text (per-run download buttons).
 
-        The run index arrives as ``?args=<i>`` (see `_parse_log_index`). Index 0
-        falls back to the legacy single `download_csv` key so caches written
-        before per-run downloads still serve their one log.
+        The run index arrives as ``?args=<i>`` and the export format as
+        ``?kwargs=<csv|xes>`` (see `_parse_log_index` / `_parse_format`); format
+        defaults to ``csv`` for backward compatibility. Index 0 falls back to the
+        legacy single `download_csv` key so CSV caches written before per-run
+        downloads still serve their one log. XES is only served from caches
+        written by the current code - older caches have no XES key -> `empty`.
         """
         idx = _parse_log_index(_kw)
-        csv = await ctx.cache.get(f"download_csv_{idx}")
-        if not csv and idx == 0:
-            csv = await ctx.cache.get("download_csv")
-        if not csv:
+        fmt = _parse_format(_kw)
+        content = await ctx.cache.get(f"download_{fmt}_{idx}")
+        if not content and fmt == "csv" and idx == 0:
+            content = await ctx.cache.get("download_csv")
+        if not content:
             return {"status": "empty"}
         suffix = (ctx.log_id or "log")[:8]
         return {
             "status": "ready",
             "index": idx,
-            "filename": f"agentsim_simulated_{suffix}_run{idx + 1}.csv",
-            "csv": csv,
+            "format": fmt,
+            "filename": f"agentsim_simulated_{suffix}_run{idx + 1}.{fmt}",
+            "content": content,
         }
 
     # ── the simulation run ─────────────────────────────────────────────────
@@ -241,14 +256,17 @@ class AgentSimulatorModule(Module):
             "metrics": fidelity,
             **summaries,
         }
-        # Every simulated run is downloadable (`/simulated-log?args=<i>`). Write
-        # the CSVs *before* the result so the panel never lists a download that
-        # isn't in the cache yet. `download_csv` (= run 0) predates per-run
-        # downloads and stays for old caches/panels.
+        # Every simulated run is downloadable as CSV or XES
+        # (`/simulated-log?args=<i>&kwargs=<fmt>`). Write both *before* the result
+        # so the panel never lists a download that isn't in the cache yet.
+        # `download_csv` (= run 0) predates per-run downloads and stays for old
+        # caches/panels; there is no legacy single-XES key (XES is newer).
         downloads: list[dict[str, Any]] = []
         for i, sim_df in enumerate(sim_dfs):
             csv_i = await asyncio.to_thread(adapter.to_download_csv, sim_df)
             await ctx.cache.set(f"download_csv_{i}", csv_i)
+            xes_i = await asyncio.to_thread(adapter.to_download_xes, sim_df)
+            await ctx.cache.set(f"download_xes_{i}", xes_i)
             if i == 0:
                 await ctx.cache.set("download_csv", csv_i)
             act_col = "activity_name" if "activity_name" in sim_df.columns else "activity"

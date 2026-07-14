@@ -107,6 +107,12 @@ services:
       MCP_MAX_CONCURRENCY_PER_USER: ${MCP_MAX_CONCURRENCY_PER_USER:-4}
       MCP_MAX_CONCURRENCY_GLOBAL: ${MCP_MAX_CONCURRENCY_GLOBAL:-32}
       MCP_TOOL_TIMEOUT_SECONDS: ${MCP_TOOL_TIMEOUT_SECONDS:-30}
+      # Graph sidecar defaults (only meaningful with the "graph" profile up;
+      # harmless otherwise). Modules use these as connection fallbacks when the
+      # user hasn't set an explicit module config – see modules/actor_performance.
+      MATE_NEO4J_URI: ${MATE_NEO4J_URI:-bolt://neo4j:7687}
+      MATE_NEO4J_PASSWORD: ${NEO4J_PASSWORD:-mate-graph-dev}
+      MATE_NEO4J_IMPORT_DIR: /app/data/neo4j-import
     ports:
       - "8000:8000"
     depends_on:
@@ -122,6 +128,49 @@ services:
       # reuse the wheels in /app/data/uv-python and start in seconds, but the
       # initial grace period needs to cover the worst case.
       start_period: 600s
+    restart: unless-stopped
+
+  # Optional graph sidecar (compose profile "graph") for modules that need a
+  # Cypher engine – currently `actor_performance` (Event Knowledge Graph based).
+  # Not started by default: enable with COMPOSE_PROFILES=graph (DEPLOY.md §4b).
+  # Stock community image + APOC core only: the module imports via plain
+  # LOAD CSV, so no APOC Extended jar and no custom image. Community edition =
+  # single database; the module treats the graph as transient per-run scratch
+  # (wipe → build → extract → wipe) and serializes runs behind a lock.
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: mate-neo4j
+    profiles: ["graph"]
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-mate-graph-dev}
+      NEO4J_PLUGINS: '["apoc"]'
+      # The module writes prepared CSVs into the shared import dir below and
+      # loads them from Cypher – both spellings keep APOC's file access on.
+      APOC_IMPORT_FILE_ENABLED: "true"
+      NEO4J_apoc_import_file_enabled: "true"
+      # Paper recommends 10G for the full BPIC17 (~1.2M events); 2G handles
+      # small/medium logs. Tune per box – see DEPLOY.md §4b.
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP:-2G}
+    ports:
+      # Loopback-only so host-mode `make dev` reaches bolt://localhost:7687.
+      # Never publish bolt on a public interface (prod overlay resets this).
+      - "127.0.0.1:7687:7687"
+    volumes:
+      # Shared with the api's ./data mount: the module writes prepared CSVs to
+      # ./data/neo4j-import (= /app/data/neo4j-import inside the api container),
+      # the server reads the same directory as its import dir.
+      - ./data/neo4j-import:/var/lib/neo4j/import
+      - neo4j-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "cypher-shell -u neo4j -p \"${NEO4J_PASSWORD:-mate-graph-dev}\" 'RETURN 1' >/dev/null 2>&1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
     restart: unless-stopped
 
   web:
@@ -186,3 +235,4 @@ services:
 
 volumes:
   kc-data:
+  neo4j-data:

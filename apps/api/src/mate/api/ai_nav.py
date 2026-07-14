@@ -132,8 +132,27 @@ PLATFORM_PAGES: list[NavDestination] = [
         kind="page",
         href_template="/modules",
         requires_log=False,
-        keywords=["module", "modules", "install module", "enable module", "plugins", "module"],
-        description="Install, enable/disable and configure analysis modules.",
+        keywords=[
+            "module",
+            "modules",
+            "install module",
+            "enable module",
+            "plugins",
+            "suggest a module",
+            "suggest module",
+            "recommend a module",
+            "recommend module",
+            "which module",
+            "what module",
+            "choose a module",
+            "modul vorschlagen",
+            "welches modul",
+        ],
+        description=(
+            "Install, enable/disable and configure analysis modules. Route here to "
+            "browse or when the user asks to suggest/recommend a module but names no "
+            "specific analysis goal."
+        ),
     ),
     NavDestination(
         id="modules.import",
@@ -226,6 +245,51 @@ def _derive_keywords(name: str, description: str | None, provides: list[str]) ->
     return out[:20]
 
 
+# The classifier catalogue carries the module's `about` (a 2-4 sentence "what you
+# can do with this" blurb) when present - it's a far stronger routing signal than
+# the terse one-line `description`. Bound it so a wide install stays within the
+# prompt budget.
+_MODULE_ROUTING_TEXT_MAX = 400
+
+
+def module_routing_text(about: str | None, description: str | None, name: str) -> str:
+    """The text a module contributes as routing context for the classifier.
+
+    Prefers the richer manifest ``about`` ("what you can do with this module"),
+    falling back to the terse ``description``, then the name. This is *manifest*
+    metadata only - never event-log data - so it never touches the data wall.
+    """
+    return (about or description or name or "").strip()
+
+
+def module_destination(
+    module_id: str,
+    name: str,
+    *,
+    about: str | None,
+    description: str | None,
+    keywords: list[str] | None,
+    provides: list[str] | None,
+) -> NavDestination:
+    """Build the ``NavDestination`` for one module from its manifest fields.
+
+    Uses ``about``/``description`` as the routing context (both for the classifier
+    catalogue and, when the manifest declares no explicit keywords, for the
+    derived pre-filter keywords). Pure/DB-free so it's unit-testable.
+    """
+    routing_text = module_routing_text(about, description, name)
+    kw = list(keywords or []) or _derive_keywords(name, routing_text, list(provides or []))
+    return NavDestination(
+        id=module_id,
+        label=name,
+        kind="module",
+        href_template="/processes/{log_id}/modules/" + module_id,
+        requires_log=True,
+        keywords=kw,
+        description=routing_text[:_MODULE_ROUTING_TEXT_MAX],
+    )
+
+
 async def build_user_destinations(session: AsyncSession, user_id: str) -> list[NavDestination]:
     """Static pages + the modules this user has installed *and* enabled."""
     dests = list(PLATFORM_PAGES)
@@ -258,16 +322,14 @@ async def build_user_destinations(session: AsyncSession, user_id: str) -> list[N
             continue
         if not enabled_map.get(m.id, m.default_enabled):
             continue
-        keywords = list(m.keywords) or _derive_keywords(m.name, m.description, list(m.provides))
         dests.append(
-            NavDestination(
-                id=m.id,
-                label=m.name,
-                kind="module",
-                href_template="/processes/{log_id}/modules/" + m.id,
-                requires_log=True,
-                keywords=keywords,
-                description=(m.description or m.name)[:300],
+            module_destination(
+                m.id,
+                m.name,
+                about=m.about,
+                description=m.description,
+                keywords=list(m.keywords),
+                provides=list(m.provides),
             )
         )
     return dests
@@ -651,6 +713,15 @@ Rules:
       -> targets=["discovery"], process="helpdesk"
     Example: "show me the complexity of the Order log"
       -> targets=["complexity"], process="Order log"
+- When the user states an analysis GOAL ("show me a bottleneck", "where does my
+  process lose time", "check if we follow the rules", "suggest a module for drift"),
+  treat it as navigation and pick the single module whose description best matches
+  that goal as the target. Use the destination descriptions below to choose.
+    Example: "show me a bottleneck" -> targets=["performance"]
+    Example: "discover how my process actually runs" -> targets=["discovery"]
+- If the user asks to suggest/recommend a module but names no concrete goal
+  (e.g. "suggest a module", "which module should I use?"), target the "modules"
+  page so they can browse.
 - If the user names a specific process that appears under 'Available processes',
   set "process" to that process's NAME (not the id). Otherwise set "process" to null.
 - If (and only if) the user EXPLICITLY asks to change one of the settings under

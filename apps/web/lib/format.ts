@@ -67,7 +67,7 @@ export function formatRelative(iso: string | null | undefined): string {
   const ts = new Date(iso).getTime();
   if (Number.isNaN(ts)) return "–";
   const deltaSec = Math.round((ts - Date.now()) / 1000);
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
   const abs = Math.abs(deltaSec);
 
   for (let i = 0; i < RELATIVE_THRESHOLDS.length; i++) {

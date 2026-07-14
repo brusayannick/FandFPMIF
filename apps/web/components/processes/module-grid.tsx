@@ -18,11 +18,11 @@ import { cn } from "@/lib/cn";
 import type { ModuleSummary } from "@/lib/api-types";
 
 const CATEGORIES: { id: string; label: string }[] = [
-  { id: "foundation", label: "Foundation" },
-  { id: "attribute", label: "Attribute" },
-  { id: "external_input", label: "External input" },
-  { id: "advanced", label: "Advanced process analytics" },
-  { id: "comparison", label: "Comparison" },
+  { id: "foundation", label: "Process Discovery" },
+  { id: "attribute", label: "Attribute Analysis" },
+  { id: "external_input", label: "External Data" },
+  { id: "advanced", label: "Process Intelligence" },
+  { id: "comparison", label: "Process Comparison" },
   { id: "other", label: "Other" },
 ];
 

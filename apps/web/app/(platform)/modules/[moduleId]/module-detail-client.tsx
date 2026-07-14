@@ -57,6 +57,7 @@ import {
   type AiModelsManifest,
   type ModelStoreManifest,
 } from "@/lib/queries";
+import type { ManifestAuthor, ManifestPaper } from "@/lib/api-types";
 
 interface AiConfigDraft {
   llm: AiModelSelection;
@@ -158,6 +159,8 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
         author: (manifest.author as string | null) ?? null,
         author_url: (manifest.author_url as string | null) ?? null,
         paper_url: (manifest.paper_url as string | null) ?? null,
+        authors: (manifest.authors as ManifestAuthor[] | undefined) ?? [],
+        papers: (manifest.papers as ManifestPaper[] | undefined) ?? [],
         license: (manifest.license as string | null) ?? null,
         provides: (manifest.provides as string[]) ?? [],
         consumes: (manifest.consumes as string[]) ?? [],
@@ -289,6 +292,8 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
                 author={m.author}
                 authorUrl={m.author_url}
                 paperUrl={m.paper_url}
+                authors={m.authors}
+                papers={m.papers}
                 license={m.license}
                 version={m.version}
               />

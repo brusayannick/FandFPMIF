@@ -8,7 +8,7 @@ overlap (§5.4 inherit-conflict rule).
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Self
 
 import yaml
@@ -79,6 +79,34 @@ class DependenciesPython(BaseModel):
 class Dependencies(BaseModel):
     python: DependenciesPython = Field(default_factory=DependenciesPython)
     npm: list[str] = Field(default_factory=list)
+
+
+class RuntimePython(BaseModel):
+    """The default runtime: the module is Python, executed in-process or in a
+    subprocess worker per `dependencies.python.isolation`."""
+
+    kind: Literal["python"] = "python"
+
+
+class RuntimeJvm(BaseModel):
+    """A module implemented on the JVM, shipped as a self-contained fat jar.
+
+    The platform never resolves Java dependencies (no server-side
+    Maven/Gradle) - the jar must bundle everything except the JRE itself. The
+    worker is always process-isolated and speaks the wire protocol documented
+    in `modules/PROTOCOL.md` (the `mate-sdk-jvm` library implements it).
+    """
+
+    kind: Literal["jvm"]
+    # Folder-relative path to the runnable fat jar (must carry a `Main-Class`).
+    jar: str
+    # Minimum Java *feature* version the jar needs (17 = oldest supported LTS;
+    # the SDK itself targets 17, and Unix-socket support requires 16+).
+    requires_java: int = Field(default=17, ge=17, alias="requires-java")
+    # Extra JVM flags, e.g. ["-Xmx1g"]. Prepended before `-jar`.
+    jvm_args: list[str] = Field(default_factory=list, alias="jvm-args")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class WidgetEntry(BaseModel):
@@ -244,6 +272,35 @@ class ModelStoreManifest(BaseModel):
     config_key: str = "model"
 
 
+# A manifest may credit up to this many authors and cite up to this many papers.
+MAX_AUTHORS = 20
+MAX_PAPERS = 20
+
+
+class Author(BaseModel):
+    """One credited author/attribution for a module.
+
+    Mirrors the singular `author` (name) + `author_url` (optional link) pair:
+    a display name plus an optional link (upstream repo, homepage, or profile).
+    Omitting `url` keeps the author badge non-clickable.
+    """
+
+    name: str
+    url: str | None = None
+
+
+class Paper(BaseModel):
+    """One scientific paper a module implements/cites.
+
+    Mirrors the singular `paper_url` but adds a `title` so several papers can be
+    told apart in the UI. `url` (DOI URL preferred) is required; `title` is
+    optional and falls back to a generic "Read the paper" label when absent.
+    """
+
+    title: str | None = None
+    url: str
+
+
 class Manifest(BaseModel):
     """The top-level manifest object - `manifest.yaml`."""
 
@@ -259,6 +316,10 @@ class Manifest(BaseModel):
     # 2-4 sentences, user-facing, plain language. Falls back to `description`
     # when omitted.
     about: str | None = None
+    # Singular author/paper fields - kept for backward compatibility. Every
+    # existing manifest uses these. `_merge_author_credits` folds them into the
+    # plural `authors`/`papers` lists (as the FIRST entry) so consumers can read
+    # a single canonical list; the singular fields stay populated for old code.
     author: str | None = None
     # Optional link for the author badge in the UI - the cited paper, upstream
     # repo, or homepage. Omitting it keeps the badge non-clickable.
@@ -267,8 +328,23 @@ class Manifest(BaseModel):
     # preferred). Rendered as a "Paper" link in the module info box - distinct
     # from `author_url`, which usually points at the upstream repo/homepage.
     paper_url: str | None = None
+    # Plural author/paper credits (max 20 each). A module may list multiple
+    # authors and cite multiple papers. Backward compat: the singular
+    # `author`/`author_url` and `paper_url` are merged in as the first entry of
+    # the respective list (see `_merge_author_credits`), so a manifest can use
+    # either form - or both, with the singular value leading. The max-20 cap is
+    # enforced both on the declared list (Pydantic `max_length`) and on the
+    # post-merge list (`_merge_author_credits`), failing loud on overflow.
+    authors: list[Author] = Field(default_factory=list, max_length=MAX_AUTHORS)
+    papers: list[Paper] = Field(default_factory=list, max_length=MAX_PAPERS)
     license: str | None = None
 
+    # Which language runtime executes this module. Absent = Python (every
+    # pre-existing manifest keeps working unchanged). Non-Python runtimes are
+    # always process-isolated: the validator below normalises
+    # `dependencies.python.isolation` to "subprocess" so the loader's existing
+    # isolation checks route them through the worker bridge.
+    runtime: RuntimePython | RuntimeJvm = Field(default_factory=RuntimePython, discriminator="kind")
     requirements: Requirements = Field(default_factory=Requirements)
     provides: list[str] = Field(default_factory=list)
     consumes: list[str] = Field(default_factory=list)
@@ -307,11 +383,81 @@ class Manifest(BaseModel):
     model_store: ModelStoreManifest | None = None
 
     @model_validator(mode="after")
+    def _merge_author_credits(self) -> Self:
+        """Fold the singular `author`/`author_url`/`paper_url` into the plural
+        `authors`/`papers` lists as the FIRST entry (backward-compat merge).
+
+        Rules:
+        - The singular value always leads the merged list, unless an equal entry
+          (same author name / same paper url) is already present, in which case
+          it is not duplicated.
+        - `author_url` without an `author` name is ignored (an author needs a
+          name); a bare `paper_url` becomes a titleless paper.
+        - After merging, each list must still hold at most 20 entries, or the
+          manifest fails loud - same ceiling as the declared list.
+        """
+        if self.author is not None:
+            lead = Author(name=self.author, url=self.author_url)
+            if not any(a.name == lead.name for a in self.authors):
+                self.authors = [lead, *self.authors]
+        if self.paper_url is not None:
+            lead_paper = Paper(url=self.paper_url)
+            if not any(p.url == lead_paper.url for p in self.papers):
+                self.papers = [lead_paper, *self.papers]
+
+        if len(self.authors) > MAX_AUTHORS:
+            raise ModuleManifestError(
+                f"Too many authors ({len(self.authors)}) - at most {MAX_AUTHORS} are allowed "
+                "(including the singular `author`)."
+            )
+        if len(self.papers) > MAX_PAPERS:
+            raise ModuleManifestError(
+                f"Too many papers ({len(self.papers)}) - at most {MAX_PAPERS} are allowed "
+                "(including the singular `paper_url`)."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _validate_id(self) -> Self:
         if not self.id.replace("_", "").isalnum() or not self.id.islower():
             raise ModuleManifestError(
                 f"Manifest id {self.id!r} must be lowercase snake_case (letters, digits, underscores)."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_runtime(self) -> Self:
+        """Cross-validate the runtime block against the Python deps block, then
+        normalise isolation so non-Python runtimes always bridge-mount.
+
+        The `dependencies.python` knobs describe a Python toolchain; on a
+        foreign runtime they are at best dead weight and at worst a sign the
+        author misunderstood the contract - reject loudly instead of ignoring.
+        """
+        if self.runtime.kind == "python":
+            return self
+        py = self.dependencies.python
+        if py.packages or py.inherit or py.requires_python:
+            raise ModuleManifestError(
+                f"runtime: {self.runtime.kind} modules must not declare dependencies.python "
+                "(packages/inherit/requires-python) - the runtime block owns the toolchain."
+            )
+        if "isolation" in py.model_fields_set and py.isolation == "in_process":
+            raise ModuleManifestError(
+                f"runtime: {self.runtime.kind} modules cannot run in_process - they always "
+                "execute in their own worker process. Drop the isolation key."
+            )
+        # Normalise: every foreign-runtime module is bridge-mounted, so the
+        # loader's existing `isolation == "subprocess"` checks all apply.
+        py.isolation = "subprocess"
+
+        if self.runtime.kind == "jvm":
+            jar = PurePosixPath(self.runtime.jar)
+            if not self.runtime.jar.strip() or jar.is_absolute() or ".." in jar.parts:
+                raise ModuleManifestError(
+                    "runtime.jar must be a folder-relative path inside the module "
+                    f"(got {self.runtime.jar!r})."
+                )
         return self
 
     @classmethod
@@ -330,9 +476,21 @@ class Manifest(BaseModel):
 
     def dependencies_hash(self) -> str:
         """Stable hash of the dependencies block - used to skip `uv sync` on
-        unchanged boots (§5.4)."""
+        unchanged boots (§5.4).
+
+        The runtime block is folded in ONLY for non-Python runtimes: for the
+        (default) Python runtime the payload must stay byte-identical to what
+        it was before `runtime:` existed, or every deployed module venv would
+        rebuild on upgrade.
+        """
         import hashlib
         import json
 
-        payload = json.dumps(self.dependencies.model_dump(by_alias=True), sort_keys=True)
+        payload_obj: Any = self.dependencies.model_dump(by_alias=True)
+        if self.runtime.kind != "python":
+            payload_obj = {
+                "dependencies": payload_obj,
+                "runtime": self.runtime.model_dump(by_alias=True),
+            }
+        payload = json.dumps(payload_obj, sort_keys=True)
         return hashlib.blake2b(payload.encode("utf-8"), digest_size=16).hexdigest()

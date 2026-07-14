@@ -3,7 +3,8 @@
 /**
  * Presentation kit shared by the AgentSimulator widgets and panel. Each widget
  * is bundled independently, so keep this small and limited to runtime externals
- * (ui/skeleton, ui/button, lucide, next/navigation). `COLORS` is the
+ * (ui/skeleton, ui/button, ui/tooltip, lucide, next/navigation) plus sibling
+ * module files (`./metric-info` for the fidelity ⓘ popovers). `COLORS` is the
  * real-vs-simulated palette used everywhere.
  *
  * `CardShell` is more than chrome: when a widget has no result it renders a
@@ -21,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { useSimulationGate, type MetricCell, type SimJob } from "../panel/queries";
+import { MetricInfoHint } from "./metric-info";
 
 export const COLORS = { real: "#6366f1", sim: "#f59e0b" } as const;
 
@@ -145,15 +147,19 @@ function SimulationPrompt({
   );
 }
 
-/** One fidelity measure: short code + mean, with ± std and the full name. */
+/** One fidelity measure: short code + mean, with ± std, the full name, and an
+ * ⓘ popover explaining the measure and citing the paper (`./metric-info`). */
 export function MetricTile({ code, cell }: { code: string; cell?: MetricCell }) {
   const mean = cell?.mean;
   const value = mean == null ? "–" : mean < 10 ? mean.toFixed(3) : mean.toFixed(2);
   return (
     <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide" title={cell?.label}>
-          {code}
+        <span className="inline-flex items-center gap-1">
+          <span className="text-[11px] font-semibold uppercase tracking-wide" title={cell?.label}>
+            {code}
+          </span>
+          <MetricInfoHint metricKey={code} />
         </span>
         <span className="text-[9px] uppercase tracking-wide text-muted-foreground">↓ better</span>
       </div>

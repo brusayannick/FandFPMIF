@@ -153,6 +153,11 @@ class DashboardCreate(BaseModel):
     log_model: LogModel = "case_centric"
     items: list[DashboardItem] = Field(default_factory=list)
     settings: CanvasSettings = Field(default_factory=CanvasSettings)
+    # When set, the board is seeded from a curated starter template: the
+    # template's ``items``/``settings``/``log_model`` win over the (empty) fields
+    # above. ``None`` (the default) keeps the classic blank-board behaviour, so
+    # this is backward compatible. An unknown id is a 404 at create time.
+    template_id: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -204,3 +209,15 @@ class DashboardImport(BaseModel):
     items: list[DashboardItem] = Field(default_factory=list)
     settings: CanvasSettings = Field(default_factory=CanvasSettings)
     event_log_id: str | None = None
+
+
+class DashboardTemplate(BaseModel):
+    """One curated starter board in the "start from template" picker. The card
+    payload is seeded server-side at create time, so this listing shape carries
+    only the label + a ``card_count`` preview (not the ``items`` themselves)."""
+
+    id: str
+    name: str
+    description: str
+    log_model: LogModel = "case_centric"
+    card_count: int = 0

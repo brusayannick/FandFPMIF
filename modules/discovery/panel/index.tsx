@@ -48,6 +48,7 @@ import {
   usePetriSettings,
   useProcessTreeSettings,
 } from "./discovery-settings-context";
+import { usePetriLayout } from "./petri-layout";
 
 import {
   downloadBpmn,
@@ -276,6 +277,8 @@ function PetriFilterBar({
   onNoiseThresholdChange: (v: number) => void;
 }) {
   const [petri, setPetri] = usePetriSettings();
+  const direction = usePetriLayout((s) => s.direction);
+  const setDirection = usePetriLayout((s) => s.setDirection);
   return (
     <FilterBar>
       <FilterField label="Algorithm">
@@ -297,6 +300,36 @@ function PetriFilterBar({
           <CommitSlider value={noiseThreshold} onCommit={onNoiseThresholdChange} />
         </FilterField>
       )}
+      <FilterField label="Layout">
+        <div className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+          {(
+            [
+              { value: "LR", label: "Left → Right" },
+              { value: "TB", label: "Top → Bottom" },
+            ] as const
+          ).map((d) => {
+            const active = direction === d.value;
+            return (
+              <button
+                key={d.value}
+                type="button"
+                title={d.label}
+                aria-pressed={active}
+                onClick={() => setDirection(d.value)}
+                data-state={active ? "active" : "inactive"}
+                className={cn(
+                  "cursor-pointer rounded px-2 py-1 text-xs font-medium transition-all",
+                  active
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-foreground/60 hover:text-foreground",
+                )}
+              >
+                {d.value}
+              </button>
+            );
+          })}
+        </div>
+      </FilterField>
       <FilterField label="Show invisible (τ)">
         <Switch
           checked={petri.showInvisibleTransitions}

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { GripVertical, Settings2, X } from "lucide-react";
+import { GripVertical, Info, Settings2, X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,10 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useWidget } from "@/lib/module-widgets";
 import { CardConfigForm } from "@/components/dashboards/card-config-form";
+import { configWithoutWidgetFilter } from "@/components/dashboards/widget-filter";
 import { GenericVizBody, VizSettings } from "@/components/dashboards/generic-viz-card";
 import {
   DEFAULT_CARD_CHROME,
@@ -44,6 +46,7 @@ export const DashboardCard = memo(function DashboardCard({
   editing,
   schema,
   chrome = DEFAULT_CARD_CHROME,
+  description,
   onUpdate,
   onRemove,
 }: {
@@ -52,6 +55,9 @@ export const DashboardCard = memo(function DashboardCard({
   editing: boolean;
   schema: WidgetConfigSchema | null | undefined;
   chrome?: CardChrome;
+  /** The widget/dataset's manifest description, surfaced via the header ⓘ.
+   * Resolved from the catalog by the canvas (a placed item doesn't store it). */
+  description?: string | null;
   onUpdate: (patch: CardPatch) => void;
   onRemove: () => void;
 }) {
@@ -81,6 +87,24 @@ export const DashboardCard = memo(function DashboardCard({
           <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60 animate-in fade-in-0 slide-in-from-left-2 duration-150" />
         )}
         <span className="min-w-0 flex-1 truncate text-xs font-medium tracking-tight">{title}</span>
+        {description && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`About ${title}`}
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                onMouseDown={stopDrag}
+                onPointerDown={stopDrag}
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs">
+              {description}
+            </TooltipContent>
+          </Tooltip>
+        )}
         {editing && (
           <span className="flex shrink-0 items-center gap-1.5 animate-in fade-in-0 slide-in-from-right-2 duration-150">
             <Popover>
@@ -109,7 +133,7 @@ export const DashboardCard = memo(function DashboardCard({
                 {isViz ? (
                   <VizSettings item={item} logId={logId} onChange={onUpdate} />
                 ) : (
-                  <CardConfigForm item={item} schema={schema} onChange={onUpdate} />
+                  <CardConfigForm item={item} schema={schema} logId={logId} onChange={onUpdate} />
                 )}
               </PopoverContent>
             </Popover>
@@ -150,5 +174,13 @@ function WidgetBody({ item, logId }: { item: DashboardItem; logId: string | null
       </div>
     );
   }
-  return <Widget logId={logId} moduleId={item.module_id ?? ""} config={item.config} />;
+  // Strip the reserved per-widget-filter key so the module widget only ever
+  // sees its own config (the filter is applied to requests, not read by the widget).
+  return (
+    <Widget
+      logId={logId}
+      moduleId={item.module_id ?? ""}
+      config={configWithoutWidgetFilter(item.config)}
+    />
+  );
 }

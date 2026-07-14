@@ -47,7 +47,8 @@ from mate.api.modules.discovery import DiscoveredModule, discover, topo_sort
 from mate.api.modules.event_filters import FILTER_OPS
 from mate.api.modules.event_log_access import EventLogAccess
 from mate.api.modules.finder import get_finder, module_namespace, reset_finder
-from mate.api.modules.installer import install_module, venv_site_packages
+from mate.api.modules.installer import ModuleInstallError, venv_site_packages
+from mate.api.modules.runtimes import runtime_for
 from mate.api.modules.installs import user_module_ids, user_owns_module
 from mate.api.modules.job_logs import get_job_log_buffer
 from mate.api.modules.job_worker import JobWorker
@@ -592,13 +593,19 @@ class ModuleLoader:
 
         for d in ordered:
             try:
-                site = await install_module(d.folder, d.manifest)
+                site = await runtime_for(d.manifest).materialize(d.folder, d.manifest)
                 if site is not None:
                     finder.register(
                         d.manifest.id,
                         site,
                         inherit=d.manifest.dependencies.python.inherit,
                     )
+            except ModuleInstallError as exc:
+                # Expected environmental failures (missing toolchain, ABI
+                # mismatch, missing jar) skip the module with the actionable
+                # message - a stack trace here is noise, not signal.
+                log.warning("modules.loader.install_skipped", module_id=d.id, error=str(exc))
+                continue
             except Exception as exc:
                 log.exception("modules.loader.install_failed", module_id=d.id, error=str(exc))
                 continue
@@ -685,7 +692,7 @@ class ModuleLoader:
             await self.unload_one(manifest.id)
 
         finder = get_finder()
-        site = await install_module(folder, manifest)
+        site = await runtime_for(manifest).materialize(folder, manifest)
         if site is not None:
             finder.register(
                 manifest.id,
@@ -946,7 +953,8 @@ class ModuleLoader:
         """Build a `Module` instance - either in-process or via a subprocess
         bridge depending on the manifest's `isolation` setting (§5.4)."""
         if d.manifest.dependencies.python.isolation == "subprocess":
-            bridge = SubprocessBridge(d.manifest, d.folder)
+            launch = runtime_for(d.manifest).launch_spec(d.folder, d.manifest)
+            bridge = SubprocessBridge(d.manifest, d.folder, launch)
             instance = await bridge.start()
             self._bridges[d.id] = bridge
         else:

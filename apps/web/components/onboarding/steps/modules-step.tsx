@@ -7,6 +7,12 @@ import { toastError } from "@/lib/toast";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/empty-state";
 import {
   useModuleConfig,
@@ -19,7 +25,7 @@ export function ModulesStep() {
   const { data: modules, isLoading } = useModules(null);
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <div className="space-y-2 text-center">
         <h1 className="text-3xl font-semibold tracking-tight">Choose your modules</h1>
         <p className="text-sm text-muted-foreground">
@@ -40,11 +46,13 @@ export function ModulesStep() {
           description="Install modules from Settings → Modules after setup."
         />
       ) : (
-        <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
-          {modules.map((m) => (
-            <ModuleToggleRow key={m.id} module={m} />
-          ))}
-        </div>
+        <TooltipProvider delayDuration={200}>
+          <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+            {modules.map((m) => (
+              <ModuleToggleRow key={m.id} module={m} />
+            ))}
+          </div>
+        </TooltipProvider>
       )}
     </div>
   );
@@ -76,20 +84,28 @@ function ModuleToggleRow({ module: m }: { module: ModuleSummary }) {
 
   return (
     <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-surface px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium">{m.name}</span>
-          <Badge
-            variant="secondary"
-            className="h-5 px-2 py-0 text-[9px] font-medium uppercase tracking-wide"
-          >
-            {m.category.replace(/_/g, " ")}
-          </Badge>
-        </div>
-        {m.description && (
-          <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{m.description}</p>
-        )}
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="min-w-0 flex-1 text-left">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-medium">{m.name}</span>
+              <Badge
+                variant="secondary"
+                className="h-5 shrink-0 px-2 py-0 text-[9px] font-medium uppercase tracking-wide"
+              >
+                {m.category.replace(/_/g, " ")}
+              </Badge>
+            </div>
+            {m.description && (
+              <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{m.description}</p>
+            )}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" align="start" className="max-w-xs">
+          <p className="font-medium">{m.name}</p>
+          {m.description && <p className="mt-1 text-background/80">{m.description}</p>}
+        </TooltipContent>
+      </Tooltip>
       <Switch
         checked={enabled}
         onCheckedChange={onToggle}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   MarkerType,
   useEdgesState,
@@ -10,6 +10,7 @@ import {
   type NodeMouseHandler,
 } from "@xyflow/react";
 
+import { runAfterPaint } from "../after-paint";
 import { elkLayout } from "../layout/layered";
 import { mapDirection, mapEdgeRouting, mapEdgeType, truncate } from "../layout/direction";
 import { PlaceNode } from "../nodes/place-node";
@@ -17,12 +18,15 @@ import { TransitionNode } from "../nodes/transition-node";
 import type { PetriNetData } from "../types";
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
 import { CanvasLayoutSkeleton } from "@/components/visualizations/canvases/shared/canvas-skeleton";
+import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import {
   useGeneralSettings,
   useNodePositions,
   usePersistNodePositions,
   usePetriSettings,
+  useResetPositions,
 } from "../discovery-settings-context";
+import { usePetriLayout } from "../petri-layout";
 
 const nodeTypes = { place: PlaceNode, transition: TransitionNode } as const;
 
@@ -32,16 +36,22 @@ interface PetriNetCanvasProps {
 
 export function PetriNetCanvas({ data }: PetriNetCanvasProps) {
   const general = useGeneralSettings();
+  const direction = usePetriLayout((s) => s.direction);
   const [petri] = usePetriSettings();
   const positions = useNodePositions("petri");
   const persist = usePersistNodePositions("petri");
+  const resetPositions = useResetPositions();
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [laid, setLaid] = useState(false);
+  // First layout is deferred past first paint (skeleton) so elkjs' synchronous
+  // main-thread solver doesn't block it; re-layouts run inline.
+  const didFirstLayout = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
+    let cancelScheduled: (() => void) | undefined;
 
     const visibleTransitions = petri.showInvisibleTransitions
       ? data.transitions
@@ -99,33 +109,40 @@ export function PetriNetCanvas({ data }: PetriNetCanvasProps) {
         markerEnd: { type: MarkerType.ArrowClosed, color: "var(--muted-foreground)" },
       }));
 
-    elkLayout([...placeNodes, ...transitionNodes], initialEdges, {
-      direction: mapDirection(general.layoutDirection),
-      edgeRouting: mapEdgeRouting(general.edgeRouting),
-      nodeNode: 28,
-      nodeNodeBetweenLayers: 80,
-      nodeSizes: {
-        place: { width: 36, height: 36 },
-        transition: { width: 130, height: 36 },
-      },
-    }).then((result) => {
-      if (cancelled) return;
-      const merged = result.nodes.map((n) => {
-        const p = positions[n.id];
-        return p ? { ...n, position: p } : n;
+    const runLayout = () => {
+      didFirstLayout.current = true;
+      elkLayout([...placeNodes, ...transitionNodes], initialEdges, {
+        direction: mapDirection(direction),
+        edgeRouting: mapEdgeRouting(general.edgeRouting),
+        nodeNode: 28,
+        nodeNodeBetweenLayers: 80,
+        nodeSizes: {
+          place: { width: 36, height: 36 },
+          transition: { width: 130, height: 36 },
+        },
+      }).then((result) => {
+        if (cancelled) return;
+        const merged = result.nodes.map((n) => {
+          const p = positions[n.id];
+          return p ? { ...n, position: p } : n;
+        });
+        setNodes(merged);
+        setEdges(result.edges);
+        setLaid(true);
       });
-      setNodes(merged);
-      setEdges(result.edges);
-      setLaid(true);
-    });
+    };
+
+    if (didFirstLayout.current) runLayout();
+    else cancelScheduled = runAfterPaint(runLayout);
 
     return () => {
       cancelled = true;
+      cancelScheduled?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     data,
-    general.layoutDirection,
+    direction,
     general.edgeRouting,
     general.nodeLabelMaxLength,
     petri.showInvisibleTransitions,
@@ -151,6 +168,7 @@ export function PetriNetCanvas({ data }: PetriNetCanvasProps) {
       fitViewKey={`pn-${data.places.length}-${data.transitions.length}`}
       miniMap={general.showMinimap}
       showGrid={general.showGrid}
+      toolbarSlot={<CanvasResetButton onReset={() => resetPositions("petri")} />}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeDragStop={onNodeDragStop}

@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageContainer } from "@/components/page";
 import { useModules } from "@/lib/queries";
 import { getModulePanel } from "@/lib/module-panels";
+import { LogFilterProvider } from "@/components/processes/log-filter";
 
 export default function ModulePage() {
   const params = useParams<{ logId: string; moduleId: string }>();
@@ -80,7 +81,12 @@ export default function ModulePage() {
           </ul>
         </div>
       ) : (
-        <ModulePanelSlot logId={logId} moduleId={mod.id} hasFrontend={mod.has_frontend} />
+        // Log-scoped global filter: sets the active log's ephemeral event filter
+        // and re-scopes this (and every other) module view for the log. Wraps
+        // the panel so its data queries pick up the `X-FF-Event-Filter` header.
+        <LogFilterProvider logId={logId}>
+          <ModulePanelSlot logId={logId} moduleId={mod.id} hasFrontend={mod.has_frontend} />
+        </LogFilterProvider>
       )}
     </PageContainer>
   );

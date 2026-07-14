@@ -3,6 +3,12 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { VizEmpty } from "@/components/visualizations/viz-shell";
 import { FieldMappingForm, type VizPatch } from "@/components/visualizations/field-mapping-form";
+import { WidgetFilterEditor } from "@/components/dashboards/widget-filter-editor";
+import {
+  configWithoutWidgetFilter,
+  readWidgetFilter,
+  writeWidgetFilter,
+} from "@/components/dashboards/widget-filter";
 import { vizRegistry } from "@/lib/visualizations/registry";
 import { useDatasetData } from "@/lib/visualizations/use-dataset-data";
 import type { DashboardItem } from "@/lib/dashboard-queries";
@@ -32,7 +38,8 @@ export function GenericVizBody({ item, logId }: { item: DashboardItem; logId: st
     <Viz
       dataset={envelope}
       mapping={(item.mapping ?? {}) as FieldMapping}
-      options={(item.config ?? {}) as Record<string, unknown>}
+      // Strip the reserved per-widget-filter key so the viz never sees it.
+      options={configWithoutWidgetFilter(item.config) as Record<string, unknown>}
     />
   );
 }
@@ -49,5 +56,14 @@ export function VizSettings({
   onChange: (patch: VizPatch) => void;
 }) {
   const { envelope, shape } = useDatasetData(item, logId);
-  return <FieldMappingForm item={item} dataset={envelope} shape={shape} onChange={onChange} />;
+  return (
+    <div className="space-y-3.5">
+      <FieldMappingForm item={item} dataset={envelope} shape={shape} onChange={onChange} />
+      <WidgetFilterEditor
+        logId={logId}
+        value={readWidgetFilter(item.config)}
+        onChange={(filter) => onChange({ config: writeWidgetFilter(item.config, filter) })}
+      />
+    </div>
+  );
 }

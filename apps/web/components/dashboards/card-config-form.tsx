@@ -11,6 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { WidgetFilterEditor } from "@/components/dashboards/widget-filter-editor";
+import { readWidgetFilter, writeWidgetFilter } from "@/components/dashboards/widget-filter";
 import type {
   DashboardItem,
   WidgetConfigSchema,
@@ -27,10 +29,13 @@ import type {
 export function CardConfigForm({
   item,
   schema,
+  logId,
   onChange,
 }: {
   item: DashboardItem;
   schema: WidgetConfigSchema | null | undefined;
+  /** The board's bound log — powers the per-widget filter's column list. */
+  logId: string | null;
   onChange: (patch: { title?: string; config?: Record<string, unknown> }) => void;
 }) {
   const props = Object.entries(schema?.properties ?? {});
@@ -68,6 +73,12 @@ export function CardConfigForm({
           />
         ))
       )}
+
+      <WidgetFilterEditor
+        logId={logId}
+        value={readWidgetFilter(item.config)}
+        onChange={(filter) => onChange({ config: writeWidgetFilter(item.config, filter) })}
+      />
     </div>
   );
 }

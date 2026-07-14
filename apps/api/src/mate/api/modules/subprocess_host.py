@@ -1,10 +1,12 @@
-"""Host-side wrapper for subprocess-isolated modules (§5.4).
+"""Host-side wrapper for worker-bridged modules (§5.4, modules/PROTOCOL.md).
 
-Spawns `subprocess_worker.py` inside the module's `.venv`, listens on a
-Unix socket for the worker's connection, and exposes a `SubprocessModule`
-object that mimics the in-process `Module` instance: each handler is a
-sync stub that the loader picks up via the same `_collect_handlers`
-machinery, but calling it routes through JSON-RPC to the worker.
+Spawns the module's worker process (argv/env/cwd come from the runtime's
+`WorkerLaunchSpec` - a Python worker on the module's `.venv`, a JVM worker
+via `java -jar`, ...), listens on a Unix socket for the worker's connection,
+and exposes a `SubprocessModule` object that mimics the in-process `Module`
+instance: each handler is a sync stub that the loader picks up via the same
+`_collect_handlers` machinery, but calling it routes through JSON-RPC to the
+worker.
 
 When the worker runs the handler, every `ctx.*` call comes back over the
 same socket as a request; this host dispatches them against a registered
@@ -25,6 +27,7 @@ from typing import Any
 
 import structlog
 
+from mate.api.config import get_settings
 from mate.api.jobs.supervisor import ChildHandle, get_child_supervisor
 from mate.api.modules.ctx_rpc import (
     CANCEL_RPC_MSG,
@@ -33,6 +36,7 @@ from mate.api.modules.ctx_rpc import (
     make_ctx_dispatcher,
 )
 from mate.api.modules.job_logs import get_job_log_buffer
+from mate.api.modules.runtimes.base import WorkerLaunchSpec
 from mate.api.modules.subprocess_worker import RPC_STREAM_LIMIT, WireConnection
 from mate.sdk.decorators import (
     _ATTR_JOB,
@@ -48,6 +52,16 @@ log = structlog.get_logger(__name__)
 
 # Re-exported from `ctx_rpc` (single source of truth, shared with JobWorker).
 __all__ = ["CANCEL_RPC_MSG", "SubprocessBridge", "SubprocessHostError", "SubprocessModule"]
+
+# Newest wire-protocol version this host understands (modules/PROTOCOL.md §1).
+# A worker advertising a higher `protocol` in `ready` fails to mount instead of
+# misbehaving subtly; a missing field means 1 (pre-versioning workers).
+SUPPORTED_PROTOCOL_MAX = 1
+
+# A worker that stayed ready this long is considered stable: the next crash
+# starts the respawn-backoff ladder from scratch instead of continuing where a
+# long-ago incident left off (a once-a-day OOM kill must self-heal forever).
+_STABLE_UPTIME_RESET_SECONDS = 60.0
 
 
 class SubprocessHostError(RuntimeError):
@@ -176,9 +190,10 @@ class SubprocessModule:
 class SubprocessBridge:
     """Owns the worker process + socket for one module."""
 
-    def __init__(self, manifest: Manifest, folder: Path) -> None:
+    def __init__(self, manifest: Manifest, folder: Path, launch: WorkerLaunchSpec) -> None:
         self.manifest = manifest
         self.folder = folder
+        self._launch = launch
         self._server: asyncio.base_events.Server | None = None
         self._conn: WireConnection | None = None
         self._proc: asyncio.subprocess.Process | None = None
@@ -199,6 +214,20 @@ class SubprocessBridge:
         self._stopping = False
         # Hold the respawn task so it isn't garbage-collected mid-flight.
         self._respawn_task: asyncio.Task[None] | None = None
+        # Ready-handshake rejection (e.g. unsupported protocol version) - set by
+        # `_on_ready` alongside `_ready_evt` so waiters wake and see the error.
+        self._ready_error: str | None = None
+        # Terminal crash-loop state: once set, every call fails immediately with
+        # this message until the module is fixed and reloaded.
+        self._failed: str | None = None
+        # Crash-respawn bookkeeping (modules/PROTOCOL.md §8): consecutive respawn
+        # attempts since the last stable run, and when the worker last signalled
+        # ready (monotonic clock) for the stable-uptime reset.
+        self._respawn_attempts = 0
+        self._last_ready_monotonic: float | None = None
+        settings = get_settings()
+        self._respawn_max_attempts: int = settings.subprocess_respawn_max_attempts
+        self._respawn_backoff_cap: float = settings.subprocess_respawn_backoff_cap_seconds
         # The worker's registration with the platform child supervisor, so a
         # global `kill_all()` (shutdown) reaps it too. Re-set on every (re)spawn.
         self._sup_handle: ChildHandle | None = None
@@ -231,6 +260,10 @@ class SubprocessBridge:
             raise SubprocessHostError(
                 f"Subprocess module {self.manifest.id!r} did not signal ready in 30s."
             ) from exc
+        if self._ready_error is not None:
+            error = self._ready_error
+            await self.stop()
+            raise SubprocessHostError(error)
 
         return SubprocessModule(
             self.manifest.id, self._handlers_meta, self, guidance_meta=self._guidance_meta
@@ -243,14 +276,11 @@ class SubprocessBridge:
         `cancel_active()` can `killpg` the whole subtree - the worker *and* any
         grandchildren it forked - without touching the API process group.
         """
-        worker_py = _worker_python(self.folder)
-        # Run the worker by file path (not `-m`) so we don't import the whole
-        # `mate.api` package chain under the module's venv Python - the worker
-        # only needs `mate.sdk`, which the installer installs into the venv.
-        worker_script = Path(__file__).with_name("subprocess_worker.py")
+        # The runtime's launch prefix (venv python + worker script, `java -jar
+        # module.jar`, ...) plus the two positional protocol args every worker
+        # receives: the socket to connect to and its module folder.
         cmd = [
-            str(worker_py),
-            str(worker_script),
+            *self._launch.argv,
             str(self._socket_path),
             str(self.folder),
         ]
@@ -258,7 +288,8 @@ class SubprocessBridge:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            env={**os.environ, **self._launch.env},
+            cwd=str(self._launch.cwd) if self._launch.cwd is not None else None,
             start_new_session=True,
         )
         # Register (replacing any prior handle from a respawn) so the platform
@@ -301,17 +332,86 @@ class SubprocessBridge:
         # Respawn off the request path so cancel returns immediately; new calls
         # block on `_ready_evt` (see `call_handler`) until the worker is back.
         self._ready_evt.clear()
-        self._respawn_task = asyncio.create_task(self._respawn())
+        self._schedule_respawn(deliberate=True)
 
-    async def _respawn(self) -> None:
-        if self._stopping:
+    def _schedule_respawn(self, *, deliberate: bool = False) -> None:
+        """Start the respawn loop unless one is already in flight.
+
+        `deliberate=True` (cancel kill) respawns immediately and doesn't count
+        toward the crash-loop attempt cap - frequent job cancels must never
+        push a healthy module into the failed state. `deliberate=False`
+        (unexpected exit) walks the backoff ladder.
+        """
+        if self._stopping or self._failed is not None:
             return
-        try:
-            await self._spawn_worker()
-            await asyncio.wait_for(self._ready_evt.wait(), timeout=30.0)
-            log.info("modules.subprocess.worker_restarted", module_id=self.manifest.id)
-        except Exception:
-            log.exception("modules.subprocess.worker_restart_failed", module_id=self.manifest.id)
+        if self._respawn_task is not None and not self._respawn_task.done():
+            # A respawn is already underway (e.g. `cancel_active` scheduled one
+            # and the killed connection's EOF arrived right after).
+            return
+        self._respawn_task = asyncio.create_task(self._respawn_loop(first_immediate=deliberate))
+
+    async def _respawn_loop(self, *, first_immediate: bool) -> None:
+        """Respawn the worker until it signals ready or the attempt cap trips.
+
+        Each failed start increments the attempt counter and backs off
+        exponentially (capped); a worker that stayed ready for
+        `_STABLE_UPTIME_RESET_SECONDS` resets the ladder, so isolated crashes
+        self-heal forever while a boot-crash loop lands in the terminal failed
+        state instead of burning CPU.
+        """
+        first = first_immediate
+        while not self._stopping and self._failed is None:
+            if not first:
+                now = asyncio.get_running_loop().time()
+                if (
+                    self._last_ready_monotonic is not None
+                    and now - self._last_ready_monotonic >= _STABLE_UPTIME_RESET_SECONDS
+                ):
+                    self._respawn_attempts = 0
+                if self._respawn_attempts >= self._respawn_max_attempts:
+                    self._enter_failed(
+                        f"Worker for {self.manifest.id!r} crash-looped "
+                        f"({self._respawn_attempts} consecutive failed starts) - fix the "
+                        "module and reload it."
+                    )
+                    return
+                delay = min(0.5 * (2**self._respawn_attempts), self._respawn_backoff_cap)
+                self._respawn_attempts += 1
+                if delay:
+                    await asyncio.sleep(delay)
+                if self._stopping:
+                    return
+            first = False
+            try:
+                await self._spawn_worker()
+                await asyncio.wait_for(self._ready_evt.wait(), timeout=30.0)
+            except Exception:
+                log.exception(
+                    "modules.subprocess.worker_restart_failed",
+                    module_id=self.manifest.id,
+                    attempt=self._respawn_attempts,
+                )
+                continue
+            if self._ready_error is not None:
+                # A protocol mismatch won't fix itself by respawning.
+                self._enter_failed(self._ready_error)
+                return
+            log.info(
+                "modules.subprocess.worker_restarted",
+                module_id=self.manifest.id,
+                attempt=self._respawn_attempts,
+            )
+            return
+
+    def _enter_failed(self, message: str) -> None:
+        """Terminal state: stop respawning, fail every call fast. Cleared only
+        by a module reload (which builds a fresh bridge)."""
+        self._failed = message
+        # Wake any `call_handler` blocked on the ready event so it fails now.
+        self._ready_evt.set()
+        log.error(
+            "modules.subprocess.worker_failed", module_id=self.manifest.id, error=message
+        )
 
     def _kill_worker_group(self) -> None:
         """SIGKILL the worker's whole process group. SIGKILL (not TERM) because
@@ -332,6 +432,11 @@ class SubprocessBridge:
         # Block any in-flight `cancel_active()` respawn from resurrecting the
         # worker mid-teardown.
         self._stopping = True
+        if self._respawn_task is not None and not self._respawn_task.done():
+            # The loop may be asleep in a backoff window - don't wait it out.
+            self._respawn_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._respawn_task
         if self._conn is not None:
             try:
                 await asyncio.wait_for(self._conn.send_request("shutdown", {}), timeout=2.0)
@@ -349,7 +454,10 @@ class SubprocessBridge:
         self._sup_handle = None
         if self._server is not None:
             self._server.close()
-            await self._server.wait_closed()
+            # Belt-and-braces bound: `_on_connect` closes its writer on EOF, but
+            # a wedged connection must never hang platform shutdown/reload.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._server.wait_closed(), timeout=5.0)
         shutil.rmtree(self._socket_dir, ignore_errors=True)
 
     async def _drain_pipe(self, stream, label: str) -> None:
@@ -390,22 +498,59 @@ class SubprocessBridge:
         await conn.run()
 
         # The connection ended - the worker exited (cancel kill, crash, or
-        # clean shutdown). Fail outstanding calls so awaiting handler tasks
-        # don't hang; if this was the live worker and we're not deliberately
-        # stopping, drop ready so the next call waits for a respawn.
+        # clean shutdown). Close our transport half too: Python 3.12's
+        # `Server.wait_closed()` waits for every connection to fully close, so
+        # a lingering half-open writer would hang `stop()` forever.
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+        # Fail outstanding calls so awaiting handler tasks don't hang; if this
+        # was the live worker and we're not deliberately stopping, drop ready
+        # and auto-respawn (a spontaneous crash used to strand the module
+        # until the next hard cancel).
         conn.fail_all_pending(SubprocessHostError(f"Worker for {self.manifest.id!r} exited."))
         if conn is self._conn and not self._stopping:
             self._ready_evt.clear()
+            self._schedule_respawn()
 
     async def _on_ready(self, params: dict[str, Any]) -> Any:
+        try:
+            protocol = int(params.get("protocol", 1))
+        except (TypeError, ValueError):
+            protocol = -1
+        if protocol > SUPPORTED_PROTOCOL_MAX or protocol < 1:
+            self._ready_error = (
+                f"Worker for {self.manifest.id!r} speaks wire protocol "
+                f"{params.get('protocol')!r}; this host supports <= {SUPPORTED_PROTOCOL_MAX}. "
+                "Upgrade the platform or build the module against an older SDK."
+            )
+            self._ready_evt.set()  # wake waiters; they check _ready_error
+            return False
+        self._ready_error = None
         self._handlers_meta = params.get("handlers", [])
         self._guidance_meta = params.get("guidance")
+        self._last_ready_monotonic = asyncio.get_running_loop().time()
         self._ready_evt.set()
         return True
 
+    async def ping(self, timeout: float = 5.0) -> bool:
+        """Round-trip liveness probe (protocol `ping`). False on any failure -
+        no worker, not ready, failed state, or no reply within *timeout*."""
+        if self._failed is not None or self._conn is None or not self._ready_evt.is_set():
+            return False
+        try:
+            result = await asyncio.wait_for(self._conn.send_request("ping", {}), timeout)
+        except Exception:
+            return False
+        return result is True
+
     async def call_handler(self, attr: str, ctx, args: tuple, kwargs: dict[str, Any]) -> Any:
-        # A cancel may be mid-respawn - wait for the fresh worker rather than
-        # dispatching onto a dead connection.
+        # Crash-looped workers fail fast with the diagnosis instead of burning
+        # 35s per call waiting for a respawn that will never come.
+        if self._failed is not None:
+            raise SubprocessHostError(self._failed)
+        # A cancel/crash may be mid-respawn - wait for the fresh worker rather
+        # than dispatching onto a dead connection.
         if not self._ready_evt.is_set():
             try:
                 await asyncio.wait_for(self._ready_evt.wait(), timeout=35.0)
@@ -413,6 +558,8 @@ class SubprocessBridge:
                 raise SubprocessHostError(
                     f"Worker for {self.manifest.id!r} is not ready (restart timed out)."
                 ) from exc
+        if self._failed is not None:
+            raise SubprocessHostError(self._failed)
         if self._conn is None:
             raise SubprocessHostError(f"Worker for {self.manifest.id!r} is not connected.")
         token = uuid.uuid4().hex
@@ -458,16 +605,3 @@ class SubprocessBridge:
         """Drop a job's soft-cancel flag (e.g. after a hard escalation) so a
         worker reused for a later call isn't poisoned by the stale flag."""
         self._cancelled_job_ids.discard(job_id)
-
-
-def _worker_python(folder: Path) -> Path:
-    """Path to the module's venv python (with platform sdk available via the
-    MetaPathFinder shim during in_process - for subprocess we use the venv
-    python directly since it's isolated)."""
-    candidates = [folder / ".venv" / "bin" / "python3", folder / ".venv" / "bin" / "python"]
-    for c in candidates:
-        if c.exists():
-            return c
-    raise SubprocessHostError(
-        f"No .venv/bin/python3 under {folder} - install must run before starting the subprocess."
-    )

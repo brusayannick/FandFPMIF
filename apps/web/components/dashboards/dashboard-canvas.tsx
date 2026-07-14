@@ -11,6 +11,7 @@ import {
   configDefaults,
   GRANULARITY,
   useCardCatalog,
+  useDatasetCatalog,
   type CanvasSettings,
   type DashboardCard as CatalogCard,
   type DashboardItem,
@@ -277,6 +278,25 @@ export function DashboardCanvas({
     return (it: DashboardItem) =>
       it.kind === "viz" ? undefined : map.get(`${it.module_id}:${it.widget_id}`);
   }, [catalog]);
+  // Each card's manifest description — surfaced by the card header's ⓘ tooltip.
+  // A placed item only stores its identity, so (like `schemaFor`) we resolve the
+  // description from the catalog: widget cards by `(module_id, widget_id)`, viz
+  // cards by their dataset ref `(module_id, dataset_id)`.
+  const { data: datasetCatalog } = useDatasetCatalog();
+  const descriptionFor = useMemo(() => {
+    const widgets = new Map<string, string | null>();
+    for (const c of catalog ?? []) widgets.set(`${c.module_id}:${c.widget_id}`, c.description);
+    const datasets = new Map<string, string | null>();
+    for (const d of datasetCatalog ?? [])
+      datasets.set(`${d.module_id}:${d.dataset_id}`, d.description);
+    return (it: DashboardItem): string | null => {
+      if (it.kind === "viz") {
+        const ref = it.dataset_ref;
+        return (ref ? datasets.get(`${ref.module_id}:${ref.dataset_id}`) : null) ?? null;
+      }
+      return widgets.get(`${it.module_id}:${it.widget_id}`) ?? null;
+    };
+  }, [catalog, datasetCatalog]);
   // Per-widget grid constraints from the catalog, keyed by `module:widget`:
   //  - `resizable`       whether the user may resize the card at all,
   //  - `minW`/`minH`     the resize floor for a resizable card (and the size an
@@ -819,6 +839,7 @@ export function DashboardCanvas({
                   logId={logId}
                   editing={editing}
                   schema={schemaFor(it)}
+                  description={descriptionFor(it)}
                   chrome={settings.chrome}
                   onUpdate={h?.onUpdate ?? (() => {})}
                   onRemove={h?.onRemove ?? (() => {})}

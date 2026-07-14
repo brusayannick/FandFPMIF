@@ -79,6 +79,12 @@ so the per-port CORS and `/etc/hosts` Keycloak hacks from the local setup are go
 - Docker Engine + Compose v2 (≥ 2.24 for the `!reset`/`!override` merge tags) on the VM.
 - The cert files present at `/etc/letsencrypt/live/pm-mate-vm.uni-muenster.de/{fullchain,privkey}.pem` and readable by the Docker daemon (root) – they are, by default. Certbot auto-renews them; Caddy re-reads on restart.
 
+> **Image size note:** the api image bakes a Temurin 21 JRE (~150 MB layer) for
+> JVM modules (`runtime: {kind: jvm}`, see `modules/PROTOCOL.md`). First pull
+> after upgrading grows by that layer once; nothing else changes. JVM module
+> jars (e.g. `modules/alpha_miner_java/dist/`) ship in the repo – no build
+> tooling needed on the VM.
+
 ## Files this deployment adds
 
 | File | Purpose |
@@ -261,6 +267,37 @@ On a shared box set `MAX_OFFLOADS_PER_USER` **below** `MODULE_PROCESS_POOL_SIZE`
 single user can hold every offload slot, and cap `DUCKDB_THREADS` / `DUCKDB_MEMORY_LIMIT`
 so one query can't monopolise cores or RAM. Leaving them unset keeps single-tenant
 behaviour (no per-user throttling).
+
+## 4b. Graph sidecar (Neo4j, optional)
+
+The `actor_performance` module (Event-Knowledge-Graph performance decomposition) needs a
+Cypher engine. It ships as an optional compose **profile** – the default stack is unchanged.
+
+```dotenv
+# .env – enable the profile and rotate the password
+COMPOSE_PROFILES=graph
+NEO4J_PASSWORD=<openssl rand -hex 16>
+# Heap for the graph engine. 2G default handles small/medium logs; the BPIC17
+# paper dataset (~1.2M events) wants ~10G – size against the VM's free RAM.
+NEO4J_HEAP=4G
+```
+
+Facts worth knowing:
+
+- Stock `neo4j:5.26-community` + APOC **core** (auto-installed via `NEO4J_PLUGINS`). No
+  APOC Extended, no custom image – the module imports via plain `LOAD CSV`.
+- bolt (7687) is **never public**: loopback-only in the base file (for host-mode
+  `make dev`), `!reset` to nothing in prod; the api container uses `bolt://neo4j:7687`.
+- Data handoff is the shared `./data/neo4j-import` directory (api writes prepared CSVs,
+  the server reads them as its import dir).
+- Community edition = one database. The module uses the graph as **transient per-run
+  scratch** (wipe → build → analyze → wipe) and serializes runs behind a module-global
+  lock, so tenant isolation holds: results land only in the per-user module cache.
+- Module connection defaults come from `MATE_NEO4J_URI` / `MATE_NEO4J_PASSWORD` /
+  `MATE_NEO4J_IMPORT_DIR` (already wired in the compose api service); per-user module
+  settings can override them.
+- Host-mode dev without the compose stack: see `modules/actor_performance/README.md`
+  for the single `docker run` command.
 
 ## 5. Bring it up
 

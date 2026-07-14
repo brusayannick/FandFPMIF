@@ -120,6 +120,13 @@ services:
       - ./modules:/app/modules
     ports: !reset []
 
+  # Graph sidecar: internal-only in prod. bolt is plain TCP – it must never be
+  # published; the api reaches it as bolt://neo4j:7687 on the compose network.
+  # (Only merged when the "graph" profile is enabled, same as the base file.)
+  neo4j:
+    profiles: ["graph"]
+    ports: !reset []
+
   keycloak:
     # Debian-based rebuild of the same Keycloak 26.0 – runs on CPUs without
     # x86-64-v2 (the official UBI9 image fatally aborts there). See

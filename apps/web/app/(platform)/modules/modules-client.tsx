@@ -33,11 +33,11 @@ const CATEGORY_ORDER = [
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
-  foundation: "Foundation",
-  attribute: "Attribute",
-  external_input: "External input",
-  advanced: "Advanced",
-  comparison: "Comparison",
+  foundation: "Process Discovery",
+  attribute: "Attribute Analysis",
+  external_input: "External Data",
+  advanced: "Process Intelligence",
+  comparison: "Process Comparison",
   other: "Other",
 };
 
@@ -142,9 +142,19 @@ function ModuleCard({ m }: { m: ModuleSummary }) {
                 </Badge>
               )}
             </div>
-            {m.author && (
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">by {m.author}</p>
-            )}
+            {(() => {
+              // Prefer the plural `authors` list (server folds the singular
+              // `author` in as the first entry); fall back to `author` for
+              // safety. Names joined on one truncated line.
+              const names = (
+                m.authors?.length ? m.authors.map((a) => a.name) : m.author ? [m.author] : []
+              ).slice(0, 20);
+              return names.length ? (
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  by {names.join(", ")}
+                </p>
+              ) : null;
+            })()}
           </div>
           <Switch
             checked={enabled}

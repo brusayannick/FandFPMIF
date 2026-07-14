@@ -38,7 +38,9 @@ _DEBOUNCE_S = 0.5
 # infinite loop (seen in the wild when a venv skip-check keeps failing and the
 # installer rewrites `.installed-hash` every pass). Match anywhere in the path,
 # not just depth 1: a submodule's `__pycache__` lives deeper than `parts[1]`.
-_IGNORED_DIR_PARTS = frozenset({".venv", ".dist", "node_modules", "__pycache__", ".git"})
+_IGNORED_DIR_PARTS = frozenset(
+    {".venv", ".dist", "node_modules", "__pycache__", ".git", ".gradle", "build"}
+)
 _IGNORED_NAMES = frozenset({".installed-hash", "pyproject.toml", ".DS_Store"})
 _IGNORED_SUFFIXES = frozenset({".pyc", ".pyo"})
 

@@ -56,6 +56,31 @@ def _ns_for(log_id: str) -> str:
     return f"cde-{log_id}"
 
 
+def _namespace_vector_count(index, namespace: str) -> int:
+    """Vectors upserted into ``namespace``, or -1 if the stat call fails.
+
+    Used to tell "uploaded but never re-indexed" (namespace absent / 0 vectors)
+    apart from "indexed, but nothing matched this drift". Returns -1 on any SDK
+    error so a transient stats failure never blocks a legitimate explain.
+    """
+    try:
+        stats = index.describe_index_stats()
+    except Exception:
+        return -1
+    namespaces = getattr(stats, "namespaces", None)
+    if namespaces is None and isinstance(stats, dict):
+        namespaces = stats.get("namespaces")
+    if not namespaces:
+        return 0
+    entry = namespaces.get(namespace)
+    if entry is None:
+        return 0
+    count = getattr(entry, "vector_count", None)
+    if count is None and isinstance(entry, dict):
+        count = entry.get("vector_count")
+    return int(count or 0)
+
+
 def _drift_key(drift: dict) -> str:
     ts = drift.get("start_timestamp", "")
     try:
@@ -320,6 +345,22 @@ class ConceptDriftExplainerModule(Module):
         clients = await load_module_ai_clients(cfg)
         index = get_pinecone_index(cfg)
         embedder = Embedder(clients.embeddings)
+
+        # Upload ≠ Re-index: `POST /documents` only writes bytes to disk; the
+        # vectors land only when `/ingest` runs. An empty namespace yields no
+        # retrieval hits and the pipeline degrades to a generic "no relevant
+        # documents" summary that reads as a lie to a user who *did* upload.
+        # Fail fast with the actual remedy instead.
+        if _namespace_vector_count(index, _ns_for(ctx.log_id)) == 0:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "No indexed documents for this log. Uploading a file does "
+                    "not embed it — click Re-index in Context documents after "
+                    "uploading (and check the indexing job didn't skip your "
+                    "files, e.g. a scanned PDF with no extractable text)."
+                ),
+            )
 
         await ctx.progress.update(0.05, "Loading event log")
         events_preview = await self._events_preview(ctx)

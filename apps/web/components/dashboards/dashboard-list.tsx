@@ -8,6 +8,7 @@ import Link from "next/link";
 import {
   Boxes,
   LayoutDashboard,
+  LayoutTemplate,
   Loader2,
   Plus,
   Share2,
@@ -53,10 +54,12 @@ import {
   useImportDashboard,
   type CanvasSettings,
   type DashboardItem,
+  type DashboardTemplate,
   type LogModel,
 } from "@/lib/dashboard-queries";
 import { useNoShareTargets, useSharedWithMe } from "@/lib/sharing-queries";
 import { NoTeamShareGate, ShareDialog } from "@/components/dashboards/share-dialog";
+import { TemplatePicker } from "@/components/dashboards/template-picker";
 
 const MODEL_OPTIONS: {
   value: LogModel;
@@ -96,6 +99,8 @@ export function DashboardList() {
   const [model, setModel] = useState<LogModel>("case_centric");
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [templatePendingId, setTemplatePendingId] = useState<string | null>(null);
 
   const onCreateOpenChange = (open: boolean) => {
     setCreateOpen(open);
@@ -114,6 +119,26 @@ export function DashboardList() {
       router.push(`/dashboards/${dash.id}`);
     } catch {
       toast.error("Could not create dashboard");
+    }
+  };
+
+  // Instantiate a curated starter board: the server seeds the cards from the
+  // template id, then we navigate into it exactly like a blank create.
+  const onPickTemplate = async (template: DashboardTemplate) => {
+    if (templatePendingId) return;
+    setTemplatePendingId(template.id);
+    try {
+      const dash = await create.mutateAsync({
+        name: template.name,
+        log_model: template.log_model,
+        template_id: template.id,
+      });
+      setTemplatesOpen(false);
+      router.push(`/dashboards/${dash.id}`);
+    } catch {
+      toast.error("Could not create dashboard");
+    } finally {
+      setTemplatePendingId(null);
     }
   };
 
@@ -172,6 +197,10 @@ export function DashboardList() {
             <Upload className="mr-1.5 h-4 w-4" />
             Import
           </Button>
+          <Button variant="outline" onClick={() => setTemplatesOpen(true)}>
+            <LayoutTemplate className="mr-1.5 h-4 w-4" />
+            Start from template
+          </Button>
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="mr-1.5 h-4 w-4" />
             New dashboard
@@ -194,6 +223,12 @@ export function DashboardList() {
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="mr-1.5 h-4 w-4" />
               New dashboard
+            </Button>
+          }
+          secondaryAction={
+            <Button variant="outline" onClick={() => setTemplatesOpen(true)}>
+              <LayoutTemplate className="mr-1.5 h-4 w-4" />
+              Start from template
             </Button>
           }
         />
@@ -321,6 +356,14 @@ export function DashboardList() {
           onOpenChange={(o) => !o && setShareTarget(null)}
         />
       )}
+
+      {/* Template picker */}
+      <TemplatePicker
+        open={templatesOpen}
+        onOpenChange={setTemplatesOpen}
+        onSelect={onPickTemplate}
+        pendingId={templatePendingId}
+      />
 
       {/* Create dialog */}
       <Dialog open={createOpen} onOpenChange={onCreateOpenChange}>

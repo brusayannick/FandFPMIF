@@ -53,10 +53,60 @@ export function clearAmbientHeaders(...keys: string[]): void {
   else for (const k of keys) _ambientHeaders.delete(k);
 }
 
+// ── Log-scoped module-panel filter (processes/[logId] module views) ─────────
+// A per-log ephemeral event filter (column filters + time range) set while
+// viewing ONE log's module panels. Unlike the dashboard's ambient header above
+// (a board-wide push onto every widget request), this is scoped to a single log
+// and applies ONLY to that log's module data requests. The active log + its
+// pre-encoded header live here so the merge below can read them lazily at fetch
+// time; the provider (`components/processes/log-filter.tsx`) sets them on a
+// filter commit and clears them on unmount. `header` is already base64-encoded
+// by the SAME serializer the dashboard uses (`encodeFilterHeader`) — this module
+// stays serializer-free and never imports from the component layer.
+const LOG_EVENT_FILTER_HEADER = "X-FF-Event-Filter"; // mirrors widget-filter's EVENT_FILTER_HEADER
+let _logScopedFilter: { logId: string; header: string } | null = null;
+
+/** Set (or clear) the active log's module-panel filter. A null `header` — or a
+ * null `logId` — clears it, restoring the byte-for-byte-unchanged no-filter
+ * path in `applyAmbientHeaders`. Idempotent; safe to call from an effect and
+ * its cleanup. */
+export function setLogScopedFilter(logId: string | null, header: string | null): void {
+  _logScopedFilter = logId && header ? { logId, header } : null;
+}
+
+// Module data requests are `/api/v1/modules/{id}/…?log_id={logId}` — the loader
+// declares `log_id` as the route's query field, so it's always a query param.
+// Return that log id ONLY for a module route (else null), so the filter can
+// never ride onto a non-module request.
+const MODULE_ROUTE_RE = /^\/api\/v1\/modules\//;
+function moduleRequestLogId(path: string): string | null {
+  if (!MODULE_ROUTE_RE.test(path)) return null;
+  const q = path.indexOf("?");
+  if (q === -1) return null;
+  return new URLSearchParams(path.slice(q + 1)).get("log_id");
+}
+
 /** Merge ambient headers in, without clobbering anything the caller set. */
-function applyAmbientHeaders(headers: Headers): void {
+function applyAmbientHeaders(headers: Headers, path?: string): void {
   for (const [k, v] of _ambientHeaders) {
     if (!headers.has(k)) headers.set(k, v);
+  }
+  // Log-scoped module-panel filter — GATED & ADDITIVE. Attach the active log's
+  // `X-FF-Event-Filter` ONLY when ALL hold: (a) a filter is set
+  // (`_logScopedFilter` non-null), (b) this is a module data request for THAT
+  // SAME log (`moduleRequestLogId(path) === lf.logId`), and (c) no event-filter
+  // header is already present — a dashboard's ambient push above, or a
+  // per-widget caller header — which must always win. When no log filter is set
+  // (`_logScopedFilter === null`) this whole block is skipped, so the merge
+  // above is byte-for-byte unchanged from the pre-feature behavior.
+  const lf = _logScopedFilter;
+  if (
+    lf &&
+    path &&
+    !headers.has(LOG_EVENT_FILTER_HEADER) &&
+    moduleRequestLogId(path) === lf.logId
+  ) {
+    headers.set(LOG_EVENT_FILTER_HEADER, lf.header);
   }
 }
 
@@ -298,7 +348,7 @@ async function attachAuth(headers: Headers): Promise<void> {
  * mutation is safe: the API's auth dependency runs before any route handler,
  * so an auth-401 guarantees the handler never executed. */
 async function authedFetch(path: string, init: RequestInit, headers: Headers): Promise<Response> {
-  applyAmbientHeaders(headers);
+  applyAmbientHeaders(headers, path);
   await attachAuth(headers);
   const doFetch = () => fetch(`${apiBase()}${path}`, { ...init, headers });
   const res = await doFetch();

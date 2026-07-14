@@ -1,10 +1,19 @@
 "use client";
 
-import { useMemo } from "react";
-import { MarkerType, Position, type Edge, type Node } from "@xyflow/react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  MarkerType,
+  Position,
+  useEdgesState,
+  useNodesState,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
 
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
+import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import { formatNumber } from "@/lib/format";
+import { useVizSettings } from "@/lib/stores/visualization-settings";
 
 import { layeredPositions } from "./DiffDfgCanvas";
 import type { DfgDiffData, DiffStatus } from "./types";
@@ -22,7 +31,8 @@ const SIDE_COLOR: Record<"a" | "b", string> = {
  *  keep the activities/edges present on that side and size edges by frequency.
  *  Two of these sit side by side so A and B can be read independently. */
 export function SideBySideDfg({ data, side }: { data: DfgDiffData; side: "a" | "b" }) {
-  const { nodes, edges } = useMemo(() => {
+  const general = useVizSettings((s) => s.general);
+  const { nodes: laidNodes, edges: laidEdges } = useMemo(() => {
     // An element is on side A unless it's comparison-only, and vice versa.
     const onSide = (s: DiffStatus) => (side === "a" ? s !== "only_b" : s !== "only_a");
     const freqOf = (n: { freq_a: number; freq_b: number }) =>
@@ -88,6 +98,17 @@ export function SideBySideDfg({ data, side }: { data: DfgDiffData; side: "a" | "
     return { nodes, edges };
   }, [data, side]);
 
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  // Bumped by the toolbar "Reset layout" button → re-seeds from the computed
+  // layered positions, discarding any in-session node drags.
+  const [resetNonce, setResetNonce] = useState(0);
+  useEffect(() => {
+    setNodes(laidNodes);
+    setEdges(laidEdges);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [laidNodes, laidEdges, resetNonce]);
+
   return (
     // The pane needs a real, non-zero height for React Flow to measure and fit
     // against. `h-[520px]` is an *arbitrary* Tailwind value used only inside a
@@ -103,7 +124,12 @@ export function SideBySideDfg({ data, side }: { data: DfgDiffData; side: "a" | "
         nodes={nodes}
         edges={edges}
         className="h-full w-full overflow-hidden rounded-xl border bg-card"
-        fitViewKey={`${data.other_log_id}-${side}-${nodes.length}`}
+        fitViewKey={`${data.other_log_id}-${side}-${resetNonce}-${nodes.length}`}
+        miniMap={general.showMinimap}
+        showGrid={general.showGrid}
+        toolbarSlot={<CanvasResetButton onReset={() => setResetNonce((n) => n + 1)} />}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
       />
     </div>
   );

@@ -154,6 +154,18 @@ export interface JobDetail {
   finished_at: string | null;
 }
 
+/** One credited author (manifest `authors[]` / singular `author`). */
+export interface ManifestAuthor {
+  name: string;
+  url: string | null;
+}
+
+/** One cited paper (manifest `papers[]` / singular `paper_url`). */
+export interface ManifestPaper {
+  title: string | null;
+  url: string;
+}
+
 export interface ModuleSummary {
   id: string;
   name: string;
@@ -173,6 +185,12 @@ export interface ModuleSummary {
   author_url: string | null;
   /** Link to the scientific paper the module implements (DOI URL preferred). */
   paper_url: string | null;
+  /** All credited authors (max 20). The singular `author`/`author_url` is folded
+   *  in as the first entry server-side, so this is the canonical list to render. */
+  authors: ManifestAuthor[];
+  /** All cited papers (max 20). The singular `paper_url` is folded in as the
+   *  first entry server-side. */
+  papers: ManifestPaper[];
   license: string | null;
   provides: string[];
   consumes: string[];

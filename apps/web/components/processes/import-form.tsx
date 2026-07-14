@@ -262,6 +262,7 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
   const defaultTsFormat = useUi((s) => s.csvTimestampFormat);
 
   const [file, setFile] = useState<File | null>(null);
+  const [sampleLoading, setSampleLoading] = useState(false);
   const [name, setName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [delimiter, setDelimiter] = useState<string>(defaultDelimiter);
@@ -487,9 +488,56 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
     }
   };
 
+  // One-click "try a sample log": fetch the bundled sample XES from the app's
+  // static assets, wrap it in a File, and feed it through the exact same import
+  // mutation a normal upload uses (an .xes needs no column mapping).
+  const loadSample = async () => {
+    if (sampleLoading || importer.isPending) return;
+    setSampleLoading(true);
+    track(EV.PROCESS_IMPORT_STARTED, { source: "sample", format: "xes" });
+    try {
+      const res = await fetch("/samples/sample-log.xes");
+      if (!res.ok) throw new Error("Sample log is unavailable");
+      const blob = await res.blob();
+      const sampleFile = new File([blob], "sample-log.xes", { type: "application/xml" });
+      const resp = await importer.mutateAsync({ file: sampleFile, name: "Sample event log" });
+      track(EV.PROCESS_IMPORT_FINISHED, { source: "sample", format: "xes", ok: true });
+      toast.success("Import queued");
+      if (onSuccess) {
+        onSuccess(resp.log_id);
+      } else {
+        router.push(`/processes?focus=${resp.log_id}`);
+      }
+    } catch (err: unknown) {
+      track(EV.PROCESS_IMPORT_FINISHED, { source: "sample", format: "xes", ok: false });
+      toastError(`Import failed: ${(err as Error).message}`);
+    } finally {
+      setSampleLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <DropZone file={file} onDrop={onDrop} onClear={() => setFile(null)} />
+
+      {!file && (
+        <div className="flex items-center justify-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={loadSample}
+            disabled={sampleLoading || importer.isPending}
+            className="cursor-pointer gap-1.5 text-xs text-muted-foreground"
+          >
+            {sampleLoading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            Just exploring? Try a sample log
+          </Button>
+        </div>
+      )}
 
       {file && (
         <Card variant="glass">

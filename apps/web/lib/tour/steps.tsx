@@ -19,15 +19,18 @@ export interface TourStep {
 
 /**
  * Build the step list, adapting to whether the user already has a ready event
- * log. The tour deliberately does NOT re-teach the import form — the setup
- * wizard owns the hands-on upload (it embeds the very same `ImportForm`); the
- * tour only points at where importing lives in the real UI, so the two
- * first-run experiences complement instead of repeating each other. The
- * discovery leg — the core of the tour — only runs when there's a `demoLogId`
- * to spotlight live; otherwise the closing step explains that discovery
- * unlocks once a log finishes importing. This keeps the "live, end-to-end"
- * tour robust for brand-new users (who have no ready data yet) without faking
- * a process map.
+ * log. The tour stays HIGH-LEVEL on purpose: it walks the platform's shape and
+ * the core loop — import → open a process → run modules — and never drills into
+ * a single module's internals (each module's own panel does that).
+ *
+ * It deliberately does NOT re-teach the import form either — the setup wizard
+ * owns the hands-on upload (it embeds the very same `ImportForm`); the tour only
+ * points at where importing lives in the real UI, so the two first-run
+ * experiences complement instead of repeating each other. The "open a process →
+ * modules" leg only runs when there's a `demoLogId` to spotlight live; otherwise
+ * the closing step explains that modules unlock once a log finishes importing.
+ * This keeps the walkthrough robust for brand-new users (who have no ready data
+ * yet) without faking a process map.
  *
  * `auto` = launched straight off the setup wizard's Finish: the opener
  * acknowledges setup instead of greeting the user a second time.
@@ -42,13 +45,13 @@ export function buildTourSteps(
           id: "welcome",
           route: "/processes",
           title: "Setup complete — now the live tour",
-          body: "Two minutes in the real UI: where your data lives and how process discovery — the platform's core — works. Skip anytime; replay later from Settings → About.",
+          body: "Two minutes in the real UI: where your data lives and how the core loop — import, open, analyse — fits together. Skip anytime; replay later from Settings → About.",
         }
       : {
           id: "welcome",
           route: "/processes",
           title: "Welcome to Mate",
-          body: "Mate turns raw event logs into living process maps. Two minutes on the platform's core: process discovery.",
+          body: "Mate turns raw event logs into living process maps. Two minutes on the essentials: import a log, open it, and let its modules analyse it.",
         },
     {
       id: "nav-processes",
@@ -91,42 +94,18 @@ export function buildTourSteps(
         route: `/processes/${demoLogId}`,
         selector: '[data-tour="module-discovery"]',
         placement: "bottom",
-        title: "Discovery is the heart",
-        body: "Process discovery reconstructs the real process model directly from the order of events — nothing drawn by hand.",
-      },
-      {
-        id: "discovery-canvas",
-        route: `/processes/${demoLogId}/modules/discovery`,
-        selector: '[data-tour="discovery-canvas"]',
-        placement: "top",
-        title: "Your discovered process",
-        body: "This map is mined from the data: nodes are activities, edges are the paths your cases actually took.",
-      },
-      {
-        id: "discovery-views",
-        route: `/processes/${demoLogId}/modules/discovery`,
-        selector: '[data-tour="discovery-views"]',
-        placement: "bottom",
-        title: "One process, many lenses",
-        body: "Switch between Direct-Follows Graph, BPMN, Petri net, process tree and more — same data, different formalism.",
-      },
-      {
-        id: "discovery-filters",
-        route: `/processes/${demoLogId}/modules/discovery`,
-        selector: '[data-tour="discovery-filters"]',
-        placement: "top",
-        title: "Cut the noise",
-        body: "Real logs are messy. Drag Activities and Connections to keep only the most frequent behaviour — the essence of discovery.",
+        title: "Start with Discovery",
+        body: "Discovery mines a process map straight from your events — the usual first stop. Open any card to run that analysis on this log.",
       },
     );
   }
 
   steps.push({
     id: "done",
-    title: demoLogId ? "You've seen the core" : "Import a log to start mining",
+    title: demoLogId ? "That's the core loop" : "Import a log to start",
     body: demoLogId
-      ? "That's process discovery. Every other module builds on this map. Replay this tour anytime from Settings → About."
-      : "Once your first log finishes importing, open it and the Discovery panel draws your process map. Replay this tour from Settings → About.",
+      ? "Import a log, open it, and each module analyses it in place — start with the Discovery map, then layer on performance, conformance and more. Replay this tour anytime from Settings → About."
+      : "Once your first log finishes importing, open it and its modules light up — starting with the Discovery map. Replay this tour anytime from Settings → About.",
   });
 
   return steps;

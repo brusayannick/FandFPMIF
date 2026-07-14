@@ -347,11 +347,37 @@ export function useDatasetCatalog() {
 export function useCreateDashboard() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { name: string; description?: string | null; log_model: LogModel }) =>
-      api<DashboardDetail>("/api/v1/dashboards", { method: "POST", json: input }),
+    mutationFn: (input: {
+      name: string;
+      description?: string | null;
+      log_model: LogModel;
+      /** When set, the server seeds the board from a curated starter template
+       * (its items/settings/model win); the model above is then ignored. */
+      template_id?: string;
+    }) => api<DashboardDetail>("/api/v1/dashboards", { method: "POST", json: input }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: dashboardKeys.all() });
     },
+  });
+}
+
+/** A curated starter board offered by the "start from template" picker. Mirrors
+ * `DashboardTemplate` in `apps/api/.../schemas/dashboards.py`. Typed locally
+ * until `make codegen` regenerates `lib/api-types.ts` (API must be on :8000). */
+export interface DashboardTemplate {
+  id: string;
+  name: string;
+  description: string;
+  log_model: LogModel;
+  card_count: number;
+}
+
+/** The curated starter boards. Static + global, so cache them generously. */
+export function useDashboardTemplates() {
+  return useQuery({
+    queryKey: ["dashboard-templates"],
+    queryFn: () => api<DashboardTemplate[]>("/api/v1/dashboards/templates"),
+    staleTime: 5 * 60_000,
   });
 }
 

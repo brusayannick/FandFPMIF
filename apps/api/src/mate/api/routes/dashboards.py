@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mate.api.auth import CurrentUserDep, get_owned_event_log
+from mate.api.dashboard_templates import get_template, list_templates
 from mate.api.db.models import Dashboard, DashboardShare, Team, User
 from mate.api.db.session import SessionDep
 from mate.api.schemas.dashboards import (
@@ -34,6 +35,7 @@ from mate.api.schemas.dashboards import (
     DashboardImport,
     DashboardItem,
     DashboardSummary,
+    DashboardTemplate,
     DashboardUpdate,
 )
 from mate.api.schemas.sharing import DashboardShareOut, ShareCreate
@@ -173,21 +175,50 @@ async def list_dashboards(session: SessionDep, user: CurrentUserDep) -> list[Das
 async def create_dashboard(
     payload: DashboardCreate, session: SessionDep, user: CurrentUserDep
 ) -> DashboardDetail:
-    await validate_dashboard_log(session, payload.event_log_id, user.id, payload.log_model)
+    # A ``template_id`` seeds the board from a curated starter template - its
+    # items, settings and data model win over the (empty) request body. Absent
+    # it, this is the classic blank-board create.
+    template = get_template(payload.template_id) if payload.template_id else None
+    if payload.template_id and template is None:
+        raise HTTPException(status_code=404, detail="Template not found.")
+    log_model = template.log_model if template else payload.log_model
+    items = template.items if template else payload.items
+    settings = template.settings if template else payload.settings
+    await validate_dashboard_log(session, payload.event_log_id, user.id, log_model)
     row = Dashboard(
         id=uuid7_str(),
         user_id=user.id,
         name=payload.name,
         description=payload.description,
         event_log_id=payload.event_log_id,
-        log_model=payload.log_model,
-        layout_json=layout_blob(payload.items, payload.settings),
+        log_model=log_model,
+        layout_json=layout_blob(items, settings),
         created_at=_utcnow(),
     )
     session.add(row)
     await session.commit()
-    log.info("dashboard.created", dashboard_id=row.id)
+    log.info("dashboard.created", dashboard_id=row.id, template=payload.template_id)
     return dashboard_detail(row)
+
+
+@router.get("/templates", response_model=list[DashboardTemplate])
+async def list_dashboard_templates(user: CurrentUserDep) -> list[DashboardTemplate]:
+    """Curated starter boards for the "start from template" picker.
+
+    Static + global (not per-user); the actual cards are seeded by
+    ``POST /dashboards`` with ``template_id``. Declared before ``/{dashboard_id}``
+    so the literal path wins over the id parameter.
+    """
+    return [
+        DashboardTemplate(
+            id=t.id,
+            name=t.name,
+            description=t.description,
+            log_model=t.log_model,
+            card_count=len(t.items),
+        )
+        for t in list_templates()
+    ]
 
 
 @router.get("/{dashboard_id}", response_model=DashboardDetail)

@@ -1,10 +1,19 @@
 "use client";
 
-import { useMemo } from "react";
-import { MarkerType, Position, type Edge, type Node } from "@xyflow/react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  MarkerType,
+  Position,
+  useEdgesState,
+  useNodesState,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
 
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
+import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import { formatNumber } from "@/lib/format";
+import { useVizSettings } from "@/lib/stores/visualization-settings";
 
 import type { DfgDiffData, DiffStatus } from "./types";
 
@@ -96,7 +105,8 @@ export function DiffDfgCanvas({
   data: DfgDiffData;
   mode?: DfgColorMode;
 }) {
-  const { nodes, edges } = useMemo(() => {
+  const general = useVizSettings((s) => s.general);
+  const { nodes: laidNodes, edges: laidEdges } = useMemo(() => {
     const positions = layeredPositions(
       data.activities.map((a) => a.id),
       data.edges,
@@ -169,11 +179,27 @@ export function DiffDfgCanvas({
     return { nodes, edges };
   }, [data, mode]);
 
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  // Bumped by the toolbar "Reset layout" button → re-seeds from the computed
+  // layered positions, discarding any in-session node drags.
+  const [resetNonce, setResetNonce] = useState(0);
+  useEffect(() => {
+    setNodes(laidNodes);
+    setEdges(laidEdges);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [laidNodes, laidEdges, resetNonce]);
+
   return (
     <CanvasShell
       nodes={nodes}
       edges={edges}
-      fitViewKey={`${data.baseline_log_id}-${data.other_log_id}-${mode}-${data.activities.length}`}
+      fitViewKey={`${data.baseline_log_id}-${data.other_log_id}-${mode}-${resetNonce}-${data.activities.length}`}
+      miniMap={general.showMinimap}
+      showGrid={general.showGrid}
+      toolbarSlot={<CanvasResetButton onReset={() => setResetNonce((n) => n + 1)} />}
+      onNodesChange={onNodesChange}
+      onEdgesChange={onEdgesChange}
     />
   );
 }

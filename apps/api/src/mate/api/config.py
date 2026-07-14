@@ -62,6 +62,20 @@ class Settings(BaseSettings):
     # promptly, but non-zero so a cooperative worker gets a chance to unwind.
     subprocess_cancel_grace_seconds: float = Field(default=3.0, ge=0, le=60)
 
+    # Java launcher used by the JVM module runtime (modules/PROTOCOL.md). Bare
+    # name resolves on PATH; the Docker image bakes a Temurin JRE onto PATH, dev
+    # hosts need their own JRE only when actually running Java modules.
+    java_bin: str = Field(default="java")
+
+    # Crash-respawn policy for worker-bridged modules (modules/PROTOCOL.md §8).
+    # A worker that exits unexpectedly is respawned with exponential backoff
+    # (0.5s · 2^attempt, capped); after this many consecutive failed starts the
+    # bridge enters a terminal failed state (calls error immediately) until the
+    # module is fixed/reloaded. The counter resets once a worker stays up 60s,
+    # so a rare OOM kill self-heals while a boot-crash loop can't burn CPU.
+    subprocess_respawn_max_attempts: int = Field(default=5, ge=1, le=50)
+    subprocess_respawn_backoff_cap_seconds: float = Field(default=30.0, ge=0.5, le=300)
+
     # Wall-clock backstop for a single job execution. A handler still running
     # after this many seconds is force-stopped (cooperative token + the subprocess
     # two-phase kill) and recorded as a timeout failure, so a wedged job can never

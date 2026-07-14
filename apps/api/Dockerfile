@@ -16,6 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # uv binary
 COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /usr/local/bin/uv
 
+# Temurin JRE – runs JVM modules (`runtime: {kind: jvm}`, see modules/PROTOCOL.md).
+# A full JRE rather than a jlink-minimised runtime: uploaded module jars are
+# arbitrary code and may need any JDK module (java.sql, jdk.unsupported, ...).
+# jammy binaries run fine on bookworm (glibc 2.35 < 2.36, forward-compatible).
+COPY --from=eclipse-temurin:21-jre-jammy /opt/java/openjdk /opt/java/openjdk
+ENV JAVA_HOME=/opt/java/openjdk \
+    PATH="/opt/java/openjdk/bin:${PATH}"
+
 WORKDIR /app
 
 # Workspace metadata first – better layer caching for dependency resolution.

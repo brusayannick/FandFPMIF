@@ -5,7 +5,9 @@ import { MarkerType, useEdgesState, useNodesState, type Edge, type Node } from "
 
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
 import { CanvasLayoutSkeleton } from "@/components/visualizations/canvases/shared/canvas-skeleton";
+import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import { formatNumber } from "@/lib/format";
+import { useVizSettings } from "@/lib/stores/visualization-settings";
 
 import { elkLayout } from "../layout/layered";
 import { ObjectTypeNode, type ObjectTypeNodeData } from "../nodes/object-type-node";
@@ -18,9 +20,13 @@ const nodeTypes = { objectType: ObjectTypeNode } as const;
  *  Directed for descendants / inheritance; undirected (no arrowheads) for
  *  interaction / co-birth / co-death. */
 export function ObjectGraphCanvas({ data }: { data: ObjectGraphData }) {
+  const general = useVizSettings((s) => s.general);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [laid, setLaid] = useState(false);
+  // Bumped by the toolbar "Reset layout" button → re-runs the ELK layout,
+  // discarding any in-session node drags.
+  const [resetNonce, setResetNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,7 +76,7 @@ export function ObjectGraphCanvas({ data }: { data: ObjectGraphData }) {
     return () => {
       cancelled = true;
     };
-  }, [data, setNodes, setEdges]);
+  }, [data, resetNonce, setNodes, setEdges]);
 
   if (!laid) return <CanvasLayoutSkeleton />;
   return (
@@ -78,7 +84,10 @@ export function ObjectGraphCanvas({ data }: { data: ObjectGraphData }) {
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
-      fitViewKey={`object-graph-${data.graph_type}-${nodes.length}`}
+      fitViewKey={`object-graph-${data.graph_type}-${resetNonce}-${nodes.length}`}
+      miniMap={general.showMinimap}
+      showGrid={general.showGrid}
+      toolbarSlot={<CanvasResetButton onReset={() => setResetNonce((n) => n + 1)} />}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
     />

@@ -12,6 +12,7 @@ import {
 
 import { formatDuration, formatNumber } from "@/lib/format";
 
+import { runAfterPaint } from "../after-paint";
 import { celonisFlowLayout } from "../layout/celonis-flow";
 import { ActivityNode, type ActivityNodeData } from "../nodes/activity-node";
 import { TerminalNode, type TerminalNodeData } from "../nodes/terminal-node";
@@ -110,6 +111,10 @@ export function DfgCanvas({
   const nodesRef = useRef<Node[]>([]);
   nodesRef.current = nodes;
   const animRef = useRef(0);
+  // First layout is deferred past first paint (skeleton) so the synchronous
+  // Celonis Sugiyama doesn't block it; re-layouts (mode/filter switches) run
+  // inline so the existing morph animation keeps its same-tick timing.
+  const didFirstLayout = useRef(false);
   const lastModeRef = useRef<typeof dfg.layoutMode | null>(null);
   // Committed (post-layout, post-merge) positions — baseline for deciding
   // whether a drag actually moved a node (see onNodeDragStop).
@@ -117,6 +122,7 @@ export function DfgCanvas({
 
   useEffect(() => {
     let cancelled = false;
+    let cancelAfterPaint: (() => void) | undefined;
     const maxFreq = data.activities.reduce((m, a) => Math.max(m, a.frequency), 1);
     const maxEdgeFreq = data.edges.reduce((m, e) => Math.max(m, e.frequency), 1);
 
@@ -382,29 +388,38 @@ export function DfgCanvas({
       );
       const edgeFreqMap = new Map<string, number>();
       for (const e of visibleEdges) edgeFreqMap.set(`${e.source} ${e.target}`, e.frequency);
-      apply(
-        celonisFlowLayout(celonisNodes, celonisEdges, {
-          nodeSize,
-          terminalSize: termSize,
-          edgeFrequency: (s, t) => edgeFreqMap.get(`${s} ${t}`) ?? 0,
-          frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
-          // Layout anchoring uses only SIGNIFICANT starts (≥10% of the max
-          // start count): a marginal start like SEPSIS' Leucocytes (18 of
-          // 1050 cases) must not pin a mid-process activity to the top row.
-          // The Process-start terminal still connects to ALL visible starts.
-          startActivityIds: significantStarts,
-          endActivityIds: endSet,
-          rankByNode: (id) => positionByActivity.get(id),
-          startTerminalId: START_ID,
-          endTerminalId: END_ID,
-          routing: "celonis",
-          classic: true,
-        }) as { nodes: Node<ActivityNodeData>[]; edges: Edge[] },
-      );
+      const runLayout = () => {
+        didFirstLayout.current = true;
+        apply(
+          celonisFlowLayout(celonisNodes, celonisEdges, {
+            nodeSize,
+            terminalSize: termSize,
+            edgeFrequency: (s, t) => edgeFreqMap.get(`${s} ${t}`) ?? 0,
+            frequencyByNode: (id) => frequencyByActivity.get(id) ?? 0,
+            // Layout anchoring uses only SIGNIFICANT starts (≥10% of the max
+            // start count): a marginal start like SEPSIS' Leucocytes (18 of
+            // 1050 cases) must not pin a mid-process activity to the top row.
+            // The Process-start terminal still connects to ALL visible starts.
+            startActivityIds: significantStarts,
+            endActivityIds: endSet,
+            rankByNode: (id) => positionByActivity.get(id),
+            startTerminalId: START_ID,
+            endTerminalId: END_ID,
+            routing: "celonis",
+            classic: true,
+          }) as { nodes: Node<ActivityNodeData>[]; edges: Edge[] },
+        );
+      };
+      // First open: yield so the CanvasLayoutSkeleton paints before the heavy
+      // synchronous Sugiyama blocks the thread. Re-layouts run inline so the
+      // node-position morph keeps its existing same-tick start.
+      if (didFirstLayout.current) runLayout();
+      else cancelAfterPaint = runAfterPaint(runLayout);
     }
 
     return () => {
       cancelled = true;
+      cancelAfterPaint?.();
       window.cancelAnimationFrame(animRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

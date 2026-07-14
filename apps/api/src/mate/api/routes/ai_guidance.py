@@ -19,8 +19,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import shutil
 import time
+from collections import Counter
 from collections.abc import AsyncGenerator
 from typing import Any, Literal
 
@@ -390,9 +392,17 @@ async def process_guidance(
 _COLUMN_MAPPING_SYSTEM = (
     "You map raw CSV column headers to a canonical process-mining schema. "
     "Canonical fields: case_id, activity, timestamp, end_timestamp, resource, "
-    "cost. Return ONLY a JSON object with the canonical field names as keys "
-    "and the matching header strings as values. Omit fields you can't match "
-    "confidently. Do not invent values not present in the headers list."
+    "cost. Besides the header names you receive a privacy-preserving profile "
+    "for every column - never the raw cell values. Each profile carries an "
+    "inferred value type, the null fraction, the distinct-value count, "
+    "value-length stats, and a few masked format examples in which digits show "
+    "as 0 and letters as X (uppercase) or x (lowercase) while separators are "
+    "kept, so an ISO timestamp reads as '0000-00-00X00:00:00', a numeric id as "
+    "'000000', and a free-text label as 'Xxxxx xxxx'. Use the header names "
+    "together with these profiles to decide the mapping. Return ONLY a JSON "
+    "object with the canonical field names as keys and the matching header "
+    "strings as values. Omit fields you can't match confidently. Do not invent "
+    "values not present in the headers list."
 )
 
 
@@ -410,6 +420,102 @@ _COLUMN_MAPPING_SCHEMA = {
 }
 
 
+# Column profiling (P3 privacy): the model is handed the *shape* of each column
+# - inferred type, cardinality, length + masked format examples - and never a
+# single raw cell value, so import mapping stays end-to-end private.
+
+_PROFILE_ROW_CAP = 200  # rows scanned locally for stats; they never leave the box
+_MAX_FORMAT_EXAMPLES = 3
+_MAX_PATTERN_LEN = 40
+
+_INT_RE = re.compile(r"^[+-]?\d+$")
+_DECIMAL_RE = re.compile(r"^[+-]?\d*[.,]\d+([eE][+-]?\d+)?$|^[+-]?\d+[eE][+-]?\d+$")
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+_ISO_DT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+_DATE_RE = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$|^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$")
+_BOOL_VALUES = frozenset({"true", "false", "yes", "no", "y", "n", "t", "f"})
+
+
+def _infer_cell_type(value: str) -> str:
+    """Classify one cell into a coarse semantic type (the value is not kept)."""
+    v = value.strip()
+    if not v:
+        return "empty"
+    if _ISO_DT_RE.match(v):
+        return "iso_datetime"
+    if _DATE_RE.match(v):
+        return "date"
+    if _UUID_RE.match(v):
+        return "uuid"
+    if _INT_RE.match(v):
+        return "integer"
+    if _DECIMAL_RE.match(v):
+        return "decimal"
+    if v.lower() in _BOOL_VALUES:
+        return "boolean"
+    return "text"
+
+
+def _mask_cell(value: str) -> str:
+    """Return a format-only pattern for a cell.
+
+    Digits become ``0``, uppercase letters ``X``, lowercase ``x``; separators
+    and whitespace are preserved as structural signal. No original alphanumeric
+    character survives, so the pattern cannot leak a raw value.
+    """
+    out: list[str] = []
+    for ch in value[:_MAX_PATTERN_LEN]:
+        if ch.isdigit():
+            out.append("0")
+        elif ch.isalpha():
+            out.append("X" if ch.isupper() else "x")
+        else:
+            out.append(ch)
+    pattern = "".join(out)
+    if len(value) > _MAX_PATTERN_LEN:
+        pattern += "…"
+    return pattern
+
+
+def _column_profiles(headers: list[str], sample_rows: list[list[str]]) -> list[dict[str, Any]]:
+    """Build privacy-preserving per-column profiles from the sample rows.
+
+    Only aggregate shape (inferred type, counts, lengths) and masked format
+    patterns leave this function - never a raw cell value. The raw ``cells``
+    stay local and are used solely to derive those aggregates.
+    """
+    rows = sample_rows[:_PROFILE_ROW_CAP]
+    profiles: list[dict[str, Any]] = []
+    for idx, header in enumerate(headers):
+        cells = [row[idx] for row in rows if idx < len(row)]
+        non_null = [c for c in cells if c.strip()]
+        sampled = len(cells)
+        null_fraction = round(1 - len(non_null) / sampled, 3) if sampled else 0.0
+        type_counts: Counter[str] = Counter(_infer_cell_type(c) for c in non_null)
+        inferred = type_counts.most_common(1)[0][0] if type_counts else "empty"
+        pattern_counts: Counter[str] = Counter(_mask_cell(c) for c in non_null)
+        example_formats = [p for p, _ in pattern_counts.most_common(_MAX_FORMAT_EXAMPLES)]
+        lengths = [len(c) for c in non_null]
+        profile: dict[str, Any] = {
+            "header": header,
+            "inferred_type": inferred,
+            "non_null_sampled": len(non_null),
+            "null_fraction": null_fraction,
+            "distinct_count": len(set(non_null)),
+            "example_formats": example_formats,
+        }
+        if lengths:
+            profile["value_length"] = {
+                "min": min(lengths),
+                "max": max(lengths),
+                "avg": round(sum(lengths) / len(lengths), 1),
+            }
+        profiles.append(profile)
+    return profiles
+
+
 @router.post("/import/column-mapping", response_model=ImportColumnMappingResponse)
 async def import_column_mapping(
     body: ImportColumnMappingRequest,
@@ -425,9 +531,11 @@ async def import_column_mapping(
     if not p.api_key:
         raise HTTPException(400, detail=f"No API key configured for {cfg.selected_provider!r}.")
 
+    # Never forward raw rows to the LLM: derive privacy-preserving per-column
+    # profiles locally and send only those (headers + shape/format signals).
     payload = {
         "headers": body.headers,
-        "sample_rows": body.sample_rows[:8],
+        "column_profiles": _column_profiles(body.headers, body.sample_rows),
     }
     try:
         result = await structured_completion(
@@ -436,7 +544,7 @@ async def import_column_mapping(
             payload=payload,
             schema=_COLUMN_MAPPING_SCHEMA,
             tool_name="emit_column_mapping",
-            user_prefix="Map these CSV headers to canonical fields.",
+            user_prefix="Map these CSV headers to canonical fields using the column profiles.",
         )
     except GuidanceError as exc:
         raise HTTPException(502, detail=str(exc)) from exc

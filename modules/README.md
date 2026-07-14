@@ -52,7 +52,7 @@ name: My Module                     # human-readable
 version: 0.1.0
 category: foundation                # foundation | attribute | external_input | advanced | other
 description: One-line summary shown on the module card.
-author: You
+author: You                         # optional. Also author_url, paper_url; or plural authors:/papers: (see below)
 license: MIT
 keywords: [my topic, synonym, domain term]   # optional – helps MATE AI route chat
                                              # messages to this module. Omit and the
@@ -111,6 +111,28 @@ Rules the manifest validator enforces:
 - Two modules declaring the same `id` is a startup error.
 
 `inherit` exists so process-mining modules don't reinstall pandas/numpy/pm4py per module – those weigh hundreds of MB. Anything not inherited is fully isolated to your `.venv`.
+
+### Crediting authors and papers
+
+`author` / `author_url` / `paper_url` are the single-credit shorthand. To credit **more than one** author or cite **more than one** paper, use the plural lists (either instead of, or alongside, the singular fields, which fold in as the first entry):
+
+```yaml
+authors:                             # max 20
+  - name: Jane Doe
+    url: https://github.com/janedoe  # optional; omit and the name isn't a link
+  - name: John Smith                 # url optional
+papers:                              # max 20
+  - title: A Great Paper (ICPM 2024) # optional; omit and the link reads "Read the paper"
+    url: https://doi.org/10.1109/xxxx # required (DOI URL preferred)
+  - title: Follow-up Work
+    url: https://doi.org/10.1109/yyyy
+```
+
+- `authors[]` entries are `{ name (required), url? }`; `papers[]` entries are `{ title?, url (required) }`. Each list caps at 20.
+- Mixing forms is fine: singular `author`/`author_url` folds into `authors[0]` and `paper_url` into `papers[0]`, with the singular value leading. A duplicate (same name, or same paper url) isn't added twice; a bare `author_url` with no `author` name is ignored.
+- More than 20 entries in either list (counting the folded singular) fails loud at startup.
+
+Live example: [`actor_performance/manifest.yaml`](./actor_performance/manifest.yaml). Schema: `Author`, `Paper`, `MAX_AUTHORS`/`MAX_PAPERS` in [`manifest.py`](../packages/module-sdk-py/src/mate/sdk/manifest.py).
 
 ### `log_model` – case-centric vs object-centric (declare it!)
 
@@ -410,6 +432,18 @@ The platform creates and owns `modules/<folder>/.venv`:
 
 If you genuinely need a **different Python version** than the platform, set `isolation: subprocess`. The platform spawns a long-lived worker from your venv on its own interpreter (selected by `requires-python`; uv picks or auto-downloads it) and proxies handler calls over a Unix-socket JSON-RPC. The `ModuleContext` interface is unchanged – `@route`, `@job`, and `@on_event` all work, and `event_log.pandas()/polars()/pm4py()` stream the log to your process via a Parquet handoff. Caveats: each call adds 5–50 ms; `inherit` names are installed into your own venv (no shared interpreter to inherit from across a process boundary); job cancellation is best-effort; dynamic `@job(title=...)` callables fall back to a static label. Use subprocess only when you actually need a different Python or have a hard native-lib conflict (e.g. `numpy 1.x` while the platform ships `numpy 2.x`).
 
+### Other languages
+
+A module's backend doesn't have to be Python at all – see [§13](#13-writing-a-module-in-another-language-jvm) for the JVM runtime (and the reserved Node/R designs). Frontend panels/widgets are TypeScript regardless of the backend language.
+
+### Needs a whole server next to the platform?
+
+If your dependency is not a library but a **server process of its own** (a graph
+database, a search engine, …), it ships as an optional compose-profile sidecar – the
+module only connects to a configured address and must treat the shared instance as
+transient scratch. Full contract + checklist: [`SIDECAR_SERVICES.md`](./SIDECAR_SERVICES.md)
+(reference implementation: `modules/actor_performance` with Neo4j).
+
 ### npm
 
 `pnpm install --dir modules/<folder>` runs at startup. Bundles land in `.dist/`. Same isolation story – your widgets bundle against your own `node_modules`.
@@ -505,3 +539,118 @@ Before submitting a module:
 - [ ] `.venv/`, `.dist/`, `node_modules/` gitignored.
 
 If all of those hold, dropping the folder into `modules/` and restarting is enough – the module is live.
+
+---
+
+## 13. Writing a module in another language (JVM)
+
+The platform's worker bridge is language-agnostic: any process that speaks the
+wire protocol in [`PROTOCOL.md`](./PROTOCOL.md) (newline-delimited JSON-RPC
+over a Unix socket + Parquet data handoff) can be a module backend. The first
+supported foreign runtime is the **JVM** – the process-mining research
+ecosystem (ProM et al.) is Java, and wrapping an existing Java algorithm as a
+Mate module is exactly the intended use.
+
+### How it works
+
+- Your manifest declares a `runtime:` block instead of Python deps:
+
+  ```yaml
+  runtime:
+    kind: jvm
+    jar: dist/my-module-all.jar   # folder-relative, self-contained fat jar
+    requires-java: 17             # minimum Java feature version (17 = floor)
+    jvm-args: ["-Xmx1g"]          # optional JVM flags
+  ```
+
+- The module ships as a **self-contained fat jar** (a runnable jar with a
+  `Main-Class` bundling every dependency). There is no server-side
+  Maven/Gradle resolution – the platform only needs a JRE (bundled in the api
+  Docker image; on a bare dev host install Temurin 17+, e.g.
+  `brew install --cask temurin@21`). Without a JRE the module is skipped at
+  boot with a clear warning and uploads fail with an actionable message.
+- Foreign-runtime modules are always process-isolated (the bridge). All the
+  [§8 subprocess caveats](#8-dependencies--isolation) apply: ~1–50 ms per
+  `ctx.*` call, no typed request bodies on routes (module config is the input
+  channel), no `user_id`/`open_event_log`/OCEL on the proxied context, static
+  job titles only.
+- Frontend panels/widgets/`datasets:` work exactly as for Python modules –
+  they never knew what language the backend was.
+
+### The Java SDK
+
+`packages/module-sdk-jvm` (Gradle; build with `make sdk-jvm`, needs JDK 17+)
+ships `mate-sdk-jvm-<v>-all.jar` – the only compile-time dependency you need
+(Jackson is bundled + relocated, so your own Jackson can't conflict).
+
+```java
+public static void main(String[] argv) {
+    MateModule.builder("alpha_miner_java")
+        .onEventJob("mine_on_import", "log.imported",
+            JobSpec.of().progress(true).cancellable(true).title("Alpha Miner"),
+            MyImpl::mine)
+        .route("get_model", RouteSpec.get("/model"), MyImpl::getModel)
+        .build()
+        .run(argv);   // connects, handshakes, serves - never returns
+}
+
+static Object mine(ModuleContext ctx, CallArgs args) {
+    List<List<Object>> rows = ctx.eventLog().duckdbFetch(
+        "SELECT case_id, activity FROM events ORDER BY case_id, timestamp",
+        List.of());
+    ctx.progress().update(0.5, "mining");
+    ctx.checkCancelled();                      // throws CancelledException
+    Map<String, Object> model = compute(rows);
+    ctx.cache().setJson("model", model);       // JSON cache values only
+    return model;                              // JSON-representable result
+}
+```
+
+Context surface: `eventLog()` (`duckdbFetch` runs host-side with zero local
+deps; `materialize()` hands you a Parquet path – DuckDB JDBC's
+`read_parquet` is the recommended reader, deliberately not an SDK
+dependency), `cache()` (JSON envelopes; reading a Python-pickled entry throws
+`UnsupportedCacheValueException`), `bus()`, `progress()`, `logger()`,
+`registry()`, `config()`, `workdir()`, `checkCancelled()`. Restricted
+invocations omit raw-data paths – touching them throws `DataWallException`
+(never guess paths).
+
+Cancellation: platform cancel makes every `ctx.*` call throw
+`CancelledException` (an `Error`, so a broad `catch (Exception)` can't
+swallow it); poll `checkCancelled()` in tight compute loops – after ~3 s of
+grace the platform SIGKILLs the worker instead.
+
+The reference module is [`modules/alpha_miner_java`](./alpha_miner_java/)
+(source under `packages/module-sdk-jvm/examples/alpha-miner`); the
+cross-runtime conformance suite lives at
+`apps/api/tests/test_worker_conformance.py`.
+
+### Author checklist (JVM)
+
+- [ ] Fat jar builds reproducibly (`shadowJar` with `Main-Class`), committed
+      or shipped inside the upload archive at the manifest's `runtime.jar`
+      path.
+- [ ] No `dependencies.python` block (the validator rejects it).
+- [ ] Results/cache values are pure JSON; big artefacts go as files under
+      `cache().dir()` with JSON metadata.
+- [ ] Long jobs tick `progress()` and poll `checkCancelled()`.
+- [ ] `duckdbFetch` results stay well under the 256 MiB frame limit –
+      aggregate in SQL or use `materialize()`.
+
+### Reserved: Node and R (design, not yet accepted)
+
+The manifest kinds below are **rejected today**; the designs are recorded so
+the runtimes can land without protocol changes:
+
+- **Node** – `runtime: {kind: node, entry: dist/worker.mjs, requires-node: ">=20"}`.
+  Distribution mirrors the fat-jar philosophy: a single esbuild-bundled,
+  self-contained `worker.mjs` (no server-side `npm ci`). Node speaks
+  `AF_UNIX` natively (`net.createConnection({path})`); the SDK would be a new
+  `packages/module-worker-node` (the existing `module-sdk-ts` stays
+  frontend-only). Adds a Node binary to the api image when implemented.
+- **R** – `runtime: {kind: r, entry: worker.R, requires-r: ">=4.3", packages: [...]}`
+  with `Rscript` installing into a module-local `.rlib` (hash-skipped like
+  venvs). Base R has no `AF_UNIX` client, so the R SDK needs `nanonext`/
+  `processx` – or protocol v1.1 extends the socket argv with a scheme prefix
+  (`unix:` | `tcp:127.0.0.1:<port>`, opt-in localhost listener). Reserved
+  extension point; protocol v1 stays Unix-socket-only.

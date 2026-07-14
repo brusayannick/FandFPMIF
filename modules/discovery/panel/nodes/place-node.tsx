@@ -3,7 +3,7 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 
 import { cn } from "@/lib/cn";
-import { useGeneralSettings } from "../discovery-settings-context";
+import { usePetriLayout } from "../petri-layout";
 
 export interface PlaceNodeData extends Record<string, unknown> {
   label: string;
@@ -28,7 +28,7 @@ function handlePositions(direction: "LR" | "TB" | "RL" | "BT") {
 }
 
 export function PlaceNode({ data, selected }: NodeProps<PlaceNode>) {
-  const { layoutDirection } = useGeneralSettings();
+  const layoutDirection = usePetriLayout((s) => s.direction);
   const { source, target } = handlePositions(layoutDirection);
   return (
     <div className="relative">

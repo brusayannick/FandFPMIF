@@ -16,11 +16,14 @@ import { PtLeafNode, type PtLeafNodeData } from "../nodes/pt-leaf-node";
 import { PtOperatorNode, type PtOperatorNodeData } from "../nodes/pt-operator-node";
 import type { ProcessTreeData, ProcessTreeNode } from "../types";
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
+import { CanvasLayoutSkeleton } from "@/components/visualizations/canvases/shared/canvas-skeleton";
+import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import {
   useGeneralSettings,
   useNodePositions,
   usePersistNodePositions,
   useProcessTreeSettings,
+  useResetPositions,
 } from "../discovery-settings-context";
 
 const nodeTypes = { pt_operator: PtOperatorNode, pt_leaf: PtLeafNode } as const;
@@ -89,6 +92,7 @@ export function ProcessTreeCanvas({ data }: ProcessTreeCanvasProps) {
   const [pt] = useProcessTreeSettings();
   const persistedPositions = useNodePositions("process_tree");
   const persist = usePersistNodePositions("process_tree");
+  const resetPositions = useResetPositions();
 
   const { laidNodes, laidEdges, key } = useMemo(() => {
     const positions = treeLayout(data.root, {
@@ -139,7 +143,7 @@ export function ProcessTreeCanvas({ data }: ProcessTreeCanvasProps) {
     [persist],
   );
 
-  if (!seeded) return null;
+  if (!seeded) return <CanvasLayoutSkeleton />;
   return (
     <CanvasShell
       nodes={nodes}
@@ -148,6 +152,7 @@ export function ProcessTreeCanvas({ data }: ProcessTreeCanvasProps) {
       fitViewKey={key}
       miniMap={general.showMinimap}
       showGrid={general.showGrid}
+      toolbarSlot={<CanvasResetButton onReset={() => resetPositions("process_tree")} />}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeDragStop={onNodeDragStop}

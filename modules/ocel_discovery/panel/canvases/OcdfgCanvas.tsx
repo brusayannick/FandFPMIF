@@ -5,7 +5,9 @@ import { MarkerType, useEdgesState, useNodesState, type Edge, type Node } from "
 
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
 import { CanvasLayoutSkeleton } from "@/components/visualizations/canvases/shared/canvas-skeleton";
+import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import { formatDuration, formatNumber } from "@/lib/format";
+import { useVizSettings } from "@/lib/stores/visualization-settings";
 
 import { elkLayout } from "../layout/layered";
 import { ActivityNode, type ActivityNodeData } from "../nodes/activity-node";
@@ -30,9 +32,14 @@ export function OcdfgCanvas({
   measure?: OcdfgMeasure;
   mode?: OcdfgMode;
 }) {
+  const general = useVizSettings((s) => s.general);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [laid, setLaid] = useState(false);
+  // Bumped by the toolbar "Reset layout" button → re-runs the ELK layout,
+  // discarding any in-session node drags (these canvases don't persist
+  // positions, so a fresh layout is the reset).
+  const [resetNonce, setResetNonce] = useState(0);
 
   useEffect(() => {
     if (!objectType) return;
@@ -118,7 +125,7 @@ export function OcdfgCanvas({
     return () => {
       cancelled = true;
     };
-  }, [data, objectType, measure, mode, setNodes, setEdges]);
+  }, [data, objectType, measure, mode, resetNonce, setNodes, setEdges]);
 
   if (!laid) return <CanvasLayoutSkeleton />;
   return (
@@ -126,7 +133,10 @@ export function OcdfgCanvas({
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
-      fitViewKey={`ocdfg-${objectType}-${measure}-${mode}-${nodes.length}`}
+      fitViewKey={`ocdfg-${objectType}-${measure}-${mode}-${resetNonce}-${nodes.length}`}
+      miniMap={general.showMinimap}
+      showGrid={general.showGrid}
+      toolbarSlot={<CanvasResetButton onReset={() => setResetNonce((n) => n + 1)} />}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
     />

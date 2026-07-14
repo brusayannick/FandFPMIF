@@ -1,0 +1,47 @@
+id: alpha_miner_java
+name: Alpha Miner (Java)
+version: 1.0.0
+category: advanced
+description: Classic Alpha-algorithm process discovery, implemented in Java on the JVM module runtime.
+about: >-
+  Discovers a Petri net from your event log with the classic Alpha algorithm -
+  the historically first process-discovery technique. It derives the footprint
+  relations between activities and lays the maximal causal activity sets down
+  as places. Also the platform's reference module for the JVM runtime: its
+  backend is a self-contained Java jar speaking the worker protocol
+  (modules/PROTOCOL.md), with no Python code at all.
+author: W.M.P. van der Aalst, A.J.M.M. Weijters, L. Maruster
+paper_url: https://doi.org/10.1109/TKDE.2004.47
+license: MIT
+
+# The whole module backend is one fat jar (built from
+# packages/module-sdk-jvm/examples/alpha-miner via `make sdk-jvm`). The
+# platform only needs a JRE (bundled in the api image); there is no server-side
+# dependency resolution.
+runtime:
+  kind: jvm
+  jar: dist/alpha-miner-all.jar
+  requires-java: 17
+  jvm-args: ["-Xmx1g"]
+
+requirements:
+  event_log:
+    required_columns: [case_id, activity, timestamp]
+
+provides: []
+consumes:
+  - log.imported
+
+keywords: [alpha, petri, net, discovery, mining, java]
+
+# No module frontend: the Petri net is exposed as a typed dataset and rendered
+# by the platform's generic graph visualization on dashboards.
+datasets:
+  - id: petri-net
+    title: Discovered Petri net (Alpha)
+    description: Petri net mined by the classic Alpha algorithm.
+    icon: Network
+    shape: graph
+    route: /model
+
+is_confidential_safe: true

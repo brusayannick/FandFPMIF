@@ -5,6 +5,8 @@ import { MarkerType, useEdgesState, useNodesState, type Edge, type Node } from "
 
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
 import { CanvasLayoutSkeleton } from "@/components/visualizations/canvases/shared/canvas-skeleton";
+import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
+import { useVizSettings } from "@/lib/stores/visualization-settings";
 
 import { elkLayout } from "../layout/layered";
 import { PlaceNode } from "../nodes/place-node";
@@ -18,9 +20,13 @@ const nodeTypes = { place: PlaceNode, transition: TransitionNode } as const;
  *  where an activity consumes / produces a variable number of objects – are
  *  drawn thicker, mirroring pm4py's own OCPN visualiser. */
 export function OcpnCanvas({ net }: { net: OcpnNet | null }) {
+  const general = useVizSettings((s) => s.general);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [laid, setLaid] = useState(false);
+  // Bumped by the toolbar "Reset layout" button → re-runs the ELK layout,
+  // discarding any in-session node drags.
+  const [resetNonce, setResetNonce] = useState(0);
 
   useEffect(() => {
     if (!net) return;
@@ -80,7 +86,7 @@ export function OcpnCanvas({ net }: { net: OcpnNet | null }) {
     return () => {
       cancelled = true;
     };
-  }, [net, setNodes, setEdges]);
+  }, [net, resetNonce, setNodes, setEdges]);
 
   if (!laid) return <CanvasLayoutSkeleton />;
   return (
@@ -88,7 +94,10 @@ export function OcpnCanvas({ net }: { net: OcpnNet | null }) {
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
-      fitViewKey={`ocpn-${net?.object_type}-${nodes.length}`}
+      fitViewKey={`ocpn-${net?.object_type}-${resetNonce}-${nodes.length}`}
+      miniMap={general.showMinimap}
+      showGrid={general.showGrid}
+      toolbarSlot={<CanvasResetButton onReset={() => setResetNonce((n) => n + 1)} />}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
     />

@@ -41,6 +41,7 @@ from mate.api.modules.installs import (
 from mate.api.modules.uninstall import uninstall_for_user
 from mate.api.policy import SCOPE_CARD, resolve
 from mate.api.schemas.event_logs import LogModel
+from mate.sdk.manifest import Author, Paper
 
 # UserSetting key holding the per-user record of which default module ids have
 # already been offered to a user (a JSON list). Seeding grants only the defaults
@@ -107,6 +108,11 @@ class ModuleSummary(BaseModel):
     author: str | None = None
     author_url: str | None = None
     paper_url: str | None = None
+    # Plural credits (max 20 each). The manifest folds the singular
+    # author/author_url/paper_url in as the first entry, so these are the
+    # canonical lists the UI renders; the singular fields stay for back-compat.
+    authors: list[Author] = Field(default_factory=list)
+    papers: list[Paper] = Field(default_factory=list)
     license: str | None = None
     provides: list[str]
     consumes: list[str]
@@ -186,6 +192,8 @@ async def list_modules(
             author=m.author,
             author_url=m.author_url,
             paper_url=m.paper_url,
+            authors=list(m.authors),
+            papers=list(m.papers),
             license=m.license,
             provides=list(m.provides),
             consumes=list(m.consumes),

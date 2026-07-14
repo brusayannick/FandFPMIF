@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useCancelJob } from "@/lib/queries";
 import { parseJobTitle, type LiveJob } from "@/lib/stores/jobs";
-import { jobProgress } from "@/lib/job-progress";
+import { jobProgress, stageLabel } from "@/lib/job-progress";
+import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
 /**
@@ -19,8 +20,12 @@ import { cn } from "@/lib/cn";
 export function JobChildRow({ job }: { job: LiveJob }) {
   const cancel = useCancelJob();
   const { name: cleanTitle } = parseJobTitle(job);
-  const { pct, label } = jobProgress(job);
+  const { pct, label, eta } = jobProgress(job);
   const running = job.status === "running";
+  // Cheap ETA: only when the step reports a determinate fraction (jobProgress
+  // derives `eta` from elapsed rate × remaining). Indeterminate steps skip it.
+  const runningLabel =
+    eta != null && Number.isFinite(eta) ? `${label} · ETA ${formatDuration(eta)}` : label;
   const isError = job.status === "failed";
   const isActive =
     job.status === "running" || job.status === "queued" || job.status === "paused";
@@ -38,7 +43,7 @@ export function JobChildRow({ job }: { job: LiveJob }) {
                 isError ? "text-destructive" : "text-muted-foreground",
               )}
             >
-              {isError ? "Failed" : running ? label : statusLabel(job.status)}
+              {isError ? "Failed" : running ? runningLabel : statusLabel(job.status)}
             </span>
             {isActive && (
               <Button
@@ -71,9 +76,7 @@ export function JobChildRow({ job }: { job: LiveJob }) {
         )}
         {(job.stage || job.message) && running && (
           <div className="truncate text-[11px] text-muted-foreground">
-            {job.stage && (
-              <span className="font-medium uppercase tracking-wide">{job.stage}</span>
-            )}
+            {job.stage && <span className="font-medium">{stageLabel(job.stage)}</span>}
             {job.stage && job.message && <span className="mx-1">·</span>}
             {job.message}
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -70,12 +70,13 @@ export function ProcessComparisonPanel({ logId }: { logId: string; moduleId: str
   }, [logs, logId]);
 
   const others = logs.filter((l) => l.id !== logId);
-  const [selected, setSelected] = useState<string[]>([]);
-  const toggle = (id: string) =>
-    setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  // One comparison log at a time: radio-style, replace-on-click. The tabs still
+  // take an array of "others", so hand them the single selection wrapped in one.
+  const [selected, setSelected] = useState<string | null>(null);
+  const selectedIds = useMemo(() => (selected ? [selected] : []), [selected]);
 
   const baselineName = labelFor(logId);
-  const hasSelection = selected.length > 0;
+  const hasSelection = Boolean(selected);
 
   return (
     <div className="flex flex-col gap-4">
@@ -97,7 +98,7 @@ export function ProcessComparisonPanel({ logId }: { logId: string; moduleId: str
         ) : (
           <div className="flex flex-wrap gap-2">
             {others.map((l) => {
-              const on = selected.includes(l.id);
+              const on = selected === l.id;
               return (
                 <Button
                   key={l.id}
@@ -105,7 +106,7 @@ export function ProcessComparisonPanel({ logId }: { logId: string; moduleId: str
                   variant={on ? "default" : "outline"}
                   size="sm"
                   className="cursor-pointer gap-1.5"
-                  onClick={() => toggle(l.id)}
+                  onClick={() => setSelected(l.id)}
                 >
                   <Layers className="h-3.5 w-3.5" />
                   {l.name}
@@ -124,8 +125,8 @@ export function ProcessComparisonPanel({ logId }: { logId: string; moduleId: str
       {!hasSelection ? (
         <EmptyState
           icon={GitCompareArrows}
-          title="Pick at least one log to compare"
-          description="Select one or more logs above to see how their behaviour differs from the baseline."
+          title="Pick a log to compare"
+          description="Select a log above to see how its behaviour differs from the baseline."
         />
       ) : (
         <Tabs defaultValue="summary" className="w-full">
@@ -139,22 +140,22 @@ export function ProcessComparisonPanel({ logId }: { logId: string; moduleId: str
           </TabsList>
 
           <TabsContent value="summary" className="mt-3">
-            <SummaryTab logId={logId} others={selected} labelFor={labelFor} />
+            <SummaryTab logId={logId} others={selectedIds} labelFor={labelFor} />
           </TabsContent>
           <TabsContent value="similarity" className="mt-3">
-            <SimilarityTab logId={logId} others={selected} labelFor={labelFor} />
+            <SimilarityTab logId={logId} others={selectedIds} labelFor={labelFor} />
           </TabsContent>
           <TabsContent value="map" className="mt-3">
-            <ProcessMapTab logId={logId} others={selected} labelFor={labelFor} />
+            <ProcessMapTab logId={logId} others={selectedIds} labelFor={labelFor} />
           </TabsContent>
           <TabsContent value="bpmn" className="mt-3">
-            <BpmnTab logId={logId} others={selected} labelFor={labelFor} />
+            <BpmnTab logId={logId} others={selectedIds} labelFor={labelFor} />
           </TabsContent>
           <TabsContent value="variants" className="mt-3">
-            <VariantsTab logId={logId} others={selected} labelFor={labelFor} />
+            <VariantsTab logId={logId} others={selectedIds} labelFor={labelFor} />
           </TabsContent>
           <TabsContent value="activities" className="mt-3">
-            <ActivityDeltasTab logId={logId} others={selected} labelFor={labelFor} />
+            <ActivityDeltasTab logId={logId} others={selectedIds} labelFor={labelFor} />
           </TabsContent>
         </Tabs>
       )}
@@ -178,48 +179,6 @@ function TabError({ message }: { message: string }) {
 
 function pct(v: number): string {
   return `${(v * 100).toFixed(1)}%`;
-}
-
-/** Single-"other" picker, seeded from the multi-select above. Keeps the first
- *  selected log when the selection changes underneath it. */
-function useOther(others: string[]): [string, (v: string) => void] {
-  const [other, setOther] = useState<string>(others[0] ?? "");
-  useEffect(() => {
-    if (!others.includes(other)) setOther(others[0] ?? "");
-  }, [others, other]);
-  return [other, setOther];
-}
-
-function OtherSelect({
-  label,
-  value,
-  onChange,
-  others,
-  labelFor,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  others: string[];
-  labelFor: LabelFor;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-3">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-8 w-56 text-xs">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {others.map((id) => (
-            <SelectItem key={id} value={id}>
-              {labelFor(id)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
 }
 
 /** Tiny segmented toggle (button group) for view-mode switches. */
@@ -276,18 +235,11 @@ function SummaryTab({
   others: string[];
   labelFor: LabelFor;
 }) {
-  const [other, setOther] = useOther(others);
+  const other = others[0] ?? "";
   const { data, isLoading, isError, error } = useSummaryDelta(logId, other || null);
 
   return (
     <div className="space-y-4">
-      <OtherSelect
-        label="Compare baseline against"
-        value={other}
-        onChange={setOther}
-        others={others}
-        labelFor={labelFor}
-      />
       {isLoading ? (
         <Skeleton className="h-28 w-full" />
       ) : isError || !data ? (
@@ -447,7 +399,7 @@ function ProcessMapTab({
   others: string[];
   labelFor: LabelFor;
 }) {
-  const [overlay, setOverlay] = useOther(others);
+  const overlay = others[0] ?? "";
   const [colorMode, setColorMode] = useState<DfgColorMode>("delta");
   const [layout, setLayout] = useState<"overlay" | "side">("overlay");
 
@@ -456,13 +408,6 @@ function ProcessMapTab({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
-        <OtherSelect
-          label="Overlay baseline against"
-          value={overlay}
-          onChange={setOverlay}
-          others={others}
-          labelFor={labelFor}
-        />
         <Segmented
           value={layout}
           onChange={setLayout}
@@ -559,19 +504,25 @@ function BpmnTab({
   others: string[];
   labelFor: LabelFor;
 }) {
-  const [other, setOther] = useOther(others);
+  const other = others[0] ?? "";
+  // "Stacked" drops the 2-column grid so each BPMN spans the full width. A large
+  // model is otherwise squeezed into half the panel; each pane also keeps its own
+  // fullscreen button (canvas toolbar) for an even bigger, isolated view.
+  const [layout, setLayout] = useState<"side" | "single">("side");
   const { data, isLoading, isError, error } = useBpmnDiff(logId, other || null);
   const map = useMemo(() => (data ? buildActivityMap(data.activities) : undefined), [data]);
+  const paneHeight = layout === "single" ? 640 : 560;
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
-        <OtherSelect
-          label="Compare baseline against"
-          value={other}
-          onChange={setOther}
-          others={others}
-          labelFor={labelFor}
+        <Segmented
+          value={layout}
+          onChange={setLayout}
+          options={[
+            { value: "side", label: "Side by side" },
+            { value: "single", label: "Stacked" },
+          ]}
         />
         <div className="ml-auto flex items-center gap-3 text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1.5">
@@ -602,13 +553,15 @@ function BpmnTab({
       ) : isError || !data ? (
         <TabError message={(error as Error)?.message ?? "Unknown error"} />
       ) : (
-        <div className="grid gap-3 lg:grid-cols-2">
+        <div className={cn("grid gap-3", layout === "side" && "lg:grid-cols-2")}>
           <BpmnPane
             name={labelFor(logId)}
             swatch={STATUS_COLOR.only_a}
             xml={data.xml_a}
             paneKey={`${data.other_log_id}-a`}
             map={map}
+            height={paneHeight}
+            refitKey={layout}
           />
           <BpmnPane
             name={labelFor(other)}
@@ -616,6 +569,8 @@ function BpmnTab({
             xml={data.xml_b}
             paneKey={`${data.other_log_id}-b`}
             map={map}
+            height={paneHeight}
+            refitKey={layout}
           />
         </div>
       )}
@@ -629,12 +584,17 @@ function BpmnPane({
   xml,
   paneKey,
   map,
+  height,
+  refitKey,
 }: {
   name: string;
   swatch: string;
   xml: string;
   paneKey: string;
   map: ReturnType<typeof buildActivityMap> | undefined;
+  height: number;
+  /** Changes when the pane is resized by the layout toggle → canvas re-fits. */
+  refitKey: string | number;
 }) {
   return (
     <div className="space-y-1.5">
@@ -642,9 +602,9 @@ function BpmnPane({
       {/* Inline height: `h-[560px]` is a module-only arbitrary Tailwind value and
           the web app's build doesn't emit those, so the class was dropped and the
           pane collapsed to 0 height (the BPMN "rendered too small"). */}
-      <div style={{ height: 560 }} className="w-full overflow-hidden rounded-xl border bg-card">
+      <div style={{ height }} className="w-full overflow-hidden rounded-xl border bg-card">
         {/* Re-mount on log change: the canvas ignores xml updates after mount. */}
-        <ComparisonBpmnCanvas key={paneKey} xml={xml} map={map} />
+        <ComparisonBpmnCanvas key={paneKey} xml={xml} map={map} refitKey={refitKey} />
       </div>
     </div>
   );

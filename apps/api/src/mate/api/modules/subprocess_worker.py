@@ -633,6 +633,7 @@ async def _amain(socket_path: str, module_folder: str) -> int:
 
     conn.register("call", handle_call)
     conn.register("shutdown", lambda _params: True)
+    conn.register("ping", lambda _params: True)
 
     # Advertise duck-typed guidance support so the host shim only exposes a
     # `guidance_payload` stub for modules that actually implement one (the
@@ -647,7 +648,9 @@ async def _amain(socket_path: str, module_folder: str) -> int:
         {
             "id": None,
             "method": "ready",
-            "params": {"handlers": handlers_meta, "guidance": guidance_meta},
+            # `protocol` versions the wire contract (modules/PROTOCOL.md §1);
+            # the host rejects workers speaking a newer protocol than it knows.
+            "params": {"protocol": 1, "handlers": handlers_meta, "guidance": guidance_meta},
         }
     )
     await conn.run()

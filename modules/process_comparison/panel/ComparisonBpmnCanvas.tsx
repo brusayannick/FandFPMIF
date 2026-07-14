@@ -57,6 +57,9 @@ export interface ComparisonBpmnCanvasProps {
   xml: string;
   map?: ActivityMap;
   decor?: ComparisonDecor;
+  /** Bump to re-fit the diagram after an external container resize (e.g. a layout
+   *  toggle switching this pane from half- to full-width). Skips the mount run. */
+  refitKey?: string | number;
 }
 
 type ModelerHandle = BpmnModelerLike & {
@@ -66,7 +69,7 @@ type ModelerHandle = BpmnModelerLike & {
 
 const DEFAULT_DECOR: ComparisonDecor = { heatmap: true, labels: true };
 
-export function ComparisonBpmnCanvas({ xml, map, decor }: ComparisonBpmnCanvasProps) {
+export function ComparisonBpmnCanvas({ xml, map, decor, refitKey }: ComparisonBpmnCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const modelerRef = useRef<ModelerHandle | null>(null);
   const [ready, setReady] = useState(false);
@@ -157,6 +160,25 @@ export function ComparisonBpmnCanvas({ xml, map, decor }: ComparisonBpmnCanvasPr
     });
     return () => cancelAnimationFrame(id);
   }, [isFullscreen]);
+
+  // Re-fit when an external resize signal changes: the layout toggle grows this
+  // pane from half- to full-width, and bpmn-js does not auto-refit on container
+  // resize, so without this the diagram keeps its cramped half-width zoom. Skip
+  // the mount run — the import path already frames it via `fitBpmnViewport`.
+  const didMountRefit = useRef(false);
+  useEffect(() => {
+    if (!didMountRefit.current) {
+      didMountRefit.current = true;
+      return;
+    }
+    const id = requestAnimationFrame(() => {
+      const canvas = modelerRef.current?.get<{
+        zoom: (scale?: number | string, center?: string) => number;
+      }>("canvas");
+      if (canvas) fitBpmnViewport(canvas);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [refitKey]);
 
   // Opacity gate for the minimap – toggled by interaction activity.
   useEffect(() => {

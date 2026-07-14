@@ -187,6 +187,15 @@ function ActivityFilter({
               Show all {options.length}
             </button>
           )}
+          {visible > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange(new Set(options.map((o) => o.name)))}
+              className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs font-medium text-primary outline-none hover:bg-accent hover:text-accent-foreground"
+            >
+              Hide all {options.length}
+            </button>
+          )}
           <div className="max-h-56 overflow-y-auto">
             {options.map((o) => {
               const on = !hidden.has(o.name);

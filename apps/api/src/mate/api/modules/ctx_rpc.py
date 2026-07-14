@@ -169,7 +169,13 @@ def make_ctx_dispatcher(
         )
 
     async def logger_log(params: dict[str, Any]) -> None:
+        # Fire-and-forget on the worker side: a log line emitted at the very
+        # end of a handler can arrive after the call completed and its ctx
+        # token was unregistered. A trailing log is expendable - drop it
+        # instead of erroring into the worker's unawaited send task.
         ctx = ctx_for(params["ctx_token"])
+        if ctx is None:
+            return
         level = params.get("level", "info")
         payload = params.get("payload", {})
         event = payload.pop("event", "")

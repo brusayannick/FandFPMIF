@@ -18,10 +18,13 @@ import { treeLayout } from "../layout/tree";
 import { mapEdgeType } from "../layout/direction";
 import type { PrefixTreeData, PrefixTreeNodeFlat } from "../types";
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
+import { CanvasLayoutSkeleton } from "@/components/visualizations/canvases/shared/canvas-skeleton";
+import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import {
   useGeneralSettings,
   useNodePositions,
   usePersistNodePositions,
+  useResetPositions,
 } from "../discovery-settings-context";
 
 // ---------------------------------------------------------------------------
@@ -139,6 +142,7 @@ export function PrefixTreeCanvas({ data }: PrefixTreeCanvasProps) {
   const general = useGeneralSettings();
   const persistedPositions = useNodePositions("prefix_tree");
   const persist = usePersistNodePositions("prefix_tree");
+  const resetPositions = useResetPositions();
 
   const { laidNodes, laidEdges, key } = useMemo(() => {
     const root = buildTree(data.nodes);
@@ -169,7 +173,7 @@ export function PrefixTreeCanvas({ data }: PrefixTreeCanvasProps) {
     [persist],
   );
 
-  if (!seeded) return null;
+  if (!seeded) return <CanvasLayoutSkeleton />;
   return (
     <CanvasShell
       nodes={nodes}
@@ -178,6 +182,7 @@ export function PrefixTreeCanvas({ data }: PrefixTreeCanvasProps) {
       fitViewKey={key}
       miniMap={general.showMinimap}
       showGrid={general.showGrid}
+      toolbarSlot={<CanvasResetButton onReset={() => resetPositions("prefix_tree")} />}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeDragStop={onNodeDragStop}

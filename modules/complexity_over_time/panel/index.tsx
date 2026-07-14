@@ -30,6 +30,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/cn";
 import { formatDuration } from "@/lib/format";
 
+import { MetricInfoHint } from "./metric-info";
 import {
   useComplexityTimeseries,
   useDriftPeriods,
@@ -656,6 +657,15 @@ function ChartBody({
   // ticks when every plotted line shares it (mixed raw units → plain numbers).
   const durationAxis = !multiScale && selectedKpis.every(isDurationKey);
   const percentAxis = !multiScale && selectedKpis.every(isPercentKey);
+  // Y-axis title: names the normalisation when lines are rescaled to 0–1, else
+  // the shared unit (the tooltip always shows each metric's real value + unit).
+  const yAxisLabel = multiScale
+    ? "normalized 0–1"
+    : durationAxis
+      ? "duration"
+      : percentAxis
+        ? "%"
+        : undefined;
   const heading =
     selectedKpis.length === 1
       ? `${kpiLabel(selectedKpis[0])} over time`
@@ -665,7 +675,10 @@ function ChartBody({
     <Card>
       <CardContent>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <h3 className="text-sm font-semibold">{heading}</h3>
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+            {heading}
+            {selectedKpis.length === 1 && <MetricInfoHint metricKey={selectedKpis[0]} />}
+          </h3>
           <DriftLegend driftBands={driftBands} driftRan={driftRan} />
         </div>
         <ResponsiveContainer width="100%" height={400}>
@@ -694,7 +707,7 @@ function ChartBody({
             <YAxis
               tick={{ fill: "var(--muted-foreground)", fontSize: 10 }}
               stroke="var(--border)"
-              width={durationAxis ? 76 : 56}
+              width={yAxisLabel ? (durationAxis ? 92 : 72) : durationAxis ? 76 : 56}
               domain={multiScale ? [0, 1] : undefined}
               tickFormatter={
                 durationAxis
@@ -702,6 +715,20 @@ function ChartBody({
                   : percentAxis
                     ? (v: number) => `${v}%`
                     : undefined
+              }
+              label={
+                yAxisLabel
+                  ? {
+                      value: yAxisLabel,
+                      angle: -90,
+                      position: "insideLeft",
+                      style: {
+                        fill: "var(--muted-foreground)",
+                        fontSize: 11,
+                        textAnchor: "middle",
+                      },
+                    }
+                  : undefined
               }
               allowDecimals
             />

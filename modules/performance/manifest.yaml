@@ -12,8 +12,6 @@ about: >-
   the slowest cases really are, and overlay timing on the discovered process map
   to see exactly which hand-offs hurt.
 keywords: ["performance", "bottleneck", "cycle time", "throughput", "lead time", "slow", "kpi", "sojourn", "p90", "waiting time"]
-author: FlowFactory
-author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.
@@ -60,6 +58,7 @@ dependencies:
 
 frontend:
   panel: ./panel/index.tsx
+  log_filter: false
   widgets:
     - id: kpi-overview
       entry: ./widgets/KpiOverview.tsx

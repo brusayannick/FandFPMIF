@@ -5,7 +5,6 @@ import { Gauge, Layers, LayoutTemplate, Loader2, Workflow, type LucideIcon } fro
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -39,13 +38,9 @@ export function TemplatePicker({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Start from a template</DialogTitle>
-          <DialogDescription>
-            Pick a curated board. It comes pre-filled with cards - bind an event log and
-            you&apos;re ready. You can add, remove or rearrange cards afterwards.
-          </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-2">

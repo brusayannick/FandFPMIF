@@ -1,7 +1,7 @@
 # Deploying Mate to the uni VM
 
 Production deployment to `pm-mate.uni-muenster.de`, fronted by the FB4 reverse
-proxy. For the local-`localhost` setup, see [`README.md`](./README.md) – this
+proxy. For the local-`localhost` setup, see [`README.md`](../README.md) – this
 doc only covers the server. **All VM access needs the FB4-DEV-VPN.**
 
 ## Quick reference (cheat sheet)
@@ -89,8 +89,8 @@ so the per-port CORS and `/etc/hosts` Keycloak hacks from the local setup are go
 
 | File | Purpose |
 | --- | --- |
-| [`docker-compose.prod.yml`](./docker-compose.prod.yml) | Prod overlay – adds the proxy, repoints URLs, drops public ports + the macOS cv4cdd mount. |
-| [`infra/caddy/Caddyfile`](./infra/caddy/Caddyfile) | TLS termination on `:443` + path routing. |
+| [`docker-compose.prod.yml`](../docker-compose.prod.yml) | Prod overlay – adds the proxy, repoints URLs, drops public ports + the macOS cv4cdd mount. |
+| [`infra/caddy/Caddyfile`](../infra/caddy/Caddyfile) | TLS termination on `:443` + path routing. |
 | `.env` (you create it on the VM – see §4) | Rotated secrets + Keycloak admin creds. |
 
 ## 0. Smoke-test the `:443` pipe first
@@ -298,6 +298,43 @@ Facts worth knowing:
   settings can override them.
 - Host-mode dev without the compose stack: see `modules/actor_performance/README.md`
   for the single `docker run` command.
+
+## 4c. S3 storage backend (optional – keep the VM volume small)
+
+By default every event log and module result lives on the `./data` bind-mount,
+so the VM volume grows with total-data-ever. Pointing the platform at an
+S3-compatible bucket (uni Ceph RGW, AWS S3, MinIO, …) makes the bucket the
+authoritative store and turns local disk into a bounded working cache.
+
+The backend is configured **only** via `.env` – there is no admin UI and no
+DB-stored config. Full variable reference + operational flows (enable on an
+existing VM, fresh-VM restore, switch back): `docs/S3_OFFLOAD.md`. Minimal
+Ceph-RGW example:
+
+```dotenv
+STORAGE_MODE=s3
+STORAGE_S3_ENDPOINT=https://rgw.uni-muenster.de
+STORAGE_S3_BUCKET=pm-mate
+STORAGE_S3_ACCESS_KEY=<key>
+STORAGE_S3_SECRET_KEY=<secret>
+# path-style + SSL-on are the defaults; set a prefix to share the bucket
+STORAGE_S3_PREFIX=prod
+
+# Actually reclaim disk: bound the local cache and (after a dry-run soak)
+# enable deletes. Without a budget S3 mode only mirrors – the VM stays big.
+LOCAL_CACHE_MAX_BYTES=53687091200   # 50 GiB working set
+CACHE_EVICT_DRY_RUN=false
+```
+
+After flipping an existing deployment to `s3`, recreate the api (a `restart`
+keeps the old env – it must be `up -d`), then push the already-imported data up
+once:
+
+```bash
+$DC up -d api                                             # recreate with the new env
+$DC exec api python -m mate.api.storage.migration check   # probe the bucket
+$DC exec api python -m mate.api.storage.migration to_s3   # copy-only, re-runnable
+```
 
 ## 5. Bring it up
 
@@ -609,6 +646,11 @@ university login mints a **new** `sub` = a fresh empty account.
 `./data/` (SQLite metadata + Parquet logs + module results + cached runtimes)
 is bind-mounted – back it up by copying the directory. Keycloak users live in
 the `kc-data` Docker volume; include it if you need to preserve logins.
+
+With the S3 backend active (§4c) the bucket already holds the authoritative
+copy of all user data plus an hourly `_system/metadata.db` snapshot, so the
+`data/` tarball matters mainly for module runtimes/venvs; a lost VM is
+recovered with the `db_backup restore` pre-boot step in `docs/S3_OFFLOAD.md`.
 
 ```bash
 tar czf mate-data-$(date +%F).tgz -C ~/mate data                                   # SQLite + Parquet + results

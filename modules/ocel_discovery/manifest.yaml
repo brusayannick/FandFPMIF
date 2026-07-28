@@ -13,9 +13,12 @@ about: >-
   object type's lifecycle takes - without forcing everything into a single case
   notion.
 keywords: ["object-centric", "object centric", "ocel", "oc-dfg", "object types", "ocpm"]
-author: FlowFactory
-author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
-paper_url: https://doi.org/10.3233/FI-2020-1946
+source:
+  - title: "PM4Py: A process mining library for Python"
+    fullCitation: >-
+      A. Berti, S. van Zelst, and D. Schuster, "PM4Py: A process mining library
+      for Python," Softw. Impacts, vol. 17, 100556, 2023
+    url: https://doi.org/10.1016/j.simpa.2023.100556
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

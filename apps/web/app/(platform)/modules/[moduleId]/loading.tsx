@@ -1,16 +1,11 @@
 import { PageContainer } from "@/components/page";
 import { Skeleton } from "@/components/ui/skeleton";
 
+// Stacked settings cards - module-detail-client.tsx renders no header of its
+// own (the topbar owns the name and the ⓘ "About" payload).
 export default function Loading() {
   return (
-    <PageContainer className="space-y-6">
-      <div className="space-y-3">
-        <Skeleton className="h-3.5 w-40" />
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-10 w-10 rounded-lg" />
-          <Skeleton className="h-7 w-56" />
-        </div>
-      </div>
+    <PageContainer className="space-y-4">
       {Array.from({ length: 3 }).map((_, i) => (
         <div
           key={i}

@@ -13,7 +13,6 @@ const TABS = [
   { href: "/admin/modules", label: "Modules" },
   { href: "/admin/users", label: "Users" },
   { href: "/admin/teams", label: "Teams" },
-  { href: "/admin/storage", label: "Storage" },
   { href: "/admin/system", label: "System" },
   { href: "/admin/export", label: "Data export" },
 ];

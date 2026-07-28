@@ -10,9 +10,10 @@ Bodies reuse the admin REST route internals one-to-one
 :mod:`~mate.api.routes.admin_teams`, :mod:`~mate.api.routes.system`,
 :mod:`~mate.api.routes.mcp_admin`) so the two surfaces can't drift.
 
-Hard exclusions by policy: storage-config writes/migration, ``/admin/export``
-equivalents, raw event-log downloads, and metadata-db export - the event-log
-listing here is metadata only.
+Hard exclusions by policy: ``/admin/export`` equivalents, raw event-log
+downloads, and metadata-db export - the event-log listing here is metadata
+only. (The storage backend itself is env-configured and has no writable
+surface anywhere; see docs/S3_OFFLOAD.md.)
 """
 
 from __future__ import annotations

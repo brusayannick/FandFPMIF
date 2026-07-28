@@ -13,9 +13,13 @@ about: >-
   flow of work, find the most frequent activities and paths, and get a model you
   can export or use as a reference for conformance checking.
 keywords: ["process model", "discover", "discovery", "dfg", "petri net", "bpmn", "process tree", "model", "variants", "paths"]
-author: van der Aalst
-author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
-paper_url: https://doi.org/10.1109/TKDE.2004.47
+source:
+  - title: "Workflow mining: Discovering process models from event logs"
+    fullCitation: >-
+      W. M. P. van der Aalst, A. J. M. M. Weijters, and L. Maruster, "Workflow
+      mining: Discovering process models from event logs," IEEE Trans. Knowl.
+      Data Eng., vol. 16, no. 9, pp. 1128-1142, 2004
+    url: https://doi.org/10.1109/TKDE.2004.47
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

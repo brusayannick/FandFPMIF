@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { SlidersHorizontal } from "lucide-react";
 
 import { setLogScopedFilter } from "@/lib/api";
 import { encodeFilterHeader } from "@/components/dashboards/widget-filter";
@@ -33,24 +32,42 @@ import { useLogFilter, useLogFilterStore } from "@/lib/stores/log-filter";
  * the cleanup below clears the active-log filter on unmount so it can't leak
  * onto other surfaces (dashboards included).
  */
-export function LogFilterProvider({ logId, children }: { logId: string; children: ReactNode }) {
+export function LogFilterProvider({
+  logId,
+  enabled = true,
+  children,
+}: {
+  logId: string;
+  /** False for modules that opt out (`frontend.log_filter: false`) or ship no
+   * panel. Hides the bar AND holds the header at null, so an opted-out panel is
+   * never narrowed by a filter the user can't see (the log's stored filter
+   * survives in the store for the modules that do show it). The panel still
+   * gets its own QueryClient, so cache isolation is uniform across module
+   * pages. */
+  enabled?: boolean;
+  children: ReactNode;
+}) {
   const filter = useLogFilter(logId);
   const setColumnFilters = useLogFilterStore((s) => s.setColumnFilters);
   const setTimeFilters = useLogFilterStore((s) => s.setTimeFilters);
 
   // Metadata for the bar + slider. Fetched here (OUTSIDE the panel's dedicated
-  // client) so a filter commit's resetQueries never churns them.
-  const { data: columns } = useEventColumns(logId);
-  const { data: bounds } = useTimeBounds(logId);
+  // client) so a filter commit's resetQueries never churns them. Passing null
+  // when disabled skips both fetches – nothing renders them.
+  const { data: columns } = useEventColumns(enabled ? logId : null);
+  const { data: bounds } = useTimeBounds(enabled ? logId : null);
 
   const [panelClient] = useState(
     () => new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } }),
   );
 
   // Time entries first, then columns — same order the dashboard serializes.
+  // Held empty when disabled so the effect below pushes a null header: the
+  // log's stored filter stays in the store (a filter-capable module restores
+  // it) but never rides onto an opted-out module's requests.
   const combined = useMemo(
-    () => [...filter.timeFilters, ...filter.columnFilters],
-    [filter.timeFilters, filter.columnFilters],
+    () => (enabled ? [...filter.timeFilters, ...filter.columnFilters] : []),
+    [enabled, filter.timeFilters, filter.columnFilters],
   );
 
   // Push the active log's filter onto the ambient header (read lazily at fetch
@@ -84,19 +101,19 @@ export function LogFilterProvider({ logId, children }: { logId: string; children
   // header can never ride onto another page's (or a dashboard's) requests.
   useEffect(() => () => setLogScopedFilter(null, null), []);
 
-  const hasColumns = !!columns && columns.length > 0;
-  const hasBounds = !!bounds?.field && !!bounds.min_ts && !!bounds.max_ts;
+  const hasColumns = enabled && !!columns && columns.length > 0;
+  const hasBounds = enabled && !!bounds?.field && !!bounds.min_ts && !!bounds.max_ts;
 
+  // No heading: the bar sits directly above the panel it scopes, and the
+  // module page is the only thing it can mean. `compact` keeps it to a thin
+  // strip so the panel — the actual content — keeps the vertical space.
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       {(hasColumns || hasBounds) && (
         <div className="overflow-hidden rounded-xl border border-border">
-          <div className="flex items-center gap-1.5 border-b border-border/60 bg-muted/40 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            <SlidersHorizontal className="h-3 w-3" />
-            Filter · applies to every module view for this log
-          </div>
           {hasColumns && (
             <DashboardFilterBar
+              compact
               logId={logId}
               columns={columns!}
               filters={filter.columnFilters}
@@ -105,6 +122,7 @@ export function LogFilterProvider({ logId, children }: { logId: string; children
           )}
           {hasBounds && (
             <DashboardTimeRange
+              compact
               bounds={bounds}
               committed={filter.timeFilters}
               onChange={(next) => setTimeFilters(logId, next)}

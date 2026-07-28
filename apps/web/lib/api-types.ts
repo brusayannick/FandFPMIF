@@ -154,15 +154,16 @@ export interface JobDetail {
   finished_at: string | null;
 }
 
-/** One credited author (manifest `authors[]` / singular `author`). */
-export interface ManifestAuthor {
-  name: string;
+/** One cited work (manifest `source[]`). `fullCitation` carries the authors. */
+export interface ManifestSource {
+  title: string;
+  fullCitation: string;
   url: string | null;
 }
 
-/** One cited paper (manifest `papers[]` / singular `paper_url`). */
-export interface ManifestPaper {
-  title: string | null;
+/** One linked artifact (manifest `artifacts[]`) — repo, dataset, demo, model. */
+export interface ManifestArtifact {
+  name: string;
   url: string;
 }
 
@@ -181,20 +182,18 @@ export interface ModuleSummary {
   description: string | null;
   /** Longer "with this module you can …" text for the About info box. */
   about: string | null;
-  author: string | null;
-  author_url: string | null;
-  /** Link to the scientific paper the module implements (DOI URL preferred). */
-  paper_url: string | null;
-  /** All credited authors (max 20). The singular `author`/`author_url` is folded
-   *  in as the first entry server-side, so this is the canonical list to render. */
-  authors: ManifestAuthor[];
-  /** All cited papers (max 20). The singular `paper_url` is folded in as the
-   *  first entry server-side. */
-  papers: ManifestPaper[];
+  /** Cited works (max 20) — title + full citation string + optional DOI link.
+   *  There are no author fields: `fullCitation` carries the author names. */
+  source: ManifestSource[];
+  /** Optional named links (max 20) — code repo, dataset, demo, released model. */
+  artifacts: ManifestArtifact[];
   license: string | null;
   provides: string[];
   consumes: string[];
   has_frontend: boolean;
+  /** Whether the module page renders the log-scoped filter bar above the panel
+   *  (manifest `frontend.log_filter`); false for panel-less modules. */
+  supports_log_filter: boolean;
   enabled: boolean;
   is_confidential_safe: boolean;
   availability: { status: "available" | "unavailable" | "degraded"; reasons: string[] } | null;

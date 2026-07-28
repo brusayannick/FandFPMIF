@@ -68,7 +68,6 @@ const ADMIN_ROUTES = [
   "/admin/jobs",
   "/admin/teams",
   "/admin/system",
-  "/admin/storage",
   "/admin/controls",
   "/admin/logs",
 ];

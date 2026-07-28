@@ -13,9 +13,19 @@ about: >-
   behaviour, see deviations painted directly onto the diagram, and decide
   whether the model or the process needs fixing.
 keywords: ["conformance", "conformance checking", "fitness", "precision", "deviation", "token replay", "alignments", "reference model", "bpmn", "compliance"]
-author: FlowFactory
-author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
-paper_url: https://doi.org/10.1016/j.is.2007.07.001
+source:
+  - title: Conformance checking of processes based on monitoring real behavior
+    fullCitation: >-
+      A. Rozinat and W. M. P. van der Aalst, "Conformance checking of processes
+      based on monitoring real behavior," Inf. Syst., vol. 33, no. 1,
+      pp. 64-95, 2008
+    url: https://doi.org/10.1016/j.is.2007.07.001
+  - title: "Conformance checking: Foundations, milestones and challenges"
+    fullCitation: >-
+      J. Carmona, B. van Dongen, and M. Weidlich, "Conformance checking:
+      Foundations, milestones and challenges," in Process Mining Handbook,
+      LNBIP vol. 448, Springer, 2022
+    url: https://doi.org/10.1007/978-3-031-08848-3_5
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.
@@ -62,6 +72,7 @@ dependencies:
 # so no npm block is needed here.
 frontend:
   panel: ./panel/index.tsx
+  log_filter: false
   widgets:
     - id: conformance-score
       entry: ./widgets/ConformanceScore.tsx

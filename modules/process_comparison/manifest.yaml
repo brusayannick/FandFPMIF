@@ -13,8 +13,6 @@ about: >-
   systems, or before/after periods and pinpoint where behaviour diverges instead
   of guessing from separate diagrams.
 keywords: ["compare", "comparison", "diff", "difference", "versus", "overlay", "two logs", "process comparison"]
-author: FlowFactory
-author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
 license: MIT
 # Runs entirely locally (pm4py / duckdb) – safe against confidential logs.
 isConfidentialSafe: true
@@ -46,6 +44,7 @@ dependencies:
 
 frontend:
   panel: ./panel/index.tsx
+  log_filter: false
 
 permissions:
   - read:event_log

@@ -15,9 +15,26 @@ about: >-
   time window of each change, distinguish one-off shifts from recurring
   patterns, and pick the right periods to compare before and after.
 keywords: ["concept drift", "drift detection", "drift", "sudden drift", "gradual drift", "recurring drift", "change point"]
-author: A. Kraus and H. van der Aa (2024)
-author_url: https://huggingface.co/datasets/pm-science/cv4cdd_4d
-paper_url: https://doi.org/10.1007/978-3-031-70396-6_16
+source:
+  # The extended manuscript this module ports (see `original README.md`).
+  - title: >-
+      Machine learning-based detection of concept drifts in business processes
+    fullCitation: >-
+      A. Kraus and H. van der Aa, "Machine learning-based detection of concept
+      drifts in business processes," manuscript submitted to the BPM'24 special
+      collection of Process Science, 2024
+  # The conference paper it extends - this is what the DOI resolves to.
+  - title: >-
+      Looking for change: A computer vision approach for concept drift
+      detection in process mining
+    fullCitation: >-
+      A. Kraus and H. van der Aa, "Looking for change: A computer vision
+      approach for concept drift detection in process mining," in Proc. BPM,
+      Springer, 2024
+    url: https://doi.org/10.1007/978-3-031-70396-6_16
+artifacts:
+  - name: cv4cdd training dataset (Hugging Face)
+    url: https://huggingface.co/datasets/pm-science/cv4cdd_4d
 license: CC-BY-4.0
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.
@@ -72,6 +89,7 @@ dependencies:
 
 frontend:
   panel: ./panel/index.tsx
+  log_filter: false
   widgets:
     - id: drift-detections
       entry: ./widgets/DriftDetections.tsx

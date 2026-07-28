@@ -39,7 +39,6 @@ from mate.api.db.models import (
     EventLog,
     Job,
     ModuleInstall,
-    StorageConfig,
     User,
     UserSetting,
 )
@@ -676,13 +675,12 @@ async def storage_insights(
         ).all()
     ]
 
-    cfg = await session.get(StorageConfig, StorageConfig.SINGLETON_ID)
-    mode = cfg.mode if cfg is not None else "local"
     s3_used: int | None = None
     s3_objects: int | None = None
     s3_quota: int | None = None
     s3_error: str | None = None
     s = get_storage_settings()
+    mode = s.mode
     if s.is_s3:
         s3_quota = s.quota_bytes
         try:

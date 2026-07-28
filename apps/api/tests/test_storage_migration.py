@@ -72,21 +72,7 @@ def test_pull_one_downloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert (d / "events.parquet").exists()
 
 
-class _FakeHandle:
-    """Minimal JobHandle stand-in for the migration handler."""
-
-    def __init__(self, direction: str) -> None:
-        self.payload = {"direction": direction}
-        self.progress_calls = 0
-
-    async def progress(self, *a, **k) -> None:
-        self.progress_calls += 1
-
-    def raise_if_cancelled(self) -> None:
-        pass
-
-
-async def test_handler_to_s3_runs_push_over_cache_dirs(
+def test_migrate_to_s3_runs_push_over_cache_dirs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dirs = [tmp_path / "a", tmp_path / "b", tmp_path / "c"]
@@ -94,20 +80,20 @@ async def test_handler_to_s3_runs_push_over_cache_dirs(
     monkeypatch.setattr(migration.eviction, "cache_dirs", lambda: dirs)
     seen: list[Path] = []
     monkeypatch.setattr(migration, "_push_one", lambda d: seen.append(d) or True)
-    handle = _FakeHandle("to_s3")
-    await migration._make_handler()(handle)
+    ticks: list[tuple[int, int]] = []
+    ok, failed = migration.migrate("to_s3", on_progress=lambda i, n, d: ticks.append((i, n)))
     assert seen == dirs
-    assert handle.payload["migrated"] == 3
-    assert handle.payload["failed"] == 0
+    assert (ok, failed) == (3, 0)
+    assert ticks == [(1, 3), (2, 3), (3, 3)]
 
 
-async def test_handler_requires_s3(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_migrate_requires_s3(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(migration, "is_s3", lambda: False)
     with pytest.raises(RuntimeError, match="S3 backend"):
-        await migration._make_handler()(_FakeHandle("to_s3"))
+        migration.migrate("to_s3")
 
 
-async def test_handler_counts_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_migrate_counts_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     dirs = [tmp_path / "a", tmp_path / "b"]
     monkeypatch.setattr(migration, "is_s3", lambda: True)
     monkeypatch.setattr(migration.eviction, "cache_dirs", lambda: dirs)
@@ -118,7 +104,8 @@ async def test_handler_counts_failures(tmp_path: Path, monkeypatch: pytest.Monke
         return True
 
     monkeypatch.setattr(migration, "_push_one", flaky)
-    handle = _FakeHandle("to_s3")
-    await migration._make_handler()(handle)
-    assert handle.payload["migrated"] == 1
-    assert handle.payload["failed"] == 1
+    assert migration.migrate("to_s3") == (1, 1)
+
+
+def test_cli_reports_unknown_command() -> None:
+    assert migration.main(["sideways"]) == 2

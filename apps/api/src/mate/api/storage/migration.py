@@ -1,34 +1,33 @@
-"""Backend-switch data migration (S3_OFFLOAD Phase 3.1).
+"""Backend-switch data migration CLI (S3_OFFLOAD Phase 3.1).
 
-Switching the storage backend doesn't move existing data - new writes go to the
-new backend, old data stays where it was (stranded). This copies it: a
-``storage.migrate`` job walks every per-log + per-module cache dir and pushes it
-to S3 (``to_s3``, after a local→s3 switch) or pulls it down (``to_local``, before
-an s3→local switch).
+Switching ``STORAGE_MODE`` doesn't move existing data - new writes go to the
+new backend, old data stays where it was (stranded). This copies it::
 
-Copy-only - it NEVER deletes the source, so it's always safe to re-run and needs
-no destructive-action confirm. Both directions require S3 to be the active
-backend (the job reads/writes the bucket), so run ``to_local`` BEFORE flipping
-the config back to local.
+    uv run python -m mate.api.storage.migration to_s3     # after local → s3
+    uv run python -m mate.api.storage.migration to_local  # before s3 → local
+    uv run python -m mate.api.storage.migration check     # probe the bucket
+
+Copy-only - it NEVER deletes the source, so it's always safe to re-run. Both
+data directions require S3 to be the active backend (the copy reads/writes the
+bucket): run ``to_s3`` after flipping the env to s3, and ``to_local`` while the
+env still says s3, then flip it back. Safe to run against a live API (uploads
+are additive; the sync hooks tolerate concurrent writes), but a quiet window
+avoids copying a dir mid-write.
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from pathlib import Path
 
 import structlog
 
 from mate.api.config import get_settings
-from mate.api.jobs.runtime import JobHandle, JobRuntime
 from mate.api.storage import eviction, s3
 from mate.api.storage import sync as storage_sync
 from mate.api.storage.config import get_storage_settings, is_s3
 
 log = structlog.get_logger(__name__)
-
-MIGRATION_JOB_TYPE = "storage.migrate"
 
 
 def _s3_cache_dirs() -> list[Path]:
@@ -66,17 +65,31 @@ def _pull_one(local_dir: Path) -> bool:
     return local_dir.exists() and any(local_dir.iterdir())
 
 
-async def _run(
-    handle: JobHandle, dirs: list[Path], fn: Callable[[Path], bool], verb: str
-) -> None:
-    total = len(dirs)
-    await handle.progress(0, total or 1, stage="migrating", message=f"{verb}: {total} dirs")
+def migrate(
+    direction: str, on_progress: Callable[[int, int, str], None] | None = None
+) -> tuple[int, int]:
+    """Copy every cache dir in ``direction`` (``to_s3`` | ``to_local``).
+
+    Returns ``(migrated, failed)``. ``on_progress(done, total, dir)`` fires after
+    each dir. Raises ``RuntimeError`` unless the S3 backend is active.
+    """
+    if not is_s3():
+        raise RuntimeError(
+            "Migration requires the S3 backend to be active - set STORAGE_MODE=s3 "
+            "(+ STORAGE_S3_* connection vars) in the environment first."
+        )
+    if direction == "to_s3":
+        dirs, fn = eviction.cache_dirs(), _push_one
+    elif direction == "to_local":
+        dirs, fn = _s3_cache_dirs(), _pull_one
+    else:
+        raise ValueError(f"Unknown migration direction: {direction!r}")
+
     ok = 0
     failed = 0
     for i, d in enumerate(dirs, 1):
-        handle.raise_if_cancelled()
         try:
-            if await asyncio.to_thread(fn, d):
+            if fn(d):
                 ok += 1
             else:
                 failed += 1
@@ -84,34 +97,51 @@ async def _run(
         except Exception:
             failed += 1
             log.warning("storage.migrate.dir_failed", dir=str(d), exc_info=True)
-        await handle.progress(i, total or 1, stage="migrating", message=f"{verb}: {i}/{total}")
-    handle.payload["migrated"] = ok
-    handle.payload["failed"] = failed
-    await handle.progress(
-        total or 1, total or 1, stage="done", message=f"Migrated {ok}/{total} ({failed} failed)"
+        if on_progress is not None:
+            on_progress(i, len(dirs), str(d))
+    log.info(
+        "storage.migrate.complete", direction=direction, migrated=ok, failed=failed, total=len(dirs)
     )
-    log.info("storage.migrate.complete", verb=verb, migrated=ok, failed=failed, total=total)
+    return ok, failed
 
 
-def _make_handler():
-    async def handler(handle: JobHandle) -> None:
-        direction = handle.payload.get("direction")
-        if not is_s3():
-            raise RuntimeError("Migration requires the S3 backend to be active.")
-        if direction == "to_s3":
-            dirs = await asyncio.to_thread(eviction.cache_dirs)
-            await _run(handle, dirs, _push_one, "Uploading")
-        elif direction == "to_local":
-            dirs = await asyncio.to_thread(_s3_cache_dirs)
-            await _run(handle, dirs, _pull_one, "Downloading")
-        else:
-            raise ValueError(f"Unknown migration direction: {direction!r}")
+def main(argv: list[str] | None = None) -> int:
+    """CLI: ``python -m mate.api.storage.migration [to_s3|to_local|check]``."""
+    import sys
 
-    return handler
+    args = argv if argv is not None else sys.argv[1:]
+    cmd = args[0] if args else ""
+    if cmd == "check":
+        try:
+            s3.head_bucket()
+            settings = get_storage_settings()
+            usage = s3.usage()
+            print(
+                f"OK: bucket {settings.bucket!r} reachable - "
+                f"{usage.object_count} objects, {usage.used_bytes} bytes under "
+                f"prefix {settings.prefix!r}"
+            )
+            return 0
+        except (s3.StorageError, RuntimeError) as exc:
+            print(f"FAILED: {exc}", file=sys.stderr)
+            return 1
+    if cmd in ("to_s3", "to_local"):
+        verb = "Uploading" if cmd == "to_s3" else "Downloading"
+        try:
+            ok, failed = migrate(
+                cmd, on_progress=lambda i, n, d: print(f"{verb} {i}/{n}: {d}", flush=True)
+            )
+        except (RuntimeError, ValueError, s3.StorageError) as exc:
+            print(f"FAILED: {exc}", file=sys.stderr)
+            return 1
+        print(f"Migrated {ok} dirs ({failed} failed)")
+        return 0 if failed == 0 else 1
+    print(
+        "usage: python -m mate.api.storage.migration [to_s3|to_local|check]",
+        file=sys.stderr,
+    )
+    return 2
 
 
-def register_storage_migration_handler(runtime: JobRuntime) -> None:
-    """Wire the ``storage.migrate`` job type onto the runtime (idempotent)."""
-    if MIGRATION_JOB_TYPE in runtime._handlers:  # type: ignore[attr-defined]
-        return
-    runtime.register(MIGRATION_JOB_TYPE, _make_handler())
+if __name__ == "__main__":
+    raise SystemExit(main())

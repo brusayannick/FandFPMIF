@@ -16,9 +16,15 @@ about: >-
   produce unreadable spaghetti models before you discover them, and track
   whether standardization efforts actually reduced variability.
 keywords: ["complexity", "entropy", "variant entropy", "lempel-ziv", "pentland", "structure", "affinity", "epa"]
-author: Augusto et al. (2022)
-author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
-paper_url: https://doi.org/10.1016/j.ins.2022.03.072
+source:
+  - title: >-
+      The connection between process complexity of event sequences and models
+      discovered by process mining
+    fullCitation: >-
+      A. Augusto, J. Mendling, M. Vidgof, and B. Wurm, "The connection between
+      process complexity of event sequences and models discovered by process
+      mining," Inf. Sci., vol. 598, pp. 196-215, 2022
+    url: https://doi.org/10.1016/j.ins.2022.03.072
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

@@ -104,8 +104,8 @@ async def get_jobs_config(user: CurrentUserDep) -> JobsConfigOut:
     """Live job-runtime worker concurrency + bounds (Settings → General → Jobs).
 
     Readable by any user so the slider shows the current value; only admins can
-    change it (see the PUT). Mirrors the ``admin/storage`` GET's ``is_admin``
-    pattern so the page renders a read-only state rather than a hard 403.
+    change it (see the PUT). The ``is_admin`` flag lets the page render a
+    read-only state rather than a hard 403 (mirrors ``admin.export_info``).
     """
     return JobsConfigOut(
         worker_concurrency=get_job_runtime().concurrency(),

@@ -6,7 +6,8 @@ embedded application data stores (SQLite + DuckDB + Parquet), no broker, no clou
 Each user gets a fully isolated workspace – their event logs, jobs, AI keys,
 and module config never bleed across accounts.
 
-For the full design rationale, read [`INSTRUCTIONS.md`](./INSTRUCTIONS.md). For
+All documentation is indexed in [`docs/README.md`](./docs/README.md). For the
+full design rationale, read [`docs/INSTRUCTIONS.md`](./docs/INSTRUCTIONS.md). For
 the module authoring contract, read [`modules/README.md`](./modules/README.md).
 
 ## Quick start
@@ -34,7 +35,7 @@ To add additional users, sign in to the Keycloak admin console at
 | `make dev` | No Docker – runs the API + web dev servers directly with hot reload (needs `uv` + `pnpm` on the host). Fastest inner loop. |
 | `make up` | Base `docker-compose.yml` only: **prod-style built images**, detached, no reload. The default quick-start – closest to prod, minus TLS/proxy. |
 | `make up-dev` | Base **+ `compose.dev.yml`**: hot reload in Docker (`uvicorn --reload` + `next dev`, source-mounted). The in-container dev mode. |
-| *(prod deploy)* | Base **+ `docker-compose.prod.yml`**: adds Caddy/TLS, collapses everything onto one same-origin, and stops publishing the app ports. Run manually – `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`; there is no `make` target. See [`DEPLOY.md`](./DEPLOY.md). |
+| *(prod deploy)* | Base **+ `docker-compose.prod.yml`**: adds Caddy/TLS, collapses everything onto one same-origin, and stops publishing the app ports. Run manually – `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`; there is no `make` target. See [`docs/DEPLOY.md`](./docs/DEPLOY.md). |
 
 In short: **develop** with `make up-dev` (or `make dev` without Docker), **preview the prod build** locally with `make up`, and **deploy** by adding the `docker-compose.prod.yml` overlay.
 
@@ -191,9 +192,10 @@ mate/
 │   ├── module-sdk-ts/   # TS SDK for module frontends
 │   └── shared-types/    # Generated TS types from OpenAPI
 ├── data/            # Bind-mounted; SQLite + Parquet + cached runtimes
+├── docs/            # Design spec, deploy runbook, MCP reference (see docs/README.md)
 ├── docker-compose.yml       # base stack
 ├── compose.dev.yml          # dev overlay – hot reload (make up-dev)
-└── docker-compose.prod.yml  # prod overlay – Caddy/TLS (see DEPLOY.md)
+└── docker-compose.prod.yml  # prod overlay – Caddy/TLS (see docs/DEPLOY.md)
 ```
 
 ## Adding a module

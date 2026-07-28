@@ -57,7 +57,7 @@ import {
   type AiModelsManifest,
   type ModelStoreManifest,
 } from "@/lib/queries";
-import type { ManifestAuthor, ManifestPaper } from "@/lib/api-types";
+import type { ManifestArtifact, ManifestSource } from "@/lib/api-types";
 
 interface AiConfigDraft {
   llm: AiModelSelection;
@@ -156,11 +156,8 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
         category: manifest.category as string,
         description: (manifest.description as string | null) ?? null,
         about: (manifest.about as string | null) ?? null,
-        author: (manifest.author as string | null) ?? null,
-        author_url: (manifest.author_url as string | null) ?? null,
-        paper_url: (manifest.paper_url as string | null) ?? null,
-        authors: (manifest.authors as ManifestAuthor[] | undefined) ?? [],
-        papers: (manifest.papers as ManifestPaper[] | undefined) ?? [],
+        source: (manifest.source as ManifestSource[] | undefined) ?? [],
+        artifacts: (manifest.artifacts as ManifestArtifact[] | undefined) ?? [],
         license: (manifest.license as string | null) ?? null,
         provides: (manifest.provides as string[]) ?? [],
         consumes: (manifest.consumes as string[]) ?? [],
@@ -289,11 +286,8 @@ export function ModuleDetailClient({ moduleId }: { moduleId: string }) {
                 name={m.name}
                 description={m.description}
                 about={m.about}
-                author={m.author}
-                authorUrl={m.author_url}
-                paperUrl={m.paper_url}
-                authors={m.authors}
-                papers={m.papers}
+                sources={m.source}
+                artifacts={m.artifacts}
                 license={m.license}
                 version={m.version}
               />

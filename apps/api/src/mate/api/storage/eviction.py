@@ -13,8 +13,9 @@ Two cooperating pieces:
   eviction of the same dir blocks until it finishes - so a tree can't be deleted
   out from under a running DuckDB scan or a Parquet rewrite.
 * **Reaper** - ``eviction_loop`` periodically sweeps; when the cache exceeds the
-  admin budget it deletes the least-recently-used *unleased* dirs locally (the
-  bytes survive on S3 and re-hydrate on the next read).
+  configured budget (``LOCAL_CACHE_MAX_BYTES``) it deletes the least-recently-
+  used *unleased* dirs locally (the bytes survive on S3 and re-hydrate on the
+  next read).
 
 Hard invariants:
 
@@ -42,9 +43,6 @@ from mate.api.config import get_settings
 from mate.api.storage.config import is_s3
 
 log = structlog.get_logger(__name__)
-
-# Live-override SystemSetting key (admin tunes the budget without a restart).
-STORAGE_CACHE_KEY = "storage.cache"
 
 # Lease + eviction coordination. One Condition guards every map below; a reader
 # waits on it to out-last an in-flight eviction of the same dir (sub-second)
@@ -137,7 +135,7 @@ def _end_evict(marker: str) -> None:
 
 
 # --------------------------------------------------------------------------
-# Config (env defaults + live admin override).
+# Config (env-only: LOCAL_CACHE_MAX_BYTES / CACHE_EVICT_* in Settings).
 # --------------------------------------------------------------------------
 
 
@@ -149,54 +147,13 @@ class EvictionConfig:
     low_water_ratio: float = 0.9  # evict down to this fraction of max_bytes
 
 
-def _env_config() -> EvictionConfig:
+def load_eviction_config() -> EvictionConfig:
     s = get_settings()
     return EvictionConfig(
         max_bytes=max(0, s.local_cache_max_bytes),
         dry_run=s.cache_evict_dry_run,
         min_age_seconds=float(s.cache_evict_min_age_seconds),
     )
-
-
-async def load_eviction_config() -> EvictionConfig:
-    """Env defaults with an admin's live override (SystemSetting ``storage.cache``)
-    layered on top, so the budget / dry-run flag can change without a restart."""
-    cfg = _env_config()
-    try:
-        from mate.api.db.models import SystemSetting
-        from mate.api.db.session import get_sessionmaker
-
-        async with get_sessionmaker()() as session:
-            row = await session.get(SystemSetting, STORAGE_CACHE_KEY)
-        val = row.value_json if row is not None else None
-        if isinstance(val, dict):
-            cfg = EvictionConfig(
-                max_bytes=max(0, int(val.get("max_bytes", cfg.max_bytes) or 0)),
-                dry_run=bool(val.get("dry_run", cfg.dry_run)),
-                min_age_seconds=float(val.get("min_age_seconds", cfg.min_age_seconds)),
-            )
-    except Exception:
-        log.warning("storage.eviction.load_config_failed", exc_info=True)
-    return cfg
-
-
-async def save_eviction_config(max_bytes: int, dry_run: bool, min_age_seconds: int) -> None:
-    """Upsert the live override into ``system_settings`` (admin route)."""
-    from mate.api.db.models import SystemSetting
-    from mate.api.db.session import get_sessionmaker
-
-    value = {
-        "max_bytes": max(0, int(max_bytes)),
-        "dry_run": bool(dry_run),
-        "min_age_seconds": max(0, int(min_age_seconds)),
-    }
-    async with get_sessionmaker()() as session:
-        row = await session.get(SystemSetting, STORAGE_CACHE_KEY)
-        if row is None:
-            session.add(SystemSetting(key=STORAGE_CACHE_KEY, value_json=value))
-        else:
-            row.value_json = value
-        await session.commit()
 
 
 # --------------------------------------------------------------------------
@@ -368,7 +325,7 @@ async def eviction_loop() -> None:
             await asyncio.sleep(interval)
             if not is_s3():
                 continue  # cheap guard - no scan in local mode
-            cfg = await load_eviction_config()
+            cfg = load_eviction_config()
             if cfg.max_bytes <= 0:
                 continue
             report = await asyncio.to_thread(evict_once, cfg)

@@ -18,14 +18,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import {
-  Popover,
-  PopoverContent,
-  PopoverDescription,
-  PopoverHeader,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ModuleAboutContent } from "@/components/modules/module-about";
 import { useEventLogs, useModules } from "@/lib/queries";
 import { useDashboards } from "@/lib/dashboard-queries";
@@ -115,11 +108,8 @@ export function Topbar() {
         name: m.name,
         description: m.description,
         about: m.about,
-        author: m.author,
-        authorUrl: m.author_url,
-        paperUrl: m.paper_url,
-        authors: m.authors,
-        papers: m.papers,
+        sources: m.source,
+        artifacts: m.artifacts,
         license: m.license,
         version: m.version,
       },
@@ -202,13 +192,8 @@ function AnimatedCrumbs({
           className="flex min-w-0 items-center justify-center gap-1"
         >
           <TrimmedBreadcrumbs crumbs={crumbs} />
-          {meta.module ? (
-            <PageInfoButton title={meta.title} module={meta.module} />
-          ) : (
-            meta.description && (
-              <PageInfoButton title={meta.title} description={meta.description} />
-            )
-          )}
+          {/* ⓘ only on in-module pages – the module "About" card. */}
+          {meta.module && <PageInfoButton title={meta.title} module={meta.module} />}
         </motion.div>
       </AnimatePresence>
     </div>
@@ -304,15 +289,7 @@ function TrimmedBreadcrumbs({ crumbs }: { crumbs: Crumb[] }) {
   );
 }
 
-function PageInfoButton({
-  title,
-  description,
-  module,
-}: {
-  title: string;
-  description?: string;
-  module?: ModuleAbout;
-}) {
+function PageInfoButton({ title, module }: { title: string; module: ModuleAbout }) {
   return (
     <Popover>
       <PopoverTrigger
@@ -321,18 +298,9 @@ function PageInfoButton({
       >
         <Info className="h-3.5 w-3.5" />
       </PopoverTrigger>
-      {module ? (
-        <PopoverContent align="center" className="w-96 max-w-[calc(100vw-2rem)] space-y-3">
-          <ModuleAboutContent {...module} />
-        </PopoverContent>
-      ) : (
-        <PopoverContent align="center" className="w-80">
-          <PopoverHeader>
-            <PopoverTitle>{title}</PopoverTitle>
-            <PopoverDescription>{description}</PopoverDescription>
-          </PopoverHeader>
-        </PopoverContent>
-      )}
+      <PopoverContent align="center" className="w-96 max-w-[calc(100vw-2rem)] space-y-3">
+        <ModuleAboutContent {...module} />
+      </PopoverContent>
     </Popover>
   );
 }

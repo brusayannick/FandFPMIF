@@ -1,6 +1,6 @@
 """Global storage-quota enforcement (S3_OFFLOAD Phase 3.2).
 
-``StorageConfig.quota_bytes`` is an admin-entered ceiling on total bucket usage
+``STORAGE_S3_QUOTA_BYTES`` is an operator-set ceiling on total bucket usage
 (under the configured prefix). This gates new-data writes (event-log imports) so
 the bucket can't grow past it. Computing usage is an S3 LIST, so the total is
 cached for a short TTL - a per-write LIST would be far too costly. Freeing space

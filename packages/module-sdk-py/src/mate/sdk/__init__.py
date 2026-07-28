@@ -36,24 +36,24 @@ from mate.sdk.context import (
 from mate.sdk.decorators import job, on_event, route
 from mate.sdk.errors import Cancelled, ModuleError, ModuleManifestError
 from mate.sdk.manifest import (
-    Author,
+    Artifact,
     DependenciesPython,
     EventLogRequirements,
     Manifest,
     ManifestFrontend,
     ModuleCategory,
     OptionalModuleDep,
-    Paper,
     Requirements,
     RuntimeJvm,
     RuntimePython,
+    Source,
 )
 from mate.sdk.module import Module
 
 __version__ = "0.2.0"
 
 __all__ = [
-    "Author",
+    "Artifact",
     "CancellationProtocol",
     "Cancelled",
     "DependenciesPython",
@@ -71,12 +71,12 @@ __all__ = [
     "ModuleRegistryProtocol",
     "OpenEventLogProtocol",
     "OptionalModuleDep",
-    "Paper",
     "ProgressReporterProtocol",
     "Requirements",
     "ResultCacheProtocol",
     "RuntimeJvm",
     "RuntimePython",
+    "Source",
     "job",
     "on_event",
     "route",

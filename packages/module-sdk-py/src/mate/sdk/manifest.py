@@ -178,6 +178,12 @@ class ManifestFrontend(BaseModel):
     side_rail: str | None = None
     widgets: list[WidgetEntry] = Field(default_factory=list)
     page_layout: list[PageLayoutSection] = Field(default_factory=list)
+    # Whether the platform renders its log-scoped filter bar (column filters +
+    # time range) above this module's panel. Set false when narrowing the log
+    # doesn't apply to what the panel shows - e.g. it reads a user-triggered
+    # result, or it picks its own logs to compare - so the bar can't offer a
+    # filter the panel won't honour.
+    log_filter: bool = True
 
 
 class DatasetEntry(BaseModel):
@@ -272,32 +278,43 @@ class ModelStoreManifest(BaseModel):
     config_key: str = "model"
 
 
-# A manifest may credit up to this many authors and cite up to this many papers.
-MAX_AUTHORS = 20
-MAX_PAPERS = 20
+# A manifest may cite up to this many sources and link up to this many artifacts.
+MAX_SOURCES = 20
+MAX_ARTIFACTS = 20
+
+# Author credits were removed from the manifest: a source's `fullCitation`
+# carries the author names, so these keys are rejected instead of silently
+# dropped by `extra="ignore"` (see `_reject_removed_credit_fields`).
+_REMOVED_CREDIT_FIELDS = ("author", "author_url", "authors", "paper_url", "papers")
 
 
-class Author(BaseModel):
-    """One credited author/attribution for a module.
+class Source(BaseModel):
+    """One work a module implements/cites - a paper, a book, a report.
 
-    Mirrors the singular `author` (name) + `author_url` (optional link) pair:
-    a display name plus an optional link (upstream repo, homepage, or profile).
-    Omitting `url` keeps the author badge non-clickable.
+    `title` is the short label the UI links. `full_citation` (YAML
+    `fullCitation`) is the full reference in **IEEE style with the DOI omitted**
+    and no final period - the DOI belongs in `url`, so repeating it would print
+    the same link twice in one row (house style, see `modules/README.md` §3).
+    `url` is optional; omit it and the title renders as plain text with the
+    citation underneath.
     """
 
-    name: str
+    model_config = ConfigDict(populate_by_name=True)
+
+    title: str
+    full_citation: str = Field(alias="fullCitation")
     url: str | None = None
 
 
-class Paper(BaseModel):
-    """One scientific paper a module implements/cites.
+class Artifact(BaseModel):
+    """One linked artifact a module points at - code, data, or a model.
 
-    Mirrors the singular `paper_url` but adds a `title` so several papers can be
-    told apart in the UI. `url` (DOI URL preferred) is required; `title` is
-    optional and falls back to a generic "Read the paper" label when absent.
+    A plain named link (`name` is what the UI shows, `url` is where it goes),
+    used for the reference implementation's repo, a dataset, a demo, or a
+    released model. Unlike a `Source` it carries no citation.
     """
 
-    title: str | None = None
+    name: str
     url: str
 
 
@@ -316,27 +333,16 @@ class Manifest(BaseModel):
     # 2-4 sentences, user-facing, plain language. Falls back to `description`
     # when omitted.
     about: str | None = None
-    # Singular author/paper fields - kept for backward compatibility. Every
-    # existing manifest uses these. `_merge_author_credits` folds them into the
-    # plural `authors`/`papers` lists (as the FIRST entry) so consumers can read
-    # a single canonical list; the singular fields stay populated for old code.
-    author: str | None = None
-    # Optional link for the author badge in the UI - the cited paper, upstream
-    # repo, or homepage. Omitting it keeps the badge non-clickable.
-    author_url: str | None = None
-    # Optional link to the scientific paper the module implements (DOI URL
-    # preferred). Rendered as a "Paper" link in the module info box - distinct
-    # from `author_url`, which usually points at the upstream repo/homepage.
-    paper_url: str | None = None
-    # Plural author/paper credits (max 20 each). A module may list multiple
-    # authors and cite multiple papers. Backward compat: the singular
-    # `author`/`author_url` and `paper_url` are merged in as the first entry of
-    # the respective list (see `_merge_author_credits`), so a manifest can use
-    # either form - or both, with the singular value leading. The max-20 cap is
-    # enforced both on the declared list (Pydantic `max_length`) and on the
-    # post-merge list (`_merge_author_credits`), failing loud on overflow.
-    authors: list[Author] = Field(default_factory=list, max_length=MAX_AUTHORS)
-    papers: list[Paper] = Field(default_factory=list, max_length=MAX_PAPERS)
+    # The works this module implements/cites (max 20). Each entry is
+    # `{title, fullCitation, url?}` - the citation string carries the author
+    # names, which is why the manifest has no author fields at all (declaring
+    # one is an error, see `_reject_removed_credit_fields`).
+    source: list[Source] = Field(default_factory=list, max_length=MAX_SOURCES)
+    # Optional named links (max 20) - the reference implementation's repo, a
+    # dataset, a demo, a released model. Rendered as their own row in the "About
+    # this module" box, below the cited sources. An artifact is `{name, url}`,
+    # both required, and an empty list simply renders nothing.
+    artifacts: list[Artifact] = Field(default_factory=list, max_length=MAX_ARTIFACTS)
     license: str | None = None
 
     # Which language runtime executes this module. Absent = Python (every
@@ -382,40 +388,27 @@ class Manifest(BaseModel):
     # ``module_configs.config_json[model_store.config_key]``.
     model_store: ModelStoreManifest | None = None
 
-    @model_validator(mode="after")
-    def _merge_author_credits(self) -> Self:
-        """Fold the singular `author`/`author_url`/`paper_url` into the plural
-        `authors`/`papers` lists as the FIRST entry (backward-compat merge).
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_credit_fields(cls, data: Any) -> Any:
+        """Fail loud on the removed author/paper credit fields.
 
-        Rules:
-        - The singular value always leads the merged list, unless an equal entry
-          (same author name / same paper url) is already present, in which case
-          it is not duplicated.
-        - `author_url` without an `author` name is ignored (an author needs a
-          name); a bare `paper_url` becomes a titleless paper.
-        - After merging, each list must still hold at most 20 entries, or the
-          manifest fails loud - same ceiling as the declared list.
+        `model_config` uses `extra="ignore"`, so a manifest still declaring
+        `author:` or `papers:` would silently lose its credits instead of
+        showing them. Reject it with the migration hint: everything is a
+        `source:` entry now, and the author names live in its `fullCitation`.
         """
-        if self.author is not None:
-            lead = Author(name=self.author, url=self.author_url)
-            if not any(a.name == lead.name for a in self.authors):
-                self.authors = [lead, *self.authors]
-        if self.paper_url is not None:
-            lead_paper = Paper(url=self.paper_url)
-            if not any(p.url == lead_paper.url for p in self.papers):
-                self.papers = [lead_paper, *self.papers]
-
-        if len(self.authors) > MAX_AUTHORS:
+        if not isinstance(data, dict):
+            return data
+        found = [key for key in _REMOVED_CREDIT_FIELDS if key in data]
+        if found:
             raise ModuleManifestError(
-                f"Too many authors ({len(self.authors)}) - at most {MAX_AUTHORS} are allowed "
-                "(including the singular `author`)."
+                f"Manifest field(s) {', '.join(repr(f) for f in found)} are no longer supported. "
+                "Cite the work under `source:` instead - a list of "
+                "`{title, fullCitation, url?}` entries whose `fullCitation` carries the "
+                "author names."
             )
-        if len(self.papers) > MAX_PAPERS:
-            raise ModuleManifestError(
-                f"Too many papers ({len(self.papers)}) - at most {MAX_PAPERS} are allowed "
-                "(including the singular `paper_url`)."
-            )
-        return self
+        return data
 
     @model_validator(mode="after")
     def _validate_id(self) -> Self:

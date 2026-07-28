@@ -15,8 +15,18 @@ about: >-
   changes, and ask follow-up questions in the built-in chat. It sends excerpts
   to an external LLM, so avoid confidential logs.
 keywords: ["explain drift", "drift explanation", "why drift", "drift reason", "root cause drift", "drift cause"]
-author: J. Schaffner
-author_url: https://github.com/janschaffner/concept_drift_explainer
+source:
+  # The master's thesis this module ports. No DOI.
+  - title: >-
+      Explaining concept drifts in business processes: An LLM-based approach to
+      context-aware sense-making in process mining
+    fullCitation: >-
+      J. Schaffner, "Explaining concept drifts in business processes: An
+      LLM-based approach to context-aware sense-making in process mining,"
+      master's thesis, University of Münster, 2025
+artifacts:
+  - name: Concept Drift Explainer
+    url: https://github.com/janschaffner/concept_drift_explainer
 license: MIT
 default_enabled: true
 # Sends event-log excerpts and uploaded documents to an external LLM – not
@@ -64,6 +74,7 @@ dependencies:
 
 frontend:
   panel: ./panel/index.tsx
+  log_filter: false
   widgets:
     - id: drift-overview
       entry: ./widgets/DriftOverview.tsx

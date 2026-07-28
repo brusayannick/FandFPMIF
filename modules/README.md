@@ -1,6 +1,6 @@
 # Authoring a Mate Module
 
-This is the practical guide for building a module. For the platform-level rationale (why Parquet, why DuckDB, why per-module venvs) read [`/INSTRUCTIONS.md` §5](../INSTRUCTIONS.md). This document is the contract: what to put on disk, what the platform calls, what your module is allowed to call back.
+This is the practical guide for building a module. For the platform-level rationale (why Parquet, why DuckDB, why per-module venvs) read [`/docs/INSTRUCTIONS.md` §5](../docs/INSTRUCTIONS.md). This document is the contract: what to put on disk, what the platform calls, what your module is allowed to call back.
 
 ---
 
@@ -52,7 +52,7 @@ name: My Module                     # human-readable
 version: 0.1.0
 category: foundation                # foundation | attribute | external_input | advanced | other
 description: One-line summary shown on the module card.
-author: You                         # optional. Also author_url, paper_url; or plural authors:/papers: (see below)
+source: []                          # optional – cited works; also artifacts: (see below)
 license: MIT
 keywords: [my topic, synonym, domain term]   # optional – helps MATE AI route chat
                                              # messages to this module. Omit and the
@@ -112,27 +112,54 @@ Rules the manifest validator enforces:
 
 `inherit` exists so process-mining modules don't reinstall pandas/numpy/pm4py per module – those weigh hundreds of MB. Anything not inherited is fully isolated to your `.venv`.
 
-### Crediting authors and papers
+### Citing sources and linking artifacts
 
-`author` / `author_url` / `paper_url` are the single-credit shorthand. To credit **more than one** author or cite **more than one** paper, use the plural lists (either instead of, or alongside, the singular fields, which fold in as the first entry):
+Credit goes in two lists. `source` cites the works the module implements – the citation string carries the author names, which is why **the manifest has no author fields**. `artifacts` links whatever else belongs to the module: the reference implementation's repo, a dataset, a demo, a released model.
 
 ```yaml
-authors:                             # max 20
-  - name: Jane Doe
-    url: https://github.com/janedoe  # optional; omit and the name isn't a link
-  - name: John Smith                 # url optional
-papers:                              # max 20
-  - title: A Great Paper (ICPM 2024) # optional; omit and the link reads "Read the paper"
-    url: https://doi.org/10.1109/xxxx # required (DOI URL preferred)
+source:                              # max 20 – cited works
+  - title: A Great Paper             # required – short label, this is what links out
+    fullCitation: >-                 # required – IEEE style, DOI omitted (see below)
+      J. Doe and J. Smith, "A great paper," in 2024 6th International Conference
+      on Process Mining (ICPM), Aachen, Germany, 2024, pp. 1-8
+    url: https://doi.org/10.1109/xxxx  # optional – the DOI link belongs here
   - title: Follow-up Work
-    url: https://doi.org/10.1109/yyyy
+    fullCitation: >-
+      J. Doe, "Follow-up work," Information Systems, vol. 1, no. 2, pp. 10-25,
+      2025
+    url: https://doi.org/10.1016/yyyy
+artifacts:                           # max 20 – optional named links
+  - name: Reference implementation   # required – this is the label the UI shows
+    url: https://github.com/janedoe/great-miner   # required
+  - name: Benchmark dataset (Zenodo)
+    url: https://doi.org/10.5281/zenodo.xxxxxxx
 ```
 
-- `authors[]` entries are `{ name (required), url? }`; `papers[]` entries are `{ title?, url (required) }`. Each list caps at 20.
-- Mixing forms is fine: singular `author`/`author_url` folds into `authors[0]` and `paper_url` into `papers[0]`, with the singular value leading. A duplicate (same name, or same paper url) isn't added twice; a bare `author_url` with no `author` name is ignored.
-- More than 20 entries in either list (counting the folded singular) fails loud at startup.
+**`fullCitation` house style: IEEE, minus the DOI.** IEEE is what the venues this platform cites (ICPM, BPM, TKDE, Elsevier CS journals) print and what their "cite this" buttons emit, so it is the cheapest style to copy correctly. Drop the trailing `, doi: 10.xxxx/yyyy.` – the DOI lives in `url`, and repeating it puts the same link twice in one popover row. End the string after the year (or the page range) with **no** final period:
 
-Live example: [`actor_performance/manifest.yaml`](./actor_performance/manifest.yaml). Schema: `Author`, `Paper`, `MAX_AUTHORS`/`MAX_PAPERS` in [`manifest.py`](../packages/module-sdk-py/src/mate/sdk/manifest.py).
+```
+Journal:    A. Author, B. Author, and C. Author, "Title in sentence case,"
+            Abbrev. J. Name, vol. X, no. Y, pp. A-B, YEAR
+Conference: A. Author et al., "Title in sentence case," in Proc. ICPM, YEAR, pp. A-B
+Chapter:    A. Author and B. Author, "Title in sentence case," in Proc. BPM,
+            Springer, YEAR
+Thesis:     A. Author, "Title in sentence case," master's thesis, University of X, YEAR
+```
+
+- Keep it short: abbreviated IEEE journal names (`Inf. Sci.`, `Inf. Syst.`, `IEEE Trans. Knowl. Data Eng.`, `Fundam. Inform.`, `Softw. Impacts`) and `in Proc. <ACRONYM>, YEAR` instead of the full proceedings title. The row is ~380px wide in the About popover; a spelled-out conference name wraps to four lines and says nothing extra.
+- Authors as `F. M. Surname`, initials first, `and` before the last one; 6+ authors may collapse to `A. Author et al.`. Since the manifest has no author fields, this string is the **only** place authors are credited – get the names right and don't truncate to the first one.
+- Title inside the quotes verbatim as published, sentence case. `title:` above it repeats it (it's the UI label and the popover link text).
+- Cite the work(s) the module **implements**, not every measure it happens to compute. Per-metric attributions belong in the panel's hover hints (see `complexity/panel/metric-info.tsx`), not in twelve `source` entries.
+- Mixing styles (APA, ACM, plain prose) across manifests is the thing to avoid – every module's About box shows citations from a different manifest side by side.
+
+Other rules:
+
+- `source[]` entries are `{ title (required), fullCitation (required), url? }`; `artifacts[]` entries are `{ name (required), url (required) }`. Each list caps at 20; more fails loud at startup.
+- `author`, `author_url`, `authors`, `paper_url` and `papers` are **removed**. A manifest still declaring any of them is rejected at startup with a migration hint – put the names in `fullCitation` instead.
+- Both lists render as rows in the platform's "About this module" box: a source shows its title (linked when `url` is set) with the full citation underneath, an artifact shows its name as a link. Omit a list and nothing renders.
+- `fullCitation` is the YAML spelling (the SDK field is `full_citation`, and the API serialises it back as `fullCitation`).
+
+Live examples: [`pcomp/manifest.yaml`](./pcomp/manifest.yaml) (two sources + two artifacts), [`actor_performance/manifest.yaml`](./actor_performance/manifest.yaml). Schema: `Source`, `Artifact`, `MAX_SOURCES`/`MAX_ARTIFACTS` in [`manifest.py`](../packages/module-sdk-py/src/mate/sdk/manifest.py).
 
 ### `log_model` – case-centric vs object-centric (declare it!)
 

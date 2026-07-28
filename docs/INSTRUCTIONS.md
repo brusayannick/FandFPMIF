@@ -45,8 +45,9 @@ A **locally-hosted, lightweight, modular** process analysis platform. State-of-t
 | Server state | TanStack Query v5 |
 | Client state | Zustand (with `persist` for UI prefs) |
 | UI | shadcn/ui + Tailwind v4 |
-| Charts | Recharts + ECharts (heavier viz) |
+| Charts | Recharts |
 | Graph canvas | xyflow (React Flow) |
+| BPMN render | bpmn-js (read-only `NavigatedViewer`) + bpmn-auto-layout — bundled per-panel, not externalized |
 | Realtime | native WebSocket client |
 | Validation | Zod (schemas mirrored from Pydantic) |
 | Type sync | `openapi-typescript` codegen from `/openapi.json` |
@@ -161,7 +162,8 @@ name: Performance                   # human-readable
 version: 1.2.0
 category: foundation                # foundation | attribute | external_input | advanced | other
 description: Throughput, lead time, waiting / sojourn time, bottleneck detection.
-author: Mate Core                   # or plural authors:/papers: lists (max 20 each) – see modules/README.md §3
+source: []                          # cited works ({title, fullCitation, url?}, max 20); also
+                                    # artifacts: for repo/dataset links – see modules/README.md §3
 license: MIT
 
 requirements:
@@ -272,7 +274,7 @@ Each module declares its own runtime dependencies in the manifest. The platform 
 | Mode | When | How |
 |---|---|---|
 | `in_process` (default) | Pure-Python deps, or deps with no native conflicts with anything inherited / other modules. | The custom `MetaPathFinder` shims imports against `modules/<folder>/.venv/site-packages`. Fast, zero IPC. |
-| `subprocess` | Module needs a native lib version that conflicts with the platform's (e.g. `numpy 1.x` while platform ships `numpy 2.x`). | Platform spawns a long-lived worker subprocess from the module's `.venv/bin/python` via [subprocess_host.py](apps/api/src/mate/api/modules/subprocess_host.py). Communication is bidirectional JSON-RPC over a Unix socket: host → worker for handler calls, worker → host for every `ctx.*` access. Same `ModuleContext` interface; transport is hidden from author. Slower (IPC) but provides true isolation. |
+| `subprocess` | Module needs a native lib version that conflicts with the platform's (e.g. `numpy 1.x` while platform ships `numpy 2.x`). | Platform spawns a long-lived worker subprocess from the module's `.venv/bin/python` via [subprocess_host.py](../apps/api/src/mate/api/modules/subprocess_host.py). Communication is bidirectional JSON-RPC over a Unix socket: host → worker for handler calls, worker → host for every `ctx.*` access. Same `ModuleContext` interface; transport is hidden from author. Slower (IPC) but provides true isolation. |
 
 The manifest sets `dependencies.python.isolation: subprocess` explicitly. Auto-promotion is not implemented – authors pick the mode.
 
@@ -282,18 +284,18 @@ The manifest sets `dependencies.python.isolation: subprocess` explicitly. Auto-p
 - DataFrame views (`ctx.event_log.pandas()` / `polars()` / `pm4py()`) raise inside the worker – shipping a DataFrame across the socket would need Parquet round-trip or Arrow IPC. Use `await ctx.event_log.duckdb_fetch(sql)` instead; it returns JSON-serialisable rows.
 - `ctx.registry.has()` (sync) raises; use `await ctx.registry.call(...)` instead.
 
-Both limitations are extension points – the wire protocol in [subprocess_worker.py](apps/api/src/mate/api/modules/subprocess_worker.py) is the place to add them when a module actually needs DataFrame transfer.
+Both limitations are extension points – the wire protocol in [subprocess_worker.py](../apps/api/src/mate/api/modules/subprocess_worker.py) is the place to add them when a module actually needs DataFrame transfer.
 
 #### Frontend (JS / TS)
 
 Same story, with one architectural choice worth flagging: module bundles **must share the host's React, shadcn primitives, and TanStack Query instances** so hook context flows across module boundaries and modules pick up the host's theme automatically. We solve that with a shared runtime contract rather than bundling everything per-module.
 
-- The web container runs [apps/web/scripts/bundle-modules.mjs](apps/web/scripts/bundle-modules.mjs) – esbuilds each module's `frontend.panel` (and any declared `frontend.widgets`) into `modules/<folder>/.dist/<entry>.js` as a **CJS** bundle with every shared dep marked as `external`. The dev script runs it in `--watch` mode alongside `next dev`; the production Docker image runs it once at container start.
-- **The shared runtime.** [apps/web/lib/module-runtime.ts](apps/web/lib/module-runtime.ts) lazily imports React, ReactDOM, TanStack Query, xyflow, lucide, recharts, sonner, radix, d3-hierarchy, elkjs, every shadcn primitive used by panels today, plus `@/lib/api`, `@/lib/cn`, `@/lib/format`, `@/lib/ws`, `@/lib/module-widgets`, `@/lib/module-layout`, and the visualization-settings store – and assigns them all to `window.__FF_RUNTIME__`. The list is authoritative: it lives in [apps/web/lib/runtime-externals.json](apps/web/lib/runtime-externals.json) and is read by both the bundler (as the `external:` array) and the runtime installer (which asserts the two stay in sync).
+- The web container runs [apps/web/scripts/bundle-modules.mjs](../apps/web/scripts/bundle-modules.mjs) – esbuilds each module's `frontend.panel` (and any declared `frontend.widgets`) into `modules/<folder>/.dist/<entry>.js` as a **CJS** bundle with every shared dep marked as `external`. The dev script runs it in `--watch` mode alongside `next dev`; the production Docker image runs it once at container start.
+- **The shared runtime.** [apps/web/lib/module-runtime.ts](../apps/web/lib/module-runtime.ts) lazily imports React, ReactDOM, TanStack Query, xyflow, lucide, recharts, sonner, radix, d3-hierarchy, elkjs, every shadcn primitive used by panels today, plus `@/lib/api`, `@/lib/cn`, `@/lib/format`, `@/lib/ws`, `@/lib/module-widgets`, `@/lib/module-layout`, and the visualization-settings store – and assigns them all to `window.__FF_RUNTIME__`. The list is authoritative: it lives in [apps/web/lib/runtime-externals.json](../apps/web/lib/runtime-externals.json) and is read by both the bundler (as the `external:` array) and the runtime installer (which asserts the two stay in sync).
 - **Lazy install.** `installModuleRuntime()` returns a Promise and dynamic-imports its 30+ deps so non-module pages never pay the cost – important because some of those packages (xyflow, recharts) inject styles at import time and would otherwise force hydration mismatches on every page.
-- **Serving.** Built bundles are served by FastAPI under `/api/v1/modules/{id}/assets/<path>` ([apps/api/src/mate/api/routes/modules.py](apps/api/src/mate/api/routes/modules.py)) – strict path-traversal check, `application/javascript` MIME.
-- **Loader.** [apps/web/lib/module-panels.tsx](apps/web/lib/module-panels.tsx) fetches the bundle text, awaits `installModuleRuntime()`, then executes via `new Function(module, exports, require, source)` with a `require()` shim that reads from `window.__FF_RUNTIME__`. Picks `Panel`, `default`, or the first React-component-looking export. `getModulePanel(moduleId, { hasFrontend })` returns the wrapper for any module declaring `frontend.panel` and `null` otherwise (so the placeholder card renders without a 404 fetch).
-- **Cross-module widgets.** [apps/web/lib/module-widgets.tsx](apps/web/lib/module-widgets.tsx) exposes `useWidget(sourceModuleId, widgetId)` which resolves a widget bundle via the same loader. Re-exported from `@mate/module-sdk-ts`.
+- **Serving.** Built bundles are served by FastAPI under `/api/v1/modules/{id}/assets/<path>` ([apps/api/src/mate/api/routes/modules.py](../apps/api/src/mate/api/routes/modules.py)) – strict path-traversal check, `application/javascript` MIME.
+- **Loader.** [apps/web/lib/module-panels.tsx](../apps/web/lib/module-panels.tsx) fetches the bundle text, awaits `installModuleRuntime()`, then executes via `new Function(module, exports, require, source)` with a `require()` shim that reads from `window.__FF_RUNTIME__`. Picks `Panel`, `default`, or the first React-component-looking export. `getModulePanel(moduleId, { hasFrontend })` returns the wrapper for any module declaring `frontend.panel` and `null` otherwise (so the placeholder card renders without a 404 fetch).
+- **Cross-module widgets.** [apps/web/lib/module-widgets.tsx](../apps/web/lib/module-widgets.tsx) exposes `useWidget(sourceModuleId, widgetId)` which resolves a widget bundle via the same loader. Re-exported from `@mate/module-sdk-ts`.
 - **Deletion.** Removing the folder removes both `.venv/` and `.dist/`. Nothing in `apps/web/package.json` to revert.
 
 #### Conflict detection & lifecycle
@@ -376,7 +378,7 @@ Notes:
 
 ### 5.6 Module entry point – `module.py`
 
-`PerformanceModule` below is the actual class shipped under [modules/performance/](modules/performance/); the second snippet (`ExtensionModule`) is a synthetic illustration of the `@job` decorator. Both show the SDK shape any module author writes.
+`PerformanceModule` below is the actual class shipped under [modules/performance/](../modules/performance/); the second snippet (`ExtensionModule`) is a synthetic illustration of the `@job` decorator. Both show the SDK shape any module author writes.
 
 ```python
 from mate.sdk import Module, ModuleContext, on_event, route
@@ -630,7 +632,7 @@ shadcn `Form` sections:
 - **Jobs.** Worker concurrency – a live slider backed by `GET`/`PUT /system/jobs`. Any user sees the current value; an **admin** can change it, which resizes the asyncio worker pool immediately (graceful – running jobs are never interrupted) and persists it in `system_settings` so the change survives a restart. This is a **system-wide** setting (one shared runtime for all tenants), not part of the per-user settings sync.
 - **Telemetry.** Off by default; an opt-in switch (the platform is local-first, no telemetry without consent).
 
-Settings live in client-side zustand stores (`useUi`, [apps/web/lib/stores/ui.ts](apps/web/lib/stores/ui.ts); `useVizSettings`) with the `persist` middleware writing to `localStorage` for instant reads. [apps/web/components/server-state-sync.tsx](apps/web/components/server-state-sync.tsx) then bridges these stores to per-user server state in `user_settings (key, value_json)`: each store is hydrated from the server on sign-in and changes are debounce-saved back, so prefs are per-account and follow the user across browsers instead of bleeding between accounts via shared `localStorage`.
+Settings live in client-side zustand stores (`useUi`, [apps/web/lib/stores/ui.ts](../apps/web/lib/stores/ui.ts); `useVizSettings`) with the `persist` middleware writing to `localStorage` for instant reads. [apps/web/components/server-state-sync.tsx](../apps/web/components/server-state-sync.tsx) then bridges these stores to per-user server state in `user_settings (key, value_json)`: each store is hydrated from the server on sign-in and changes are debounce-saved back, so prefs are per-account and follow the user across browsers instead of bleeding between accounts via shared `localStorage`.
 
 #### 7.6.2 Modules
 
@@ -644,10 +646,10 @@ Each module's *Configure* opens the deep page (`/settings/modules/{moduleId}`):
 
 - **About:** rendered manifest (id, version, category, requires-python, author, license, link to docs if declared).
 - **Requirements:** event-log requirements + dep status (✓ / ✗ for each `requirements.modules` and `optional_modules`).
-- **Provides / consumes:** capability tables, plus a live xyflow graph ([apps/web/components/settings/capability-graph.tsx](apps/web/components/settings/capability-graph.tsx)) showing which other installed modules reference this one (edges are `provides → consumes` with the capability name as label).
+- **Provides / consumes:** capability tables, plus a live xyflow graph ([apps/web/components/settings/capability-graph.tsx](../apps/web/components/settings/capability-graph.tsx)) showing which other installed modules reference this one (edges are `provides → consumes` with the capability name as label).
 - **Configuration:** the module's `config_schema` rendered as a shadcn `Form` with Zod validation. Save persists to `module_configs` in SQLite.
 - **Dependencies:** Python + npm packages from the manifest's `dependencies` block, with their resolved versions from the lockfile, install size, and a *Reinstall* button.
-- **Logs:** tail of the last 50 `ctx.logger.*` lines, streamed over `WS /api/v1/events` subscribed to `module.log.*` and filtered client-side by `payload.module_id`. The loader wraps every `ctx.logger` call to also publish onto that topic ([apps/web/components/settings/module-logs-tail.tsx](apps/web/components/settings/module-logs-tail.tsx)).
+- **Logs:** tail of the last 50 `ctx.logger.*` lines, streamed over `WS /api/v1/events` subscribed to `module.log.*` and filtered client-side by `payload.module_id`. The loader wraps every `ctx.logger` call to also publish onto that topic ([apps/web/components/settings/module-logs-tail.tsx](../apps/web/components/settings/module-logs-tail.tsx)).
 - **Danger zone:** *Disable for all logs*, *Uninstall*.
   Removes the module folder, its venv, and any cached results. The platform's own dependencies are unaffected.
 
@@ -668,10 +670,10 @@ Platform version, license, an "Onboarding → Restart" button, and a one-click *
 ### 7.7 Per-module page customisation
 
 - Each module supplies a default `frontend.page_layout` in its manifest.
-- **Layout persistence is wired.** The `module_layouts (user_id, log_id, module_id, layout_json)` SQLite table is live, with `GET / PUT /api/v1/modules/{id}/layout?log_id=...` and a `useModuleLayout(moduleId, logId)` + `useSaveModuleLayout(...)` hook pair in [apps/web/lib/module-layout.ts](apps/web/lib/module-layout.ts) (re-exported from `@mate/module-sdk-ts`). The drag-drop UI itself (`react-grid-layout`) is unrendered today because the shipping modules render monolithic panels rather than widget grids – once a module declares `frontend.widgets` and uses the hook to read/write its layout, the editor surface goes live without a server change.
+- **Layout persistence is wired.** The `module_layouts (user_id, log_id, module_id, layout_json)` SQLite table is live, with `GET / PUT /api/v1/modules/{id}/layout?log_id=...` and a `useModuleLayout(moduleId, logId)` + `useSaveModuleLayout(...)` hook pair in [apps/web/lib/module-layout.ts](../apps/web/lib/module-layout.ts) (re-exported from `@mate/module-sdk-ts`). The drag-drop UI itself (`react-grid-layout`) is unrendered today because the shipping modules render monolithic panels rather than widget grids – once a module declares `frontend.widgets` and uses the hook to read/write its layout, the editor surface goes live without a server change.
 - Widgets share a small contract: `Widget(props: { logId, moduleId, config }) → ReactNode`.
-- **Cross-module widget reuse** – a widget exposed by one module can be embedded on another module's page, provided the source module is installed. `useWidget(sourceModuleId, widgetId)` from `@mate/module-sdk-ts` ([apps/web/lib/module-widgets.tsx](apps/web/lib/module-widgets.tsx)) resolves the bundle lazily via the same loader as panels, renders a `Skeleton`, then a placeholder card if the source module is missing or disabled. The bundler in [bundle-modules.mjs](apps/web/scripts/bundle-modules.mjs) already produces one bundle per `frontend.widgets[]` entry (`.dist/widget-<id>.js`).
-- **Public SDK surface.** [packages/module-sdk-ts/src/index.ts](packages/module-sdk-ts/src/index.ts) re-exports `useWidget`, `useModuleLayout`, `useSaveModuleLayout`, the `api` / `rawFetch` HTTP helpers, the `subscribeBus` / `subscribeJob` WS helpers, and `cn` / `formatDuration` / `formatNumber` so module authors import from one place rather than reaching into host `@/` aliases directly.
+- **Cross-module widget reuse** – a widget exposed by one module can be embedded on another module's page, provided the source module is installed. `useWidget(sourceModuleId, widgetId)` from `@mate/module-sdk-ts` ([apps/web/lib/module-widgets.tsx](../apps/web/lib/module-widgets.tsx)) resolves the bundle lazily via the same loader as panels, renders a `Skeleton`, then a placeholder card if the source module is missing or disabled. The bundler in [bundle-modules.mjs](../apps/web/scripts/bundle-modules.mjs) already produces one bundle per `frontend.widgets[]` entry (`.dist/widget-<id>.js`).
+- **Public SDK surface.** [packages/module-sdk-ts/src/index.ts](../packages/module-sdk-ts/src/index.ts) re-exports `useWidget`, `useModuleLayout`, `useSaveModuleLayout`, the `api` / `rawFetch` HTTP helpers, the `subscribeBus` / `subscribeJob` WS helpers, and `cn` / `formatDuration` / `formatNumber` so module authors import from one place rather than reaching into host `@/` aliases directly.
 
 ### 7.8 Persistent chrome (sidebar + topbar)
 
@@ -794,7 +796,7 @@ The Job model in SQLite (§8) gains: `title`, `subtitle`, `module_id?`, `eta_sec
 - **Worker pool.** In-process asyncio tasks (configurable `WORKER_CONCURRENCY`, default 2). Progress is persisted to SQLite every N events (default 1000) and broadcast over the WebSocket fan-out.
 - **Stream.** WebSocket subscribes to a per-job `asyncio.Event`; falls back to SQLite polling if the connection drops.
 - **No Redis / Celery / RQ / Dramatiq.** Keeps the stack to two services and a single Python process per scale unit.
-- For heavy CPU work (e.g. inductive mining on a million-event log), `JobRuntime` exposes a lazily-initialised `ProcessPoolExecutor` sized to `worker_concurrency`. Module authors offload via `await ctx.run_in_process(fn, *args, **kwargs)` ([context.py](packages/module-sdk-py/src/mate/sdk/context.py)) – standard pickling rules apply (importable callable, picklable args/return), so authors typically declare a module-level pure function for the hot loop and call it from an otherwise-async handler. Still no broker, still single binary.
+- For heavy CPU work (e.g. inductive mining on a million-event log), `JobRuntime` exposes a lazily-initialised `ProcessPoolExecutor` sized to `worker_concurrency`. Module authors offload via `await ctx.run_in_process(fn, *args, **kwargs)` ([context.py](../packages/module-sdk-py/src/mate/sdk/context.py)) – standard pickling rules apply (importable callable, picklable args/return), so authors typically declare a module-level pure function for the hot loop and call it from an otherwise-async handler. Still no broker, still single binary.
 
 ---
 
@@ -841,7 +843,7 @@ services:
     depends_on: [api]
 ```
 
-Two services. No Redis, no DB container, no Nginx in dev. The `data/` bind-mount is the user's persistent storage – back it up by copying the folder. Both containers share the `modules/` bind-mount: the API serves bundled assets under `/api/v1/modules/{id}/assets/...`, and the web container's entrypoint runs the module bundler (esbuild via [bundle-modules.mjs](apps/web/scripts/bundle-modules.mjs)) before handing off to Next, so every installed module's `.dist/` is fresh by the time the first request hits.
+Two services. No Redis, no DB container, no Nginx in dev. The `data/` bind-mount is the user's persistent storage – back it up by copying the folder. Both containers share the `modules/` bind-mount: the API serves bundled assets under `/api/v1/modules/{id}/assets/...`, and the web container's entrypoint runs the module bundler (esbuild via [bundle-modules.mjs](../apps/web/scripts/bundle-modules.mjs)) before handing off to Next, so every installed module's `.dist/` is fresh by the time the first request hits.
 
 ---
 

@@ -22,6 +22,9 @@
  * model dirty and is excluded from export.
  */
 
+// bpmn-js' own default stroke/fill literals - see BPMN_THEME_COLORS.
+import { black, white } from "bpmn-js/lib/draw/BpmnRenderUtil";
+
 import type { PerActivityDeviation } from "./types";
 
 export type BpmnModelerLike = { get<T = unknown>(name: string): T };
@@ -252,6 +255,58 @@ const MINIMAP_CSS = `
 .djs-minimap.ff-minimap-hidden{opacity:0!important;pointer-events:none!important;}
 `;
 
+/**
+ * `bpmnRenderer` config making the diagram follow the app theme. Pass it to
+ * every `NavigatedViewer` that renders through this decorator.
+ *
+ * bpmn-js resolves each element's fill/stroke/label colour once, at import
+ * time, and tiny-svg writes the result into that node's **inline style**
+ * (`node.style.stroke = ...` - these are not presentation attributes, so no
+ * ordinary stylesheet can re-theme them). Its built-in defaults are `black` on
+ * `white`, which on a dark canvas paints near-black lines on a near-black
+ * background.
+ *
+ * So we hand bpmn-js CSS *variables* instead of colours: it writes
+ * `stroke: var(--ff-bpmn-stroke)` into the inline style, and `themeCss()`
+ * re-points that variable per theme. The canvas then re-themes live on a theme
+ * toggle - no viewer rebuild, no second `layoutProcess`, no lost pan/zoom.
+ *
+ * These are only *defaults*: `getFillColor`/`getStrokeColor` read the diagram's
+ * own BPMN DI (`color:background-color` / `bioc:fill`) first, so theming can
+ * never override a colour a model declares for itself. That would matter here,
+ * where the reference model is a user-uploaded file - except `ensureLayout`
+ * regenerates DI through bpmn-auto-layout, which drops an upload's `bioc:*`
+ * long before the renderer sees it. Uploaded colours are already lost today;
+ * theming is not what loses them.
+ */
+export const BPMN_THEME_COLORS = {
+  defaultFillColor: "var(--ff-bpmn-fill)",
+  defaultStrokeColor: "var(--ff-bpmn-stroke)",
+  defaultLabelColor: "var(--ff-bpmn-label)",
+} as const;
+
+/**
+ * Resolve the variables behind `BPMN_THEME_COLORS`. Light mode restates
+ * bpmn-js' own `black`/`white`, so it renders exactly as it did before any of
+ * this existed; dark mode swaps in the app's surface/foreground tokens.
+ *
+ * @param litShapeClasses Decoration markers that paint a *light* fill in both
+ *   themes (the deviation ramp plus the ok/unmatched states - their lightness
+ *   range is tuned to keep dark labels readable). Their labels must therefore
+ *   stay dark, so they re-assert bpmn-js' default label colour over the themed
+ *   inline style.
+ */
+function themeCss(litShapeClasses: string[]): string {
+  const litLabels = litShapeClasses
+    .map((c) => `.dark .djs-element.${c} .djs-visual text`)
+    .join(",");
+  return `
+.djs-container{--ff-bpmn-fill:${white};--ff-bpmn-stroke:${black};--ff-bpmn-label:${black};}
+.dark .djs-container{--ff-bpmn-fill:var(--card);--ff-bpmn-stroke:var(--foreground);--ff-bpmn-label:var(--foreground);}
+${litLabels}{fill:${black}!important;}
+`;
+}
+
 const STYLE_ID = "ff-conformance-styles";
 
 /** Map a 0..1 deviation ratio to a red fill/stroke pair. Exported so the
@@ -285,6 +340,7 @@ ${devRules.join("\n")}
 .ff-conf-badge{font:600 10px/1.35 ui-sans-serif,system-ui,sans-serif;background:${CONF_COLORS.badge};color:#fff;padding:1px 5px;border-radius:6px;white-space:nowrap;pointer-events:none;box-shadow:0 1px 2px rgba(0,0,0,.25);}
 .ff-conf-badge-warn{background:${CONF_COLORS.badgeWarn};}
 ${MINIMAP_CSS}
+${themeCss([...DEV_CLASSES, ...STATE_CLASSES])}
 `;
   const style = document.createElement("style");
   style.id = STYLE_ID;

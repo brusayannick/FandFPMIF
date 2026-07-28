@@ -13,8 +13,6 @@ about: >-
   behaviour changes - or to check whether a process redesign actually changed
   how work arrives and gets done.
 keywords: ["log evolution", "over time", "case arrivals", "work in progress", "wip", "dotted chart", "backlog", "seasonality"]
-author: FlowFactory
-author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

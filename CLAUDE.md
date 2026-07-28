@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Mate is a locally-hosted, modular **process mining** platform. Two app services (`api` + `web`) plus a bundled Keycloak (OIDC) for login. All application data is embedded and on-disk (SQLite metadata + DuckDB/Parquet event logs) – no broker, no cloud. Every user gets a fully isolated workspace; nothing crosses accounts.
 
-Deeper rationale lives in [`INSTRUCTIONS.md`](./INSTRUCTIONS.md) (design) and [`modules/README.md`](./modules/README.md) (the module authoring contract). [`DEPLOY.md`](./DEPLOY.md) covers the VM deploy; [`MCP.md`](./MCP.md) is the MCP server's consumer reference (tools, scopes, client setup). Read those before large changes – this file is the orientation, not the full spec.
+Deeper rationale lives in [`docs/INSTRUCTIONS.md`](./docs/INSTRUCTIONS.md) (design) and [`modules/README.md`](./modules/README.md) (the module authoring contract). [`docs/DEPLOY.md`](./docs/DEPLOY.md) covers the VM deploy; [`docs/MCP.md`](./docs/MCP.md) is the MCP server's consumer reference (tools, scopes, client setup). [`docs/README.md`](./docs/README.md) indexes every doc. Read those before large changes – this file is the orientation, not the full spec.
 
 ## Commands
 

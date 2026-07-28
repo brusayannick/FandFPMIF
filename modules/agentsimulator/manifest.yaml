@@ -6,9 +6,8 @@ description: >-
   Simulates your process as a team of interacting agents. It learns each
   resource's behaviour, working calendars, and handovers from your log,
   generates realistic synthetic logs, and scores them against a held-out slice
-  of the real data. Based on Kirchdorfer et al., "AgentSimulator: An Agent-based
-  Approach for Data-driven Business Process Simulation" (2024). DOI:
-  https://doi.org/10.1109/ICPM63005.2024.10680660
+  of the real data. Based on Kirchdorfer et al., "AgentSimulator: An agent-based
+  approach for data-driven business process simulation" (ICPM 2024).
 about: >-
   Ask "what if" questions safely: this module learns how your resources actually
   work — their speed, schedules, and handovers — and generates realistic
@@ -16,9 +15,18 @@ about: >-
   changes would play out, generate shareable data that mirrors your process
   without exposing real cases, and check how predictable your process is via
   the fidelity scores comparing simulated runs to reality.
-author: Lukas Kirchdorfer et al. (2024)
-author_url: https://github.com/lukaskirchdorfer/AgentSimulator
-paper_url: https://doi.org/10.1109/ICPM63005.2024.10680660
+source:
+  - title: >-
+      AgentSimulator: An agent-based approach for data-driven business process
+      simulation
+    fullCitation: >-
+      L. Kirchdorfer, R. Blümel, T. Kampik, H. van der Aa, and H. Stuckenschmidt,
+      "AgentSimulator: An agent-based approach for data-driven business process
+      simulation," in Proc. ICPM, Kgs. Lyngby, Denmark, 2024, pp. 97-104
+    url: https://doi.org/10.1109/ICPM63005.2024.10680660
+artifacts:
+  - name: AgentSimulator reference implementation (L. Kirchdorfer)
+    url: https://github.com/lukaskirchdorfer/AgentSimulator
 license: MIT
 
 requirements:
@@ -78,6 +86,7 @@ dependencies:
 
 frontend:
   panel: ./panel/index.tsx
+  log_filter: false
   widgets:
     - id: fidelity-scorecard
       entry: ./widgets/FidelityScorecard.tsx

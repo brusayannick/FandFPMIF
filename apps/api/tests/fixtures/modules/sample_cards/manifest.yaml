@@ -3,7 +3,6 @@ name: Sample Cards Module
 version: 0.1.0
 category: foundation
 description: Test fixture exercising per-card admin control (config + ai + model cards).
-author: Tests
 license: MIT
 
 dependencies:

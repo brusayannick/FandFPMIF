@@ -41,7 +41,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/empty-state";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CardGridSkeleton } from "@/components/skeletons";
 import { PageContainer, PageHeader, PageActions } from "@/components/page";
 import { cn } from "@/lib/cn";
 import { formatRelative } from "@/lib/format";
@@ -209,11 +209,7 @@ export function DashboardList() {
       </PageHeader>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-28 w-full" />
-          ))}
-        </div>
+        <CardGridSkeleton count={6} />
       ) : !dashboards || dashboards.length === 0 ? (
         <EmptyState
           icon={LayoutDashboard}

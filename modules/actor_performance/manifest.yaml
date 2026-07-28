@@ -17,16 +17,16 @@ about: >-
   overloaded actors, from batching, or from handovers sitting idle in a queue.
   Requires the optional Neo4j graph sidecar (compose profile "graph"); the graph is
   used as transient compute scratch per run and wiped afterwards.
-authors:
-  - name: Eva L. Klijn
-    url: https://github.com/multi-dimensional-process-mining/ekg_bpic17_decomposing_performance_by_actor_behavior
-  - name: Isabelle Tentina
-  - name: Dirk Fahland
-  - name: Felix Mannhardt
-papers:
-  - title: Decomposing Process Performance based on Actor Behavior (ICPM 2024)
+source:
+  - title: Decomposing process performance based on actor behavior
+    fullCitation: >-
+      E. L. Klijn, I. Tentina, D. Fahland, and F. Mannhardt, "Decomposing
+      process performance based on actor behavior," in Proc. ICPM, 2024
     url: https://doi.org/10.1109/ICPM63005.2024.10680657
-  - title: "PromG: the Event Knowledge Graph library the pipeline builds on"
+artifacts:
+  - name: Reference implementation (E. L. Klijn) - EKG BPIC17 decomposition
+    url: https://github.com/multi-dimensional-process-mining/ekg_bpic17_decomposing_performance_by_actor_behavior
+  - name: PromG - the Event Knowledge Graph library the pipeline builds on
     url: https://github.com/PromG-dev/promg-core
 # promg is GPL-3.0 and this module imports it, so the module folder is GPL-3.0.
 # The reference implementation repo has no license file; its queries were

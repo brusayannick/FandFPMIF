@@ -45,7 +45,7 @@ from mate.api.modules.installs import (
 from mate.api.modules.uninstall import uninstall_for_user
 from mate.api.policy import SCOPE_CARD, resolve
 from mate.api.schemas.event_logs import LogModel
-from mate.sdk.manifest import Author, Paper
+from mate.sdk.manifest import Artifact, Source
 
 # UserSetting key holding the per-user record of which default module ids have
 # already been offered to a user (a JSON list). Seeding grants only the defaults
@@ -109,18 +109,19 @@ class ModuleSummary(BaseModel):
     category: str
     description: str | None = None
     about: str | None = None
-    author: str | None = None
-    author_url: str | None = None
-    paper_url: str | None = None
-    # Plural credits (max 20 each). The manifest folds the singular
-    # author/author_url/paper_url in as the first entry, so these are the
-    # canonical lists the UI renders; the singular fields stay for back-compat.
-    authors: list[Author] = Field(default_factory=list)
-    papers: list[Paper] = Field(default_factory=list)
+    # Cited works (max 20), each `{title, fullCitation, url?}`. The manifest has
+    # no author fields - the citation string carries the author names.
+    source: list[Source] = Field(default_factory=list)
+    # Optional named links (max 20) - repo, dataset, demo, released model.
+    artifacts: list[Artifact] = Field(default_factory=list)
     license: str | None = None
     provides: list[str]
     consumes: list[str]
     has_frontend: bool
+    # Whether the module page renders the platform's log-scoped filter bar above
+    # the panel (manifest `frontend.log_filter`). Folds in `has_frontend`: with
+    # no panel there is no surface to filter.
+    supports_log_filter: bool = True
     enabled: bool = True
     is_confidential_safe: bool = False
     availability: Availability | None = None
@@ -194,15 +195,13 @@ async def list_modules(
             category=m.category,
             description=m.description,
             about=m.about,
-            author=m.author,
-            author_url=m.author_url,
-            paper_url=m.paper_url,
-            authors=list(m.authors),
-            papers=list(m.papers),
+            source=list(m.source),
+            artifacts=list(m.artifacts),
             license=m.license,
             provides=list(m.provides),
             consumes=list(m.consumes),
             has_frontend=bool(m.frontend.panel),
+            supports_log_filter=bool(m.frontend.panel) and m.frontend.log_filter,
             enabled=enabled_map.get(m.id, m.default_enabled),
             is_confidential_safe=m.is_confidential_safe,
             availability=avail_map.get(m.id),

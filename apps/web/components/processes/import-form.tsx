@@ -4,11 +4,10 @@ import { useCallback, useMemo, useState } from "react";
 import { useProgressRouter } from "@/lib/use-progress-router";
 import {
   CheckCircle2,
+  ExternalLink,
   FileText,
   FileUp,
-  Link2,
   Loader2,
-  RefreshCw,
   Sparkles,
   X,
 } from "lucide-react";
@@ -27,17 +26,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useImportEventLog,
-  useImportEventLogFromUrl,
   useProbeJson,
   useProbeXml,
   type JsonProbeResponse,
   type XmlProbeResponse,
 } from "@/lib/queries";
-import { useCreateWatchedFolder } from "@/lib/watched-queries";
-import type { WatchMode } from "@/lib/api-types";
 import { useAiConfig } from "@/lib/ai-queries";
 import { useImportColumnMapping } from "@/lib/ai-guidance";
 import { useUi } from "@/lib/stores/ui";
@@ -45,19 +40,37 @@ import { useTrack } from "@/lib/analytics/hooks";
 import { EV } from "@/lib/analytics/events";
 import { cn } from "@/lib/cn";
 
-type DetectedFormat = "xes" | "xes.gz" | "csv" | "xml" | "json" | "ocel" | "unsupported";
+type DetectedFormat = "xes" | "xes.gz" | "csv" | "xml" | "json" | "ocel" | "zip" | "unsupported";
+
+const COMPRESSION_SUFFIX_RE = /\.(gz|gzip|bz2|xz|lzma|zip)$/;
+
+/** "log.csv.gz" → "log.csv"; "log.csv" unchanged. */
+function stripCompression(lower: string): { inner: string; zip: boolean } {
+  const m = lower.match(COMPRESSION_SUFFIX_RE);
+  if (!m) return { inner: lower, zip: false };
+  return { inner: lower.slice(0, -m[0].length), zip: m[1] === "zip" };
+}
+
+function isCompressed(file: File): boolean {
+  return COMPRESSION_SUFFIX_RE.test(file.name.toLowerCase());
+}
 
 function detect(file: File): DetectedFormat {
   const n = file.name.toLowerCase();
   if (n.endsWith(".xes.gz")) return "xes.gz";
-  if (n.endsWith(".xes")) return "xes";
-  if (n.endsWith(".csv")) return "csv";
-  if (n.endsWith(".jsonocel") || n.endsWith(".xmlocel") || n.endsWith(".sqlite")) return "ocel";
+  const { inner, zip } = stripCompression(n);
+  if (inner.endsWith(".xes")) return "xes";
+  if (inner.endsWith(".csv")) return "csv";
+  if (inner.endsWith(".jsonocel") || inner.endsWith(".xmlocel") || inner.endsWith(".sqlite"))
+    return "ocel";
   // Plain .xml / .json are ambiguous (case-centric vs OCEL); the server sniffs
   // the content and auto-routes. We probe them client-side only to decide
-  // whether to show the mapping wizard.
-  if (n.endsWith(".xml")) return "xml";
-  if (n.endsWith(".json")) return "json";
+  // whether to show the mapping wizard (compressed ones probe fine - the
+  // server decompresses).
+  if (inner.endsWith(".xml")) return "xml";
+  if (inner.endsWith(".json")) return "json";
+  // A bare data.zip: the server resolves the archive's single member.
+  if (zip) return "zip";
   return "unsupported";
 }
 
@@ -206,39 +219,6 @@ interface ImportFormProps {
 }
 
 export function ImportForm({ onSuccess }: ImportFormProps = {}) {
-  return (
-    <Tabs defaultValue="file" className="space-y-6">
-      <TabsList>
-        <TabsTrigger value="file" className="cursor-pointer">
-          <FileUp className="mr-1.5 h-3.5 w-3.5" />
-          Upload file
-        </TabsTrigger>
-        <TabsTrigger value="url" className="cursor-pointer">
-          <Link2 className="mr-1.5 h-3.5 w-3.5" />
-          From URL
-        </TabsTrigger>
-        <TabsTrigger value="watch" className="cursor-pointer">
-          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          Watched folder
-        </TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="file">
-        <FileImportForm onSuccess={onSuccess} />
-      </TabsContent>
-      <TabsContent value="url">
-        <UrlImportForm onSuccess={onSuccess} />
-      </TabsContent>
-      <TabsContent value="watch">
-        <WatchImportForm />
-      </TabsContent>
-    </Tabs>
-  );
-}
-
-// ── File upload form ──────────────────────────────────────────────────────────
-
-function FileImportForm({ onSuccess }: ImportFormProps) {
   const router = useProgressRouter();
   const importer = useImportEventLog();
   const probeXml = useProbeXml();
@@ -251,7 +231,6 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
   const defaultTsFormat = useUi((s) => s.csvTimestampFormat);
 
   const [file, setFile] = useState<File | null>(null);
-  const [sampleLoading, setSampleLoading] = useState(false);
   const [name, setName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [delimiter, setDelimiter] = useState<string>(defaultDelimiter);
@@ -279,14 +258,18 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
       const detected = detect(f);
       if (detected === "unsupported") {
         toastError(
-          `Unsupported file: ${f.name}. Use .xes, .xes.gz, .csv, .xml, .json, or OCEL ` +
-            `(.jsonocel/.xmlocel/.sqlite).`,
+          `Unsupported file: ${f.name}. Use .xes, .csv, .xml, .json, or OCEL ` +
+            `(.jsonocel/.xmlocel/.sqlite) - optionally compressed (.gz/.bz2/.xz/.zip).`,
         );
         return;
       }
       setFile(f);
-      setName((current) =>
-        current || f.name.replace(/\.(xes\.gz|xes|csv|xml|json|jsonocel|xmlocel|sqlite)$/i, ""),
+      setName(
+        (current) =>
+          current ||
+          f.name
+            .replace(/\.(gz|gzip|bz2|xz|lzma|zip)$/i, "")
+            .replace(/\.(xes|csv|xml|json|jsonocel|xmlocel|sqlite)$/i, ""),
       );
       setAiSuggested(new Set());
       setXmlProbe(null);
@@ -348,6 +331,14 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
         return;
       }
       if (detected === "csv") {
+        if (isCompressed(f)) {
+          // Headers aren't readable client-side from compressed bytes - the
+          // server auto-detects column roles at import (fixable afterwards in
+          // the log's settings → Column roles).
+          setHeaders([]);
+          setMapping({});
+          return;
+        }
         const sample = await readSampleLines(f, 11);
         const headerLine = sample[0] ?? "";
         const cols = parseCsvHeader(headerLine, delimiter);
@@ -398,6 +389,8 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
   const ready = useMemo(() => {
     if (!file) return false;
     if (fmt === "csv") {
+      // Compressed CSVs skip the client wizard - the server auto-maps.
+      if (isCompressed(file)) return true;
       return Boolean(mapping.case_id && mapping.activity && mapping.timestamp);
     }
     if (fmt === "xml") {
@@ -425,7 +418,9 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
     track(EV.PROCESS_IMPORT_STARTED, { source: "file", format: fmt });
     try {
       const csvMappingPayload =
-        fmt === "csv" ? { ...mapping, delimiter, timestamp_format: tsFormat || undefined } : undefined;
+        fmt === "csv" && !isCompressed(file)
+          ? { ...mapping, delimiter, timestamp_format: tsFormat || undefined }
+          : undefined;
       const xmlMappingPayload =
         fmt === "xml" &&
         xmlProbe?.format_hint !== "xes" &&
@@ -477,54 +472,21 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
     }
   };
 
-  // One-click "try a sample log": fetch the bundled sample XES from the app's
-  // static assets, wrap it in a File, and feed it through the exact same import
-  // mutation a normal upload uses (an .xes needs no column mapping).
-  const loadSample = async () => {
-    if (sampleLoading || importer.isPending) return;
-    setSampleLoading(true);
-    track(EV.PROCESS_IMPORT_STARTED, { source: "sample", format: "xes" });
-    try {
-      const res = await fetch("/samples/sample-log.xes");
-      if (!res.ok) throw new Error("Sample log is unavailable");
-      const blob = await res.blob();
-      const sampleFile = new File([blob], "sample-log.xes", { type: "application/xml" });
-      const resp = await importer.mutateAsync({ file: sampleFile, name: "Sample event log" });
-      track(EV.PROCESS_IMPORT_FINISHED, { source: "sample", format: "xes", ok: true });
-      toast.success("Import queued");
-      if (onSuccess) {
-        onSuccess(resp.log_id);
-      } else {
-        router.push(`/processes?focus=${resp.log_id}`);
-      }
-    } catch (err: unknown) {
-      track(EV.PROCESS_IMPORT_FINISHED, { source: "sample", format: "xes", ok: false });
-      toastError(`Import failed: ${(err as Error).message}`);
-    } finally {
-      setSampleLoading(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <DropZone file={file} onDrop={onDrop} onClear={() => setFile(null)} />
 
       {!file && (
         <div className="flex items-center justify-center">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={loadSample}
-            disabled={sampleLoading || importer.isPending}
-            className="cursor-pointer gap-1.5 text-xs text-muted-foreground"
+          <a
+            href="https://www.processmining.org/event-data.html"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
-            {sampleLoading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Sparkles className="h-3.5 w-3.5" />
-            )}
-            Just exploring? Try a sample log
-          </Button>
+            <ExternalLink className="h-3.5 w-3.5" />
+            Just exploring? Get public event logs from processmining.org
+          </a>
         </div>
       )}
 
@@ -543,7 +505,17 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
 
             {fmt && <DetectedTypeBanner fmt={fmt} />}
 
-            {fmt === "csv" && (
+            {(fmt === "zip" || (fmt === "csv" && isCompressed(file))) && (
+              <div className="flex items-start gap-2 rounded-md border border-dashed border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
+                <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Compressed upload - columns are auto-detected during import. If something
+                  maps incorrectly, fix it afterwards in the log&apos;s settings → Column roles.
+                </span>
+              </div>
+            )}
+
+            {fmt === "csv" && !isCompressed(file) && (
               <>
                 {aiConfig !== undefined && !aiConfigured && (
                   <div className="flex items-start gap-2 rounded-md border border-dashed border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
@@ -637,252 +609,6 @@ function FileImportForm({ onSuccess }: ImportFormProps) {
   );
 }
 
-// ── URL import form ───────────────────────────────────────────────────────────
-
-function isValidUrl(value: string): boolean {
-  try {
-    const u = new URL(value);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function UrlImportForm({ onSuccess }: ImportFormProps) {
-  const router = useProgressRouter();
-  const importer = useImportEventLogFromUrl();
-
-  const [url, setUrl] = useState("");
-  const [name, setName] = useState("");
-  const [urlTouched, setUrlTouched] = useState(false);
-
-  const urlValid = isValidUrl(url);
-  const urlError = urlTouched && url.length > 0 && !urlValid;
-
-  const submit = async () => {
-    if (!urlValid) return;
-    try {
-      const resp = await importer.mutateAsync({
-        url,
-        name: name.trim() || undefined,
-      });
-      toast.success("Import queued");
-      if (onSuccess) {
-        onSuccess(resp.log_id);
-      } else {
-        router.push(`/processes?focus=${resp.log_id}`);
-      }
-    } catch (err: unknown) {
-      toastError(`Import failed: ${(err as Error).message}`);
-    }
-  };
-
-  return (
-    <Card variant="glass">
-      <CardContent className="space-y-4">
-        <div className="grid gap-2">
-          <Label htmlFor="url-input">
-            URL <span className="text-destructive">*</span>
-          </Label>
-          <Input
-            id="url-input"
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onBlur={() => setUrlTouched(true)}
-            placeholder="https://example.com/event-log.xes"
-            className={cn(urlError && "border-destructive focus-visible:ring-destructive")}
-          />
-          {urlError ? (
-            <p className="text-xs text-destructive">Enter a valid https:// or http:// URL.</p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              The file must be publicly accessible and end with .xes, .xes.gz, .csv, .xml, .json,
-              or an OCEL extension.
-            </p>
-          )}
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="url-name">Display name (optional)</Label>
-          <Input
-            id="url-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Leave blank to use the filename from the URL"
-          />
-        </div>
-
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
-          <Button
-            variant="outline"
-            onClick={() => router.back()}
-            className="cursor-pointer"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={submit}
-            disabled={!urlValid || importer.isPending}
-            className="cursor-pointer gap-2"
-          >
-            {importer.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Import
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Watched-folder form ───────────────────────────────────────────────────────
-
-const WATCH_MODES: { value: WatchMode; label: string; hint: string }[] = [
-  { value: "manual", label: "Manual", hint: "Only scan when you click “Scan now”." },
-  {
-    value: "interval",
-    label: "Every N minutes",
-    hint: "Poll on a timer and import any new files found.",
-  },
-  {
-    value: "continuous",
-    label: "Automatic",
-    hint: "Import new files as soon as they appear (checked about once a minute).",
-  },
-];
-
-function WatchImportForm() {
-  const router = useProgressRouter();
-  const createWatch = useCreateWatchedFolder();
-
-  const [name, setName] = useState("");
-  const [sourcePath, setSourcePath] = useState("");
-  const [mode, setMode] = useState<WatchMode>("manual");
-  const [minutes, setMinutes] = useState(10);
-
-  const intervalValid = mode !== "interval" || minutes >= 1;
-  const ready = name.trim().length > 0 && intervalValid;
-
-  const submit = async () => {
-    if (!ready) return;
-    try {
-      const watch = await createWatch.mutateAsync({
-        name: name.trim(),
-        source_path: sourcePath.trim() || undefined,
-        mode,
-        interval_seconds: mode === "interval" ? Math.max(60, Math.round(minutes) * 60) : null,
-        create_dest_folder: true,
-      });
-      toast.success(`Watching “${watch.name}”`);
-      router.push("/processes/watched");
-    } catch (err: unknown) {
-      toastError(`Couldn't create watched folder: ${(err as Error).message}`);
-    }
-  };
-
-  return (
-    <Card variant="glass">
-      <CardContent className="space-y-4">
-        <div className="rounded-md border border-dashed border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-          A watched folder scans a location in your storage backend and imports new event-log
-          files automatically. Drop files there from an upstream pipeline (an S3 prefix when S3
-          storage is connected, otherwise a server directory) – nothing is uploaded from your
-          browser here.
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="watch-name">
-            Name <span className="text-destructive">*</span>
-          </Label>
-          <Input
-            id="watch-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Nightly SAP export"
-          />
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="watch-source">Source location (optional)</Label>
-          <Input
-            id="watch-source"
-            value={sourcePath}
-            onChange={(e) => setSourcePath(e.target.value)}
-            placeholder="Leave blank for a managed folder, or enter an S3 prefix / server path"
-          />
-          <p className="text-xs text-muted-foreground">
-            Leave blank to let Mate create and manage the location. Otherwise point it at an
-            existing prefix/path an upstream process already writes to.
-          </p>
-        </div>
-
-        <div className="grid gap-2">
-          <Label>Refresh</Label>
-          <div className="flex flex-wrap gap-2">
-            {WATCH_MODES.map((m) => (
-              <button
-                key={m.value}
-                type="button"
-                onClick={() => setMode(m.value)}
-                className={cn(
-                  "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer",
-                  mode === m.value
-                    ? "border-primary bg-primary/10 text-foreground"
-                    : "border-border text-muted-foreground hover:text-foreground",
-                )}
-                aria-pressed={mode === m.value}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {WATCH_MODES.find((m) => m.value === mode)?.hint}
-          </p>
-          {mode === "interval" && (
-            <div className="flex items-center gap-2 pt-1">
-              <Label htmlFor="watch-minutes" className="text-xs">
-                Every
-              </Label>
-              <Input
-                id="watch-minutes"
-                type="number"
-                min={1}
-                value={minutes}
-                onChange={(e) => setMinutes(Number(e.target.value))}
-                className="w-24"
-              />
-              <span className="text-xs text-muted-foreground">minute(s)</span>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-start gap-2 rounded-md border border-dashed border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>
-            Columns are auto-detected for each file. If a CSV/XML/JSON file maps incorrectly,
-            fix it later in that log’s settings → Column roles.
-          </span>
-        </div>
-
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
-          <Button variant="outline" onClick={() => router.back()} className="cursor-pointer">
-            Cancel
-          </Button>
-          <Button
-            onClick={submit}
-            disabled={!ready || createWatch.isPending}
-            className="cursor-pointer gap-2"
-          >
-            {createWatch.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Create watched folder
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function DropZone({
   file,
   onDrop,
@@ -939,13 +665,15 @@ function DropZone({
     >
       <FileUp className="h-8 w-8 text-muted-foreground" />
       <div className="text-sm font-medium">
-        Drop a XES, XES.gz, CSV, XML, JSON, or OCEL file here
+        Drop an event log here or click to choose a file
       </div>
-      <div className="text-xs text-muted-foreground">Or click to choose a file</div>
+      <div className="text-xs text-muted-foreground">
+        Supports XES, CSV, XML, JSON, and OCEL - plain or compressed (.gz, .bz2, .xz, .zip)
+      </div>
       <input
         type="file"
         className="sr-only"
-        accept=".xes,.xes.gz,.csv,.xml,.json,.jsonocel,.xmlocel,.sqlite,application/xml,text/xml,text/csv,application/json"
+        accept=".xes,.xes.gz,.csv,.xml,.json,.jsonocel,.xmlocel,.sqlite,.gz,.gzip,.bz2,.xz,.lzma,.zip,application/xml,text/xml,text/csv,application/json,application/zip,application/gzip"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) onDrop(f);
@@ -1123,6 +851,7 @@ function DetectedTypeBanner({ fmt }: { fmt: DetectedFormat }) {
     "xes.gz": "XES detected",
     csv: "CSV detected",
     ocel: "Object-centric (OCEL) log detected",
+    zip: "Zip archive detected - the event log inside will be imported",
   };
   const text = label[fmt];
   if (!text) return null;

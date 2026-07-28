@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { Skeleton } from "@/components/ui/skeleton";
+import { TableSkeleton } from "@/components/skeletons";
 import { PageContainer, PageHeader } from "@/components/page";
 import { EmptyState } from "@/components/empty-state";
 import { FileBox, Lock, Plus, RotateCcw } from "lucide-react";
@@ -103,7 +103,7 @@ function ModuleActions() {
   );
 }
 
-function ModuleCard({ m }: { m: ModuleSummary }) {
+function ModuleRow({ m }: { m: ModuleSummary }) {
   // The PUT replaces the stored config wholesale, so we must read the saved
   // config first and hand it back unchanged when flipping `enabled` – toggling
   // with an empty config would wipe the module's settings. The switch stays
@@ -125,55 +125,36 @@ function ModuleCard({ m }: { m: ModuleSummary }) {
   };
 
   return (
-    <Card className="gap-0 py-0">
-      <CardContent className="space-y-3 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="truncate text-sm font-semibold">{m.name}</h3>
-              <span className="text-xs text-muted-foreground">{m.version}</span>
-              {controlled && (
-                <Badge
-                  variant="outline"
-                  className="h-5 gap-1 border-destructive/30 bg-destructive/10 px-1.5 py-0 text-[10px] text-destructive"
-                >
-                  <Lock className="h-3 w-3" />
-                  Admin-controlled
-                </Badge>
-              )}
-            </div>
-            {(() => {
-              // Prefer the plural `authors` list (server folds the singular
-              // `author` in as the first entry); fall back to `author` for
-              // safety. Names joined on one truncated line.
-              const names = (
-                m.authors?.length ? m.authors.map((a) => a.name) : m.author ? [m.author] : []
-              ).slice(0, 20);
-              return names.length ? (
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  by {names.join(", ")}
-                </p>
-              ) : null;
-            })()}
-          </div>
-          <Switch
-            checked={enabled}
-            onCheckedChange={onToggle}
-            disabled={cfg === undefined || update.isPending || controlled}
-            aria-label={enabled ? `Disable ${m.name}` : `Enable ${m.name}`}
-            className={
-              controlled ? "cursor-pointer shrink-0 opacity-60" : "cursor-pointer shrink-0"
-            }
-          />
+    <div className="flex items-center gap-4 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="truncate text-sm font-semibold">{m.name}</h3>
+          <span className="text-xs text-muted-foreground">{m.version}</span>
+          {controlled && (
+            <Badge
+              variant="outline"
+              className="h-5 gap-1 border-destructive/30 bg-destructive/10 px-1.5 py-0 text-[10px] text-destructive"
+            >
+              <Lock className="h-3 w-3" />
+              Admin-controlled
+            </Badge>
+          )}
         </div>
         {m.description && (
-          <p className="line-clamp-2 text-xs text-muted-foreground">{m.description}</p>
+          <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{m.description}</p>
         )}
-        <Button asChild variant="outline" size="sm" className="cursor-pointer w-full">
-          <Link href={`/modules/${m.id}`}>Configure</Link>
-        </Button>
-      </CardContent>
-    </Card>
+      </div>
+      <Button asChild variant="outline" size="sm" className="shrink-0 cursor-pointer">
+        <Link href={`/modules/${m.id}`}>Configure</Link>
+      </Button>
+      <Switch
+        checked={enabled}
+        onCheckedChange={onToggle}
+        disabled={cfg === undefined || update.isPending || controlled}
+        aria-label={enabled ? `Disable ${m.name}` : `Enable ${m.name}`}
+        className={controlled ? "cursor-pointer shrink-0 opacity-60" : "cursor-pointer shrink-0"}
+      />
+    </div>
   );
 }
 
@@ -188,11 +169,7 @@ export function ModulesClient() {
       </PageHeader>
 
       {isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
+        <TableSkeleton rows={9} />
       ) : !modules || modules.length === 0 ? (
         <EmptyState
           icon={FileBox}
@@ -207,11 +184,13 @@ export function ModulesClient() {
                 <h2 className="text-sm font-semibold tracking-tight">{categoryLabel(cat)}</h2>
                 <span className="text-xs text-muted-foreground">{mods.length}</span>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {mods.map((m) => (
-                  <ModuleCard key={m.id} m={m} />
-                ))}
-              </div>
+              <Card className="gap-0 py-0">
+                <CardContent className="divide-y divide-border p-0">
+                  {mods.map((m) => (
+                    <ModuleRow key={m.id} m={m} />
+                  ))}
+                </CardContent>
+              </Card>
             </section>
           ))}
         </div>

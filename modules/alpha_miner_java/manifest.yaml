@@ -10,8 +10,13 @@ about: >-
   as places. Also the platform's reference module for the JVM runtime: its
   backend is a self-contained Java jar speaking the worker protocol
   (modules/PROTOCOL.md), with no Python code at all.
-author: W.M.P. van der Aalst, A.J.M.M. Weijters, L. Maruster
-paper_url: https://doi.org/10.1109/TKDE.2004.47
+source:
+  - title: "Workflow mining: Discovering process models from event logs"
+    fullCitation: >-
+      W. M. P. van der Aalst, A. J. M. M. Weijters, and L. Maruster, "Workflow
+      mining: Discovering process models from event logs," IEEE Trans. Knowl.
+      Data Eng., vol. 16, no. 9, pp. 1128-1142, 2004
+    url: https://doi.org/10.1109/TKDE.2004.47
 license: MIT
 
 # The whole module backend is one fat jar (built from

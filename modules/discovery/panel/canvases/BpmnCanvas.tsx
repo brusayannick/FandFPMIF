@@ -40,6 +40,7 @@ import {
   applyBpmnOverlay,
   injectBpmnStyles,
   locateActivity,
+  BPMN_THEME_COLORS,
   type BpmnModelerLike,
   type FrequencyMaps,
 } from "../bpmn-decorate";
@@ -119,6 +120,7 @@ export function BpmnCanvas({
       modeler = new NavigatedViewer({
         container,
         additionalModules: [minimapModule],
+        bpmnRenderer: BPMN_THEME_COLORS,
       }) as unknown as ModelerHandle;
 
       try {

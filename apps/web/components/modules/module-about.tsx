@@ -1,8 +1,8 @@
 "use client";
 
-import { BookOpen, ExternalLink, Info, User } from "lucide-react";
+import { BookOpen, ExternalLink, Info, Package } from "lucide-react";
 
-import type { ManifestAuthor, ManifestPaper } from "@/lib/api-types";
+import type { ManifestArtifact, ManifestSource } from "@/lib/api-types";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/cn";
 
-/** Hard ceiling mirroring the manifest schema (`MAX_AUTHORS`/`MAX_PAPERS`). */
+/** Hard ceiling mirroring the manifest schema (`MAX_SOURCES`/`MAX_ARTIFACTS`). */
 const MAX_CREDITS = 20;
 
 export interface ModuleAboutProps {
@@ -22,57 +22,45 @@ export interface ModuleAboutProps {
   description?: string | null;
   /** Longer "with this module you can …" text from the manifest `about`. */
   about?: string | null;
-  author?: string | null;
-  /** Upstream repo / homepage of the author (manifest `author_url`). */
-  authorUrl?: string | null;
-  /** DOI / paper link the module implements (manifest `paper_url`). */
-  paperUrl?: string | null;
-  /** All credited authors (manifest `authors[]`); preferred over `author`. */
-  authors?: ManifestAuthor[] | null;
-  /** All cited papers (manifest `papers[]`); preferred over `paperUrl`. */
-  papers?: ManifestPaper[] | null;
+  /** Cited works (manifest `source[]`); `fullCitation` carries the authors. */
+  sources?: ManifestSource[] | null;
+  /** Named links (manifest `artifacts[]`) — code repo, dataset, demo, model. */
+  artifacts?: ManifestArtifact[] | null;
   license?: string | null;
   version?: string | null;
   className?: string;
 }
 
 /**
- * Resolve the authors/papers to render: prefer the plural manifest lists, fall
- * back to the singular `author`/`paperUrl` (which the server also folds into the
- * lists) so this works whether the caller passes one form or the other. Capped
- * at 20 each to mirror the manifest schema.
+ * Resolve the credit lists to render, capped at 20 each to mirror the manifest
+ * schema. The manifest has no author fields and no singular shorthands, so this
+ * only normalises null/undefined and enforces the ceiling.
  */
 export function resolveCredits({
-  author,
-  authorUrl,
-  authors,
-  paperUrl,
-  papers,
-}: Pick<ModuleAboutProps, "author" | "authorUrl" | "authors" | "paperUrl" | "papers">): {
-  authorList: ManifestAuthor[];
-  paperList: ManifestPaper[];
+  sources,
+  artifacts,
+}: Pick<ModuleAboutProps, "sources" | "artifacts">): {
+  sourceList: ManifestSource[];
+  artifactList: ManifestArtifact[];
 } {
-  const authorList = (
-    authors?.length ? authors : author ? [{ name: author, url: authorUrl ?? null }] : []
-  ).slice(0, MAX_CREDITS);
-  const paperList = (
-    papers?.length ? papers : paperUrl ? [{ title: null, url: paperUrl }] : []
-  ).slice(0, MAX_CREDITS);
-  return { authorList, paperList };
+  return {
+    sourceList: (sources ?? []).slice(0, MAX_CREDITS),
+    artifactList: (artifacts ?? []).slice(0, MAX_CREDITS),
+  };
 }
 
 /**
  * "About this module" info popover for module detail headers.
  *
  * Platform-side (not module-authored): every module gets it for free from its
- * manifest fields - `description`, `about` (what-you-can-do text), `author` /
- * `author_url`, and `paper_url` (the cited paper, DOI link preferred).
+ * manifest fields - `description`, `about` (what-you-can-do text), `source`
+ * (cited works) and `artifacts` (named links).
  */
 export function ModuleAboutInfo({ name, className, ...content }: ModuleAboutProps) {
   const { description, about } = content;
-  const { authorList, paperList } = resolveCredits(content);
+  const { sourceList, artifactList } = resolveCredits(content);
   const hasBody = Boolean(about || description);
-  if (!hasBody && authorList.length === 0 && paperList.length === 0) return null;
+  if (!hasBody && sourceList.length === 0 && artifactList.length === 0) return null;
 
   return (
     <Popover>
@@ -94,9 +82,10 @@ export function ModuleAboutInfo({ name, className, ...content }: ModuleAboutProp
 }
 
 /**
- * Body of the module "About" popover — header, what-you-can-do, author/paper,
- * and the version · license footer. Split out so it can render inside any
- * popover shell (the in-page {@link ModuleAboutInfo} button and the topbar ⓘ).
+ * Body of the module "About" popover — header, what-you-can-do, cited sources,
+ * artifact links, and the version · license footer. Split out so it can render
+ * inside any popover shell (the in-page {@link ModuleAboutInfo} button and the
+ * topbar ⓘ).
  */
 export function ModuleAboutContent({
   description,
@@ -106,7 +95,7 @@ export function ModuleAboutContent({
   ...credits
 }: Omit<ModuleAboutProps, "name" | "className">) {
   const meta = [version ? `v${version}` : null, license].filter(Boolean).join(" · ");
-  const { authorList, paperList } = resolveCredits(credits);
+  const { sourceList, artifactList } = resolveCredits(credits);
 
   return (
     <>
@@ -126,42 +115,45 @@ export function ModuleAboutContent({
         </div>
       )}
 
-      {(authorList.length > 0 || paperList.length > 0) && (
-        <div className="space-y-1.5 border-t border-white/10 pt-2.5 text-xs">
-          {authorList.map((a, i) => (
-            <div
-              key={`${a.name}-${i}`}
-              className="flex items-center gap-1.5 text-muted-foreground"
-            >
-              <User className="h-3 w-3 shrink-0" />
-              {a.url ? (
-                <a
-                  href={a.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
-                >
-                  {a.name}
-                  <ExternalLink className="h-2.5 w-2.5" />
-                </a>
-              ) : (
-                <span>{a.name}</span>
-              )}
+      {(sourceList.length > 0 || artifactList.length > 0) && (
+        <div className="space-y-2 border-t border-white/10 pt-2.5 text-xs">
+          {sourceList.map((s, i) => (
+            <div key={`${s.title}-${i}`} className="flex gap-1.5 text-muted-foreground">
+              <BookOpen className="mt-0.5 h-3 w-3 shrink-0" />
+              <div className="min-w-0 space-y-0.5">
+                {s.url ? (
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 font-medium text-foreground/90 hover:text-foreground hover:underline"
+                  >
+                    {s.title}
+                    <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                  </a>
+                ) : (
+                  <div className="font-medium text-foreground/90">{s.title}</div>
+                )}
+                {/* Full reference string, quotable as-is. */}
+                <p className="text-[10px] leading-relaxed text-muted-foreground/80">
+                  {s.fullCitation}
+                </p>
+              </div>
             </div>
           ))}
-          {paperList.map((p, i) => (
+          {artifactList.map((a, i) => (
             <div
-              key={`${p.url}-${i}`}
+              key={`${a.url}-${i}`}
               className="flex items-center gap-1.5 text-muted-foreground"
             >
-              <BookOpen className="h-3 w-3 shrink-0" />
+              <Package className="h-3 w-3 shrink-0" />
               <a
-                href={p.url}
+                href={a.url}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
               >
-                {p.title ?? "Read the paper"}
+                {a.name}
                 <ExternalLink className="h-2.5 w-2.5" />
               </a>
             </div>

@@ -162,32 +162,6 @@ export function useImportEventLog() {
   });
 }
 
-export function useImportEventLogFromUrl() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: {
-      url: string;
-      name?: string;
-      csvMapping?: unknown;
-      xmlMapping?: unknown;
-      jsonMapping?: unknown;
-    }) =>
-      api<EventLogCreateResponse>("/api/v1/event-logs/from-url", {
-        method: "POST",
-        json: {
-          url: input.url,
-          name: input.name || undefined,
-          csv_mapping: input.csvMapping ? JSON.stringify(input.csvMapping) : undefined,
-          xml_mapping: input.xmlMapping ? JSON.stringify(input.xmlMapping) : undefined,
-          json_mapping: input.jsonMapping ? JSON.stringify(input.jsonMapping) : undefined,
-        },
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
-    },
-  });
-}
-
 export interface XmlProbeField {
   name: string;
   coverage: number;
@@ -375,7 +349,51 @@ export function useReorderTree() {
         method: "POST",
         json: { items },
       }),
-    onSuccess: () => {
+    // Optimistic: write the new parent/position into the folder + log list
+    // caches immediately so a dropped row lands in its slot on mouse-up
+    // instead of snapping back until the server round-trip settles.
+    onMutate: async (items) => {
+      await Promise.all([
+        qc.cancelQueries({ queryKey: queryKeys.folders() }),
+        qc.cancelQueries({ predicate: (q) => isEventLogListKey(q.queryKey) }),
+      ]);
+      const prevFolders = qc.getQueryData<FolderSummary[]>(queryKeys.folders());
+      const prevLogs = qc.getQueriesData<EventLogSummary[]>({
+        predicate: (q) => isEventLogListKey(q.queryKey),
+      });
+      const folderMoves = new Map<string, ReorderItem>();
+      const logMoves = new Map<string, ReorderItem>();
+      for (const item of items) {
+        (item.kind === "folder" ? folderMoves : logMoves).set(item.id, item);
+      }
+      if (folderMoves.size > 0) {
+        qc.setQueryData<FolderSummary[]>(queryKeys.folders(), (old) =>
+          old?.map((f) => {
+            const m = folderMoves.get(f.id);
+            return m ? { ...f, parent_id: m.parent_id, position: m.position } : f;
+          }),
+        );
+      }
+      if (logMoves.size > 0) {
+        qc.setQueriesData<EventLogSummary[]>(
+          { predicate: (q) => isEventLogListKey(q.queryKey) },
+          (old) =>
+            Array.isArray(old)
+              ? old.map((l) => {
+                  const m = logMoves.get(l.id);
+                  return m ? { ...l, folder_id: m.parent_id, position: m.position } : l;
+                })
+              : old,
+        );
+      }
+      return { prevFolders, prevLogs };
+    },
+    onError: (_e, _items, ctx) => {
+      if (!ctx) return;
+      qc.setQueryData(queryKeys.folders(), ctx.prevFolders);
+      ctx.prevLogs.forEach(([key, data]) => qc.setQueryData(key, data));
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: queryKeys.folders() });
       qc.invalidateQueries({ queryKey: queryKeys.eventLogs() });
     },

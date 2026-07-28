@@ -7,10 +7,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Inbox, Loader2, Settings2 } from "lucide-react";
 
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/page";
+import { DetailSkeleton } from "@/components/skeletons";
 import { EmptyState } from "@/components/empty-state";
 import { ModuleGrid, ModuleSearchBar } from "@/components/processes/module-grid";
 import { ProcessTabs, type ProcessTabItem } from "@/components/processes/process-tabs";
@@ -100,13 +100,9 @@ export function ProcessDetailClient({ logId }: { logId: string }) {
   );
 
   if (isLoading) {
-    return (
-      <PageContainer className="space-y-4">
-        <Skeleton className="h-8 w-72" />
-        <Skeleton className="h-4 w-96" />
-        <Skeleton className="h-64 w-full" />
-      </PageContainer>
-    );
+    // Same shell as loading.tsx, so the route-level and data-level skeletons
+    // are interchangeable - no flash or jump when one hands over to the other.
+    return <DetailSkeleton />;
   }
   if (isError || !log) {
     return (

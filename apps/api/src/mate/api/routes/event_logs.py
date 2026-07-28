@@ -8,7 +8,7 @@ import os
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import aiofiles
 import structlog
@@ -23,6 +23,7 @@ from mate.api.auth import (
 )
 from mate.api.db.models import EventLog
 from mate.api.db.session import SessionDep
+from mate.api.ingest.compression import decompressed
 from mate.api.ingest.detect import (
     detect_format,
     original_extension,
@@ -75,7 +76,8 @@ async def create_event_log(
     file: Annotated[
         UploadFile,
         File(
-            description="XES, XES.GZ, CSV, XML, JSON, or OCEL (.jsonocel/.xmlocel/.sqlite) upload"
+            description="XES, CSV, XML, JSON, or OCEL (.jsonocel/.xmlocel/.sqlite) upload, "
+            "optionally compressed (.gz/.bz2/.xz/.zip)"
         ),
     ],
     name: Annotated[str | None, Form()] = None,
@@ -121,7 +123,8 @@ async def create_event_log(
     if await asyncio.to_thread(over_quota_sync):
         raise HTTPException(
             status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
-            detail="Storage quota reached. Delete data or raise the quota in Admin → Storage.",
+            detail="Storage quota reached. Delete data or have the operator raise "
+            "STORAGE_S3_QUOTA_BYTES.",
         )
 
     log_id = uuid7_str()
@@ -136,10 +139,16 @@ async def create_event_log(
             await out.write(chunk)
 
     # Refine the coarse extension guess by inspecting the staged file: plain
-    # .json / .xml auto-route to the object-centric (OCEL) or case-centric path.
-    source_format, ocel_flavor = await asyncio.to_thread(
-        sniff_format, original_path, coarse_format, filename=file.filename
-    )
+    # .json / .xml auto-route to the object-centric (OCEL) or case-centric path,
+    # and a bare .zip resolves to its single member's format. ValueError =
+    # empty/ambiguous archive → reject before any DB row exists.
+    try:
+        source_format, ocel_flavor = await asyncio.to_thread(
+            sniff_format, original_path, coarse_format, filename=file.filename
+        )
+    except ValueError as exc:
+        await asyncio.to_thread(paths.remove)
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
 
     display_name = (name or file.filename).strip() or file.filename
 
@@ -232,11 +241,16 @@ async def probe_xml_upload(
             while chunk := await file.read(1024 * 1024):
                 await out.write(chunk)
         # Avoid the late import of xml_parser at module-load time - lxml's
-        # iterparse is sync and CPU-bound, so this runs in a thread.
+        # iterparse is sync and CPU-bound, so this runs in a thread. The probe
+        # accepts compressed uploads (gz/bz2/xz/zip) - same contract as import.
         from mate.api.ingest.xml_parser import autodetect_mapping, probe_xml
 
+        def _probe_plain(p: Path) -> dict[str, Any]:
+            with decompressed(p) as plain:
+                return probe_xml(plain)
+
         try:
-            probe = await asyncio.to_thread(probe_xml, tmp_path)
+            probe = await asyncio.to_thread(_probe_plain, tmp_path)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Could not parse XML file: {exc}") from exc
         # XES- and OCEL-shaped probes ship without fields - they're handled by
@@ -275,8 +289,12 @@ async def probe_json_upload(
                 await out.write(chunk)
         from mate.api.ingest.json_parser import autodetect_mapping, probe_json
 
+        def _probe_plain(p: Path) -> dict[str, Any]:
+            with decompressed(p) as plain:
+                return probe_json(plain)
+
         try:
-            probe = await asyncio.to_thread(probe_json, tmp_path)
+            probe = await asyncio.to_thread(_probe_plain, tmp_path)
         except Exception as exc:
             raise HTTPException(
                 status_code=400, detail=f"Could not parse JSON file: {exc}"

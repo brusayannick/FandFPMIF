@@ -5,6 +5,7 @@ import { CalendarRange, Check, RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import { cn } from "@/lib/cn";
 import type { FilterEntry } from "@/lib/api-types";
 import { toNaiveUtcString } from "@/lib/format";
 import type { TimeBounds } from "@/lib/dashboard-queries";
@@ -59,12 +60,16 @@ function windowFromCommitted(
 export function DashboardTimeRange({
   bounds,
   committed,
+  compact = false,
   onChange,
 }: {
   bounds: TimeBounds | undefined;
   /** The board's committed time-range entries – seeds the thumbs on mount so a
    * persisted (and thus *shared*) window shows, instead of always full span. */
   committed?: FilterEntry[];
+  /** Thin-strip variant for the module-panel shell (`LogFilterProvider`). Same
+   * controls, less padding. Dashboards leave it off. */
+  compact?: boolean;
   onChange: (entries: FilterEntry[]) => void;
 }) {
   const range = useMemo(() => {
@@ -103,7 +108,12 @@ export function DashboardTimeRange({
 
   if (!range || !value || !applied) {
     return (
-      <div className="flex items-center gap-2 border-t border-white/10 bg-card/40 backdrop-blur-md px-3 py-2 text-xs text-muted-foreground">
+      <div
+        className={cn(
+          "flex items-center gap-2 border-t border-white/10 bg-card/40 backdrop-blur-md text-xs text-muted-foreground",
+          compact ? "px-2 py-1" : "px-3 py-2",
+        )}
+      >
         <CalendarRange className="h-3.5 w-3.5" />
         No timestamp range available for this log.
       </div>
@@ -137,7 +147,12 @@ export function DashboardTimeRange({
   const step = Math.max(60_000, Math.round((range.max - range.min) / 1000));
 
   return (
-    <div className="flex items-center gap-3 border-t border-white/10 bg-card/40 backdrop-blur-md px-3 py-2.5">
+    <div
+      className={cn(
+        "flex items-center border-t border-white/10 bg-card/40 backdrop-blur-md",
+        compact ? "gap-2 px-2 py-1" : "gap-3 px-3 py-2.5",
+      )}
+    >
       <CalendarRange className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="shrink-0 tabular-nums text-xs text-muted-foreground">{fmt(start)}</span>
       <Slider
@@ -152,7 +167,7 @@ export function DashboardTimeRange({
       <Button
         type="button"
         size="sm"
-        className="h-7 shrink-0 px-2 text-xs"
+        className={cn("shrink-0 px-2 text-xs", compact ? "h-6" : "h-7")}
         aria-label="Apply time range"
         disabled={!dirty}
         onClick={apply}
@@ -164,7 +179,7 @@ export function DashboardTimeRange({
         type="button"
         variant="ghost"
         size="icon"
-        className="h-7 w-7 shrink-0"
+        className={cn("shrink-0", compact ? "h-6 w-6" : "h-7 w-7")}
         aria-label="Reset time range"
         disabled={!narrowed && !dirty}
         onClick={reset}

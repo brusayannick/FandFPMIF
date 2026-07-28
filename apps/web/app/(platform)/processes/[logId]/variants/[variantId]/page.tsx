@@ -5,13 +5,13 @@ import { useParams } from "next/navigation";
 import { Inbox } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { PageContainer } from "@/components/page";
 import { ChartCardSkeleton } from "@/components/skeletons";
 import { useEventLog, useVariant, useVariantCases } from "@/lib/queries";
 import { displayActivities, getActivityRenameMap } from "@/lib/activity-rename";
 import { VariantHeader } from "@/components/processes/variant-detail/header";
+import { VariantDetailSkeleton } from "@/components/processes/variant-detail/skeleton";
 import { SequenceStrip } from "@/components/processes/variant-detail/sequence-strip";
 import { CaseList } from "@/components/processes/variant-detail/case-list";
 import { AttributeBreakdowns } from "@/components/processes/variant-detail/attribute-breakdowns";
@@ -36,13 +36,7 @@ export default function VariantDetailPage() {
   const { data: cases } = useVariantCases(logId, variantId);
 
   if (isLoading) {
-    return (
-      <PageContainer className="space-y-4">
-        <Skeleton className="h-6 w-40" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-64 w-full" />
-      </PageContainer>
-    );
+    return <VariantDetailSkeleton />;
   }
 
   if (isError || !variant) {

@@ -20,8 +20,9 @@ step, before alembic::
 
 It downloads the snapshot only when the local DB is absent (never clobbers a
 populated DB); the subsequent ``alembic upgrade head`` then migrates the restored
-DB to head. Storage config normally lives *inside* metadata.db, so the CLI reads
-the bucket from ``STORAGE_*`` env vars (the fallback in ``storage.config``).
+DB to head. The storage backend is configured purely via ``STORAGE_*`` env vars
+(``storage.config``), so the CLI sees exactly the same bucket as the app - no
+DB needed to bootstrap.
 """
 
 from __future__ import annotations
@@ -92,8 +93,8 @@ def restore_sync() -> bool:
 
     Returns True when a snapshot was restored. Never overwrites a populated DB
     (size > 0) - so it's safe to run unconditionally before boot; on an existing
-    VM it no-ops. Reads the bucket from the DB row or the ``STORAGE_*`` env
-    fallback (the DB itself may not exist yet).
+    VM it no-ops. Reads the bucket from the ``STORAGE_*`` env vars (the DB
+    itself may not exist yet).
     """
     if not is_s3():
         log.info("storage.db_restore.not_s3")

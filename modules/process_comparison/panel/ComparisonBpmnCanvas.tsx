@@ -33,6 +33,7 @@ import minimapModule from "diagram-js-minimap";
 import {
   applyComparisonOverlay,
   injectComparisonStyles,
+  BPMN_THEME_COLORS,
   type ActivityMap,
   type BpmnModelerLike,
 } from "./comparison-decorate";
@@ -92,6 +93,7 @@ export function ComparisonBpmnCanvas({ xml, map, decor, refitKey }: ComparisonBp
       modeler = new NavigatedViewer({
         container,
         additionalModules: [minimapModule],
+        bpmnRenderer: BPMN_THEME_COLORS,
       }) as unknown as ModelerHandle;
       try {
         const laidOut = await ensureLayout(xml);

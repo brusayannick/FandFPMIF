@@ -92,6 +92,26 @@ services:
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/flows-funds}
       KEYCLOAK_JWKS_URL: ${KEYCLOAK_JWKS_URL:-http://keycloak:8080/realms/flows-funds/protocol/openid-connect/certs}
       KEYCLOAK_AUDIENCE: ${KEYCLOAK_AUDIENCE:-flows-funds-api}
+      # Storage backend (env-only config – no admin UI, no DB row; see
+      # docs/S3_OFFLOAD.md). Default keeps everything on the data volume;
+      # STORAGE_MODE=s3 makes the bucket authoritative so the VM volume stops
+      # growing with total-data-ever. Values come from the host .env.
+      STORAGE_MODE: ${STORAGE_MODE:-local}
+      STORAGE_S3_ENDPOINT: ${STORAGE_S3_ENDPOINT:-}
+      STORAGE_S3_BUCKET: ${STORAGE_S3_BUCKET:-}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:-}
+      STORAGE_S3_ACCESS_KEY: ${STORAGE_S3_ACCESS_KEY:-}
+      STORAGE_S3_SECRET_KEY: ${STORAGE_S3_SECRET_KEY:-}
+      STORAGE_S3_PATH_STYLE: ${STORAGE_S3_PATH_STYLE:-true}
+      STORAGE_S3_USE_SSL: ${STORAGE_S3_USE_SSL:-true}
+      STORAGE_S3_VERIFY: ${STORAGE_S3_VERIFY:-}
+      STORAGE_S3_PREFIX: ${STORAGE_S3_PREFIX:-}
+      STORAGE_S3_QUOTA_BYTES: ${STORAGE_S3_QUOTA_BYTES:-0}
+      # S3-mode local-cache reaper (dry-run by default; see docs/S3_OFFLOAD.md).
+      LOCAL_CACHE_MAX_BYTES: ${LOCAL_CACHE_MAX_BYTES:-0}
+      CACHE_EVICT_DRY_RUN: ${CACHE_EVICT_DRY_RUN:-true}
+      CACHE_EVICT_MIN_AGE_SECONDS: ${CACHE_EVICT_MIN_AGE_SECONDS:-600}
+      JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-0}
       # MCP server (opt-in). The api image doesn't bake .env, so every MCP
       # knob must be interpolated through here to reach the container.
       MCP_ENABLED: ${MCP_ENABLED:-false}

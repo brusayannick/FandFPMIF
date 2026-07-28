@@ -8,20 +8,17 @@
 // generic label until the data lands. Keep this in sync with the routes under
 // apps/web/app/(platform).
 
-import type { ManifestAuthor, ManifestPaper } from "@/lib/api-types";
+import type { ManifestArtifact, ManifestSource } from "@/lib/api-types";
 
 /** Rich module "About" payload — manifest-sourced, rendered by the topbar ⓘ. */
 export interface ModuleAbout {
   name: string;
   description?: string | null;
   about?: string | null;
-  author?: string | null;
-  authorUrl?: string | null;
-  paperUrl?: string | null;
-  /** All credited authors (max 20); preferred over the singular `author`. */
-  authors?: ManifestAuthor[] | null;
-  /** All cited papers (max 20); preferred over the singular `paperUrl`. */
-  papers?: ManifestPaper[] | null;
+  /** Cited works (max 20) — title + full citation + optional DOI link. */
+  sources?: ManifestSource[] | null;
+  /** Named links (max 20) — code repo, dataset, demo, released model. */
+  artifacts?: ManifestArtifact[] | null;
   license?: string | null;
   version?: string | null;
 }
@@ -120,10 +117,6 @@ const STATIC: Record<string, PageMeta> = {
     title: "Teams",
     description: "Teams and dashboard-sharing membership.",
   },
-  "/admin/storage": {
-    title: "Storage",
-    description: "Local working cache vs the authoritative S3 backend.",
-  },
   "/admin/system": {
     title: "System",
     description: "Live host CPU & memory and the job runtime.",
@@ -184,6 +177,7 @@ export function resolvePageMeta(pathname: string, ctx: ResolvePageCtx = {}): Pag
     return {
       title: mod?.name ?? "Module",
       description: mod?.description ?? "Module details, configuration, and per-user install.",
+      module: mod,
     };
   }
 

@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mate.api.db.models import EventLog, Job
 from mate.api.ingest.aggregation import compute_cases
+from mate.api.ingest.compression import decompressed
 from mate.api.ingest.csv_parser import parse_csv
 from mate.api.ingest.json_parser import parse_json
 from mate.api.ingest.mapping import (
@@ -39,7 +40,7 @@ from mate.api.ingest.mapping import (
     dedupe_case_insensitive_columns,
     resolve_roles,
 )
-from mate.api.ingest.ocel import parse_ocel
+from mate.api.ingest.ocel import OcelParseResult, parse_ocel
 from mate.api.ingest.parquet_coerce import (
     coerce_object_columns,
     normalize_timestamps,
@@ -64,6 +65,50 @@ IMPORT_JOB_TYPE = "event_log.import"
 
 class IngestStats(dict[str, Any]):
     pass
+
+
+def _parse_case_centric(
+    source_format: str,
+    original_path: Path,
+    csv_mapping_data: dict[str, Any] | None,
+    xml_mapping_data: dict[str, Any] | None,
+    json_mapping_data: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any] | None]:
+    """Parse the staged upload into rows (sync; runs in a worker thread).
+
+    The staged original may be compressed (gz / bz2 / xz / zip, possibly
+    nested) - `decompressed` magic-sniffs the bytes and hands the parser a
+    plain temp copy that lives only for the duration of the parse.
+    """
+    with decompressed(original_path) as src:
+        if source_format in {"xes", "xes.gz"}:
+            rows, detected = parse_xes(src, on_progress=lambda n: None)
+            return rows, detected, None
+        if source_format == "csv":
+            mapping = (
+                CsvColumnMapping.model_validate(csv_mapping_data) if csv_mapping_data else None
+            )
+            rows, detected, used = parse_csv(src, mapping)
+            return rows, detected, used.model_dump()
+        if source_format == "xml":
+            xml_mapping = (
+                XmlColumnMapping.model_validate(xml_mapping_data) if xml_mapping_data else None
+            )
+            rows, detected, used_xml = parse_xml(src, xml_mapping)
+            return rows, detected, used_xml.model_dump()
+        if source_format == "json":
+            json_mapping = (
+                JsonColumnMapping.model_validate(json_mapping_data) if json_mapping_data else None
+            )
+            rows, detected, used_json = parse_json(src, json_mapping)
+            return rows, detected, used_json.model_dump()
+    raise ValueError(f"Source format {source_format!r} is not supported in v1.")
+
+
+def _parse_ocel_source(original_path: Path, flavor: str) -> OcelParseResult:
+    """OCEL parse with the same transparent-decompression contract as above."""
+    with decompressed(original_path) as src:
+        return parse_ocel(src, flavor=flavor)
 
 
 async def _import_handler(handle: JobHandle) -> None:
@@ -94,31 +139,14 @@ async def _import_handler(handle: JobHandle) -> None:
         await _import_ocel(handle, log_id, original_path, paths, flavor=ocel_flavor)
         return
 
-    if source_format in {"xes", "xes.gz"}:
-        rows, detected = await asyncio.to_thread(
-            parse_xes,
-            original_path,
-            on_progress=lambda n: None,
-        )
-        effective_mapping: dict[str, Any] | None = None
-    elif source_format == "csv":
-        mapping = CsvColumnMapping.model_validate(csv_mapping_data) if csv_mapping_data else None
-        rows, detected, used = await asyncio.to_thread(parse_csv, original_path, mapping)
-        effective_mapping = used.model_dump()
-    elif source_format == "xml":
-        xml_mapping = (
-            XmlColumnMapping.model_validate(xml_mapping_data) if xml_mapping_data else None
-        )
-        rows, detected, used_xml = await asyncio.to_thread(parse_xml, original_path, xml_mapping)
-        effective_mapping = used_xml.model_dump()
-    elif source_format == "json":
-        json_mapping = (
-            JsonColumnMapping.model_validate(json_mapping_data) if json_mapping_data else None
-        )
-        rows, detected, used_json = await asyncio.to_thread(parse_json, original_path, json_mapping)
-        effective_mapping = used_json.model_dump()
-    else:
-        raise ValueError(f"Source format {source_format!r} is not supported in v1.")
+    rows, detected, effective_mapping = await asyncio.to_thread(
+        _parse_case_centric,
+        source_format,
+        original_path,
+        csv_mapping_data,
+        xml_mapping_data,
+        json_mapping_data,
+    )
 
     # The parser ran inside a single uninterruptible `to_thread` - cancel can't
     # land mid-parse, so an in-flight parse finishes first. Poll here, the first
@@ -339,7 +367,7 @@ async def _import_ocel(
     ``flavor`` (``json`` / ``xml`` / ``sqlite``) selects the pm4py reader; it's
     content-detected at upload and recovered from meta.json on re-import.
     """
-    result = await asyncio.to_thread(parse_ocel, original_path, flavor=flavor)
+    result = await asyncio.to_thread(_parse_ocel_source, original_path, flavor)
 
     # First gap after the single uninterruptible parse `to_thread` - honour a
     # cancel issued during parsing before normalising/writing the OCEL tables.

@@ -13,8 +13,8 @@ import { cn } from "@/lib/cn";
  * TooltipProvider (apps/web/components/providers.tsx) supplies the Radix provider.
  *
  * Grounded in this module's paper — Kirchdorfer et al. (2024), "AgentSimulator:
- * An Agent-based Approach for Data-driven Business Process Simulation" (ICPM),
- * DOI 10.1109/ICPM63005.2024.10680660 (the manifest's `paper_url`) — which
+ * An agent-based approach for data-driven business process simulation" (ICPM),
+ * DOI 10.1109/ICPM63005.2024.10680660 (the manifest's `source[0]`) — which
  * evaluates simulated vs. real logs with exactly these five measures across
  * control-flow (NGD), time (AED/CED/RED) and congestion (CTD), all "lower is
  * better", attributing the distance formulations to Chapela-Campa et al. The

@@ -36,6 +36,7 @@ import {
   applyConformanceOverlay,
   injectConformanceStyles,
   locateActivity,
+  BPMN_THEME_COLORS,
   type BpmnModelerLike,
   type DeviationMaps,
 } from "../conformance-decorate";
@@ -105,6 +106,7 @@ export function ConformanceBpmnCanvas({
       modeler = new NavigatedViewer({
         container,
         additionalModules: [minimapModule],
+        bpmnRenderer: BPMN_THEME_COLORS,
       }) as unknown as ModelerHandle;
       try {
         const laidOut = await ensureLayout(xml);

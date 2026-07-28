@@ -50,7 +50,6 @@ from mate.api.schemas.common import HealthResponse
 from mate.api.storage import get_storage_settings
 from mate.api.storage.db_backup import backup_sync, db_backup_loop
 from mate.api.storage.eviction import eviction_loop
-from mate.api.storage.migration import register_storage_migration_handler
 from mate.api.storage.module_archive import restore_missing_modules_sync
 from mate.api.system.metrics import ResourceSampler, set_resource_sampler
 
@@ -296,7 +295,6 @@ async def lifespan(app: FastAPI):
     )
     set_module_loader(loader)
     register_module_install_handlers(runtime, loader)
-    register_storage_migration_handler(runtime)
 
     # S3 mode: reclaim orphaned uploaded-module dirs (zero install rows), then
     # re-materialise any *owned* upload whose source is missing locally (fresh

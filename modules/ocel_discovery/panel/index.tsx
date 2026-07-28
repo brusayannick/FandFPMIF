@@ -57,7 +57,7 @@ export function OcelDiscoveryPanel({ logId }: { logId: string; moduleId: string 
       <div
         role="tablist"
         aria-label="Object-centric discovery views"
-        className="inline-flex max-w-xl items-center gap-1 rounded-lg bg-muted p-[3px]"
+        className="inline-flex w-fit items-center gap-1 rounded-lg bg-muted p-[3px]"
       >
         {VIEWS.map((v) => {
           const active = v.value === view;
@@ -69,7 +69,7 @@ export function OcelDiscoveryPanel({ logId }: { logId: string; moduleId: string 
               aria-selected={active}
               onClick={() => setView(v.value)}
               className={cn(
-                "flex-1 cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-all",
+                "cursor-pointer whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-all",
                 active
                   ? "bg-background text-foreground shadow-sm"
                   : "text-foreground/60 hover:text-foreground",

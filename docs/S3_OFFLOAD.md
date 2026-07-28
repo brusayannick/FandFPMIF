@@ -1,25 +1,69 @@
-# S3 Offload — Scalable Storage Plan
+# S3 Offload — Scalable Storage
 
-Status of the storage backend today, the gaps that stop it from actually
-relieving the VM, and the phased plan to fix them. Scope decided: **S3
-authoritative, local disk a bounded cache; hydrate-to-local on read;
-multi-node-ready but single-node now.** See `apps/api/src/mate/api/storage/`.
+The storage backend: what it does, how it is configured, and the phased plan
+that built it. Scope: **S3 authoritative, local disk a bounded cache;
+hydrate-to-local on read; multi-node-ready but single-node now.** Code:
+`apps/api/src/mate/api/storage/`.
 
-## Today (before this work)
+## Configuration (env-only)
 
-`mode="s3"` (Admin → Storage) makes the bucket a **write-through mirror**: a
-log/output dir is written locally, then uploaded; on a read-miss the whole dir
-is pulled back. Per-user key layout, isolated:
+The backend is selected **exclusively in the platform env** (`.env` /
+compose-interpolated vars → `mate.api.config.Settings`). There is no admin UI
+and no DB-stored config: the connection (including the secret) is deployment
+config like the Keycloak credentials, it must be identical for pre-boot CLIs
+(`db_backup restore`) that run before any DB exists, and keeping it out of the
+DB avoids the secret-at-rest/encryption-key dance entirely. Changing it =
+edit `.env` → recreate the api (`docker compose up -d api`; a plain `restart`
+keeps the old env).
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `STORAGE_MODE` | `local` | `local` = single copy under `data/`; `s3` = bucket authoritative, local disk a cache |
+| `STORAGE_S3_ENDPOINT` | – | Endpoint URL incl. scheme (`https://rgw.example.org`, `http://minio:9000`). **Empty = AWS S3 proper** (boto3 derives the regional endpoint); required for every other provider |
+| `STORAGE_S3_BUCKET` | – | Bucket name (required in s3 mode) |
+| `STORAGE_S3_REGION` | – | Required by AWS (SigV4 scope); most self-hosted providers ignore it; Cloudflare R2 wants `auto` |
+| `STORAGE_S3_ACCESS_KEY` / `STORAGE_S3_SECRET_KEY` | – | Credentials |
+| `STORAGE_S3_PATH_STYLE` | `true` | Path-style addressing (`host/bucket/key`) – needed by Ceph RGW / MinIO without wildcard DNS; set `false` on AWS (virtual-host style) |
+| `STORAGE_S3_USE_SSL` | `true` | Only meaningful when the endpoint URL carries no scheme |
+| `STORAGE_S3_VERIFY` | *(empty)* | TLS verification: empty = system CAs, `false` = disable, or a CA-bundle path (on-prem internal CA) |
+| `STORAGE_S3_PREFIX` | *(empty)* | Key prefix – several deployments can share one bucket |
+| `STORAGE_S3_QUOTA_BYTES` | `0` | Total-bucket ceiling; imports 507 once reached. `0` = no quota |
+| `LOCAL_CACHE_MAX_BYTES` | `0` | Local working-cache budget for the eviction reaper. `0` = never evict |
+| `CACHE_EVICT_DRY_RUN` | `true` | Reaper logs candidates without deleting – soak first, then set `false` |
+| `CACHE_EVICT_MIN_AGE_SECONDS` | `600` | Never evict a dir accessed within this window |
+| `JOB_RETENTION_DAYS` | `0` | Prune terminal jobs older than N days (bounds `metadata.db`). `0` = keep all |
+
+**Is there one standard way to connect?** The S3 *wire protocol* (AWS REST +
+SigV4) is a de-facto standard, and one boto3 client covers AWS S3, Ceph RGW,
+MinIO, Backblaze B2, Wasabi, Cloudflare R2, DO Spaces, … What differs per
+provider is only parameter *values*, which the table above captures: AWS needs
+no endpoint but a real region and virtual-host addressing; self-hosted stacks
+need an explicit endpoint, usually path-style, sometimes a custom CA; R2 wants
+`region=auto`. No provider needs extra connection parameters beyond these.
+
+### What lives in the bucket (S3 mode)
+
+Per-user key layout mirrors the on-disk tree, fully tenant-isolated:
 
 ```
 {prefix}/users/{uid}/event_logs/{lid}/{events,cases,meta,original}…
 {prefix}/users/{uid}/event_logs/{lid}/ocel/{events,objects,relations,o2o}.parquet
 {prefix}/users/{uid}/module_results/{lid}/{mid}/{key}.{json,parquet,bin}
+{prefix}/_system/metadata.db                # hourly SQLite snapshot (Phase 2)
+{prefix}/_system/modules/{mid}.tar.gz       # uploaded-module sources (Phase 2)
 ```
 
-Mirrored to S3: event-log Parquet (`events`/`cases`), OCEL Parquet (4 tables),
-`meta.json`, original uploads, module result caches (+ filter variants),
-watched-folder source path.
+Synced: event-log Parquet (`events`/`cases`), OCEL Parquet (4 tables),
+`meta.json`, retained original uploads, module result caches (+ filter
+variants), the metadata-DB snapshot, uploaded-module source archives.
+Watched folders additionally *read* arbitrary bucket prefixes as an import
+source. **Never synced** (local-only, rebuilt on demand): module `.venv`s,
+esbuild `.dist` bundles, `data/uv-python/` runtimes.
+
+## The mirror problem this design fixes
+
+A naive `s3` mode is a **write-through mirror**: a log/output dir is written
+locally, then uploaded; on a read-miss the whole dir is pulled back.
 
 ### Why it did not relieve the VM
 
@@ -52,10 +96,9 @@ total-data-ever. S3 holds the complete, restorable truth. The model flips from
 The core. Makes the local tree a reclaimable cache. Code:
 `apps/api/src/mate/api/storage/eviction.py`.
 
-- **Disk budget.** `local_cache_max_bytes` (env default `0` = disabled / keep
-  every copy). Admin-tunable live at Admin → Storage, persisted in
-  `system_settings` under `storage.cache` (mirrors the worker-concurrency
-  pattern). Independent of the S3-side `quota_bytes`.
+- **Disk budget.** `LOCAL_CACHE_MAX_BYTES` (default `0` = disabled / keep
+  every copy), env-only like the rest of the storage config. Independent of the
+  S3-side `STORAGE_S3_QUOTA_BYTES`.
 - **Access bookkeeping.** Effective last-access per cache dir =
   `max(in-process atime, newest file mtime)`. mtime is the restart-surviving
   fallback, so no new table / migration in Phase 1.
@@ -112,35 +155,50 @@ reclaimed.
    live-manifest interpreters — `uv` self-manages that cache; lower value, do
    later.
 
-### Operating (Phase 1 + 2)
+### Operating
 
-- **Cache budget** (Phase 1): Admin → Storage → *Local cache budget*, or env
-  `LOCAL_CACHE_MAX_BYTES` / `CACHE_EVICT_DRY_RUN` / `CACHE_EVICT_MIN_AGE_SECONDS`.
-  Off by default; set a budget + turn dry-run off to actually reclaim.
-- **Jobs retention**: `JOB_RETENTION_DAYS` (0 = keep forever).
+All storage settings are env-only (see *Configuration* above). The recurring
+flows:
+
+- **Enable S3 on an existing deployment**: set `STORAGE_MODE=s3` +
+  `STORAGE_S3_*` in `.env`, recreate the api (`docker compose up -d api`),
+  probe with `python -m mate.api.storage.migration check`, then push the
+  already-imported data up once with `… migration to_s3` (copy-only,
+  re-runnable). New writes sync automatically; only pre-existing data needs
+  the one-time push.
+- **Actually reclaim disk**: set `LOCAL_CACHE_MAX_BYTES`, soak with
+  `CACHE_EVICT_DRY_RUN=true` (watch `storage.eviction.*` logs), then set it
+  `false`. Without a budget, S3 mode only mirrors — the VM stays big.
+- **Switch back to local**: while the env still says `s3`, run
+  `… migration to_local` (pulls everything down), then set
+  `STORAGE_MODE=local` and recreate.
 - **DB restore on a fresh VM** (before `alembic upgrade head`):
   ```
   STORAGE_MODE=s3 STORAGE_S3_ENDPOINT=… STORAGE_S3_BUCKET=… \
   STORAGE_S3_ACCESS_KEY=… STORAGE_S3_SECRET_KEY=… STORAGE_S3_PREFIX=… \
     uv run python -m mate.api.storage.db_backup restore
   ```
-  Storage config normally lives *inside* metadata.db, so the CLI (and any
-  DB-less bootstrap) reads the bucket from these `STORAGE_*` env vars — a
-  fallback in `storage/config.py` consulted only when the DB has no
-  `storage_config` row. Restore no-ops if the local DB already exists, so it's
+  The CLI reads exactly the same `STORAGE_*` env config as the app — no DB
+  needed to bootstrap. Restore no-ops if the local DB already exists, so it's
   safe to run unconditionally in an entrypoint.
+
+The admin **Storage insights** panel (Admin → Overview, `GET
+/api/v1/admin/insights/storage`) stays read-only: backend mode, bucket
+usage/object count vs quota, per-user totals.
 
 ## Phase 3 — Migration + quota  ✅ implemented
 
-1. **Backend-switch migration job** (`storage/migration.py`). A `storage.migrate`
-   admin job walks every per-log + per-module cache dir and pushes it to S3
-   (`to_s3`, after a local→s3 switch) or pulls it down (`to_local`, before an
-   s3→local switch), with progress. **Copy-only** — it never deletes the source,
-   so it's safe to re-run and needs no destructive-confirm; the "switch + delete"
-   hazard simply doesn't exist. Both directions require S3 active (run `to_local`
-   before flipping back). Admin route `POST /admin/storage/migrate`; buttons on
-   the Storage page; tracked in Admin → Jobs.
-2. **Enforce `quota_bytes`** (`storage/quota.py`). `StorageConfig.quota_bytes` is
+1. **Backend-switch migration CLI** (`storage/migration.py`). `python -m
+   mate.api.storage.migration to_s3|to_local|check` walks every per-log +
+   per-module cache dir and pushes it to S3 (`to_s3`, after a local→s3 switch)
+   or pulls it down (`to_local`, before an s3→local switch), printing per-dir
+   progress. **Copy-only** — it never deletes the source, so it's safe to
+   re-run; the "switch + delete" hazard simply doesn't exist. Both directions
+   require S3 active in the env (run `to_local` before flipping back). A CLI
+   rather than a job on purpose: backend switches are operator work tied to an
+   env edit + restart, and a huge copy must not race the job-execution
+   timeout.
+2. **Enforce the quota** (`storage/quota.py`). `STORAGE_S3_QUOTA_BYTES` is
    the total-bucket ceiling. The event-log upload route rejects up-front (507)
    when usage meets/exceeds it — before staging bytes. Usage (an S3 LIST) is
    cached for a 30 s TTL and invalidated on delete (frees space), so it's not a

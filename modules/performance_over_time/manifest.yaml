@@ -14,8 +14,6 @@ about: >-
   improvement initiative actually moved the numbers, or to catch a gradual
   slowdown before it becomes a backlog.
 keywords: ["performance", "over time", "trend", "cycle time", "throughput", "drift", "kpi", "time series"]
-author: FlowFactory
-author_url: https://github.com/brusayannick/Process-Mining-SeminarProtoype
 license: MIT
 default_enabled: true
 # Runs entirely locally – safe to use against confidential event logs.

@@ -49,19 +49,22 @@ def _run_parallel(tasks: list[Callable[[], None]]) -> None:
 
 def make_client(s: StorageSettings | None = None) -> Any:
     s = s or get_storage_settings()
-    if not s.endpoint_url or not s.bucket:
-        raise StorageError("S3 is not fully configured (endpoint and bucket required).")
+    if not s.bucket:
+        raise StorageError("S3 is not fully configured (bucket required).")
     import boto3
     from botocore.config import Config
 
     addressing = "path" if s.path_style else "auto"
     return boto3.client(
         "s3",
-        endpoint_url=s.endpoint_url,
+        # None = AWS S3 proper (boto3 derives the regional endpoint); every
+        # non-AWS provider sets an explicit endpoint URL.
+        endpoint_url=s.endpoint_url or None,
         aws_access_key_id=s.access_key,
         aws_secret_access_key=s.secret_key,
         region_name=s.region or "us-east-1",
         use_ssl=s.use_ssl,
+        verify=s.verify,
         config=Config(signature_version="s3v4", s3={"addressing_style": addressing}),
     )
 
@@ -188,7 +191,7 @@ def list_objects(prefix: str, s: StorageSettings | None = None) -> list[S3Object
     """List every object directly relevant under ``prefix`` (recursive).
 
     ``prefix`` is used literally against the configured bucket - it is NOT
-    combined with the admin ``prefix`` setting, so a watch can point at any
+    combined with the ``STORAGE_S3_PREFIX`` setting, so a watch can point at any
     location an upstream pipeline writes to. Directory markers (keys ending in
     ``/``) are skipped.
     """

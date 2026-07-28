@@ -5,9 +5,9 @@ import { useParams } from "next/navigation";
 import { FileBox } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { PageContainer } from "@/components/page";
+import { PanelSkeleton } from "@/components/skeletons";
 import { useModules } from "@/lib/queries";
 import { getModulePanel } from "@/lib/module-panels";
 import { LogFilterProvider } from "@/components/processes/log-filter";
@@ -20,14 +20,10 @@ export default function ModulePage() {
 
   const mod = modules?.find((m) => m.id === moduleId);
 
+  // Same shell as loading.tsx, so the route-level and data-level skeletons are
+  // interchangeable - no flash or jump when one hands over to the other.
   if (isLoading) {
-    return (
-      <PageContainer className="space-y-4">
-        <Skeleton className="h-8 w-72" />
-        <Skeleton className="h-4 w-96" />
-        <Skeleton className="h-96 w-full" />
-      </PageContainer>
-    );
+    return <PanelSkeleton />;
   }
   if (isError) {
     return (
@@ -84,7 +80,9 @@ export default function ModulePage() {
         // Log-scoped global filter: sets the active log's ephemeral event filter
         // and re-scopes this (and every other) module view for the log. Wraps
         // the panel so its data queries pick up the `X-FF-Event-Filter` header.
-        <LogFilterProvider logId={logId}>
+        // Modules opt out via the manifest (`frontend.log_filter: false`) and
+        // mount without the bar or the header.
+        <LogFilterProvider logId={logId} enabled={mod.supports_log_filter}>
           <ModulePanelSlot logId={logId} moduleId={mod.id} hasFrontend={mod.has_frontend} />
         </LogFilterProvider>
       )}

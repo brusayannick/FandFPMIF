@@ -654,7 +654,8 @@ async def import_log_from_url(
         raise HTTPException(
             status_code=415,
             detail=f"Cannot determine file format from URL path ({filename!r}). "
-            "Make sure the URL ends with .xes, .xes.gz, .csv, .xml, .json, or an OCEL extension.",
+            "Make sure the URL ends with .xes, .csv, .xml, .json, an OCEL extension, "
+            "or a compressed variant (.gz/.bz2/.xz/.zip).",
         ) from exc
 
     parsed_mapping: CsvColumnMapping | None = None
@@ -701,14 +702,24 @@ async def import_log_from_url(
     async with aiofiles.open(original_path, "wb") as out:
         await out.write(raw)
 
-    # Refine the coarse guess from the downloaded content (OCEL vs case-centric).
-    source_format, ocel_flavor = await asyncio.to_thread(
-        sniff_format, original_path, coarse_format, filename=filename
-    )
+    # Refine the coarse guess from the downloaded content (OCEL vs case-centric;
+    # a bare .zip resolves to its single member's format - ValueError means an
+    # empty/ambiguous archive).
+    try:
+        source_format, ocel_flavor = await asyncio.to_thread(
+            sniff_format, original_path, coarse_format, filename=filename
+        )
+    except ValueError as exc:
+        await asyncio.to_thread(paths.remove)
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
 
     display_name = (name or filename).strip() or filename
-    # Strip the extension from auto-derived names to keep things clean.
+    # Strip the extension (and a compression suffix) from auto-derived names.
     if not name:
+        for comp in (".gz", ".gzip", ".bz2", ".xz", ".lzma", ".zip"):
+            if display_name.lower().endswith(comp):
+                display_name = display_name[: -len(comp)]
+                break
         for suffix in (".xes.gz", ".xes", ".csv", ".xml", ".json", ".jsonocel", ".xmlocel"):
             if display_name.lower().endswith(suffix):
                 display_name = display_name[: -len(suffix)]

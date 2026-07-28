@@ -1,12 +1,11 @@
 import { PageContainer } from "@/components/page";
-import { PageHeaderSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
-// Header + dropzone + form-field pairs – the import wizard's rough geometry.
+// Dropzone + form-field pairs – the import wizard's rough geometry. The page
+// renders no header of its own (the topbar owns the title), so neither does it.
 export default function ImportLoading() {
   return (
     <PageContainer>
-      <PageHeaderSkeleton withActions={false} />
       <div className="max-w-2xl space-y-6">
         <Skeleton className="h-40 w-full rounded-xl" />
         <div className="space-y-2">

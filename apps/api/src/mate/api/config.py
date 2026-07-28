@@ -126,14 +126,53 @@ class Settings(BaseSettings):
     # within the freshness window. 0 disables; bounded by a per-frame size guard.
     event_log_cache_entries: int = Field(default=3, ge=0, le=64)
 
-    # --- S3 local-cache eviction (see S3_OFFLOAD.md) -----------------------
+    # --- Storage backend (see docs/S3_OFFLOAD.md) --------------------------
+    # Where event logs + module outputs are durably stored. ``local`` (default)
+    # keeps everything under ``data_dir``; ``s3`` makes an S3-compatible bucket
+    # (AWS S3, Ceph RGW, MinIO, …) the authoritative store and local disk a
+    # bounded working cache - the point is that the VM volume no longer has to
+    # hold every byte ever imported. Configured HERE ONLY (.env / compose env);
+    # there is no admin UI and no DB row - changing the backend is an operator
+    # action: edit the env, restart, run the migration CLI
+    # (``python -m mate.api.storage.migration``) to move existing data.
+    storage_mode: Literal["local", "s3"] = Field(
+        default="local",
+        description="STORAGE_MODE - 'local' (single copy on disk) or 's3' (bucket authoritative).",
+    )
+    # Endpoint URL incl. scheme (e.g. https://rgw.example.org or
+    # http://minio:9000). Leave EMPTY for AWS S3 proper - boto3 derives the
+    # regional endpoint. Required for every non-AWS provider.
+    storage_s3_endpoint: str = Field(default="", description="STORAGE_S3_ENDPOINT")
+    storage_s3_bucket: str = Field(default="", description="STORAGE_S3_BUCKET")
+    # Region: required by AWS (picks the endpoint + SigV4 scope); most
+    # S3-compatibles ignore it (any value works; Cloudflare R2 wants 'auto').
+    storage_s3_region: str = Field(default="", description="STORAGE_S3_REGION")
+    storage_s3_access_key: str = Field(default="", description="STORAGE_S3_ACCESS_KEY")
+    storage_s3_secret_key: str = Field(default="", description="STORAGE_S3_SECRET_KEY")
+    # Path-style addressing (host/bucket/key). Required by most self-hosted
+    # providers (Ceph RGW, MinIO without wildcard DNS); AWS prefers
+    # virtual-host style - set false there.
+    storage_s3_path_style: bool = Field(default=True, description="STORAGE_S3_PATH_STYLE")
+    storage_s3_use_ssl: bool = Field(default=True, description="STORAGE_S3_USE_SSL")
+    # TLS certificate verification: '' = verify against system CAs (default),
+    # 'false' = disable verification, or a path to a CA bundle - for on-prem
+    # endpoints with an internal CA.
+    storage_s3_verify: str = Field(default="", description="STORAGE_S3_VERIFY")
+    # Key prefix inside the bucket (share one bucket between deployments).
+    storage_s3_prefix: str = Field(default="", description="STORAGE_S3_PREFIX")
+    # Total-bucket ceiling in bytes enforced on new imports (507 when reached).
+    # 0 = no quota.
+    storage_s3_quota_bytes: int = Field(
+        default=0, ge=0, description="STORAGE_S3_QUOTA_BYTES - 0 disables the quota."
+    )
+
+    # --- S3 local-cache eviction (see docs/S3_OFFLOAD.md) ------------------
     # In S3 mode the bucket is authoritative and local disk is a reclaimable
     # cache. When the cache exceeds ``local_cache_max_bytes`` a background reaper
     # deletes the least-recently-used log/output dirs locally (they survive on S3
     # and re-hydrate on the next read). ``0`` disables eviction - local disk keeps
     # every synced copy, the pre-eviction behaviour. No effect in local mode,
-    # where the local copy is the only copy. Admins override these live at
-    # Admin → Storage (persisted in ``system_settings`` under ``storage.cache``).
+    # where the local copy is the only copy.
     local_cache_max_bytes: int = Field(
         default=0,
         ge=0,
@@ -235,16 +274,6 @@ class Settings(BaseSettings):
     demo_admin: bool = Field(
         default=False,
         description="DEMO_ADMIN - give the demo user the admin role (only when DEMO_MODE is on).",
-    )
-
-    # Secret used to derive the Fernet key that encrypts the S3 secret-access-key
-    # stored in the metadata DB (Admin → Storage). Must be set and STABLE in
-    # production - rotating it makes the stored S3 secret undecryptable and the
-    # admin has to re-enter it. Falls back to ``database_url`` when unset so dev
-    # works out of the box (acceptable: the DB is local-only there).
-    storage_encryption_key: str | None = Field(
-        default=None,
-        description="STORAGE_ENCRYPTION_KEY - encrypts the stored S3 secret key.",
     )
 
     # MCP server (Model Context Protocol). When enabled the API mounts a

@@ -429,48 +429,6 @@ class ControlPolicy(Base):
     __table_args__ = (Index("ix_control_policies_scope", "scope"),)
 
 
-class StorageConfig(Base):
-    """Global (VM-wide) storage backend configuration - a single row.
-
-    Unlike :class:`UserSetting` this is *not* per-user: it selects where every
-    user's event logs and module outputs are durably stored. ``mode="local"``
-    (the default) keeps everything on disk exactly as before; ``mode="s3"``
-    treats a connected S3/Ceph-RGW bucket as the primary store while local disk
-    acts as a working cache (see ``mate.api.storage``). Set and edited only by
-    an admin via ``/api/v1/admin/storage``. The single row is keyed by the
-    constant :data:`SINGLETON_ID`.
-    """
-
-    __tablename__ = "storage_config"
-
-    SINGLETON_ID = "singleton"
-
-    id: Mapped[str] = mapped_column(String(16), primary_key=True, default=SINGLETON_ID)
-    mode: Mapped[str] = mapped_column(
-        String(8), default="local", server_default="local", nullable=False
-    )
-    endpoint_url: Mapped[str | None] = mapped_column(String(512))
-    bucket: Mapped[str | None] = mapped_column(String(255))
-    region: Mapped[str | None] = mapped_column(String(64))
-    access_key: Mapped[str | None] = mapped_column(String(255))
-    # Fernet ciphertext of the secret access key - never stored or returned in
-    # plaintext (see ``storage/config.py``).
-    secret_key_enc: Mapped[str | None] = mapped_column(Text)
-    # Ceph RGW and most non-AWS S3 need path-style addressing
-    # (``host/bucket/key`` rather than ``bucket.host/key``).
-    path_style: Mapped[bool] = mapped_column(
-        Boolean, default=True, server_default="1", nullable=False
-    )
-    use_ssl: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
-    prefix: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
-    # Admin-entered total quota (bytes) for the storage-overview bar. Optional -
-    # S3 itself doesn't report it back without admin caps the RGW user lacks.
-    quota_bytes: Mapped[int | None] = mapped_column(Integer)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
-    )
-
-
 class EventEdit(Base):
     """Audit trail for manual cell edits made via the Events tab.
 

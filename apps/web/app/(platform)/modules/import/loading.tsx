@@ -1,12 +1,11 @@
 import { PageContainer } from "@/components/page";
-import { PageHeaderSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
-// Header + upload dropzone + field pairs – the module upload page's geometry.
+// Upload dropzone + field pairs – the module upload page's geometry. The page
+// renders no header of its own (the topbar owns the title), so neither does it.
 export default function ModuleImportLoading() {
   return (
     <PageContainer>
-      <PageHeaderSkeleton withActions={false} />
       <div className="max-w-2xl space-y-6">
         <Skeleton className="h-40 w-full rounded-xl" />
         <div className="space-y-2">

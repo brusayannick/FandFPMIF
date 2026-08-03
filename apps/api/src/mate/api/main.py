@@ -327,12 +327,12 @@ async def lifespan(app: FastAPI):
     try:
         await loader.load_all()
     except Exception:
-        # A batch-aborting failure (e.g. a bad manifest or a duplicate module
-        # id surfacing during discovery/topo-sort) must not stop the platform
+        # Last-resort net: a batch-aborting failure must not stop the platform
         # from booting - but it must be loud. Swallowing it silently once left
-        # the whole module system dark with no modules and no log line. Per-
-        # module install/import errors are already logged + skipped inside the
-        # loader; this catches the ones that abort the entire load.
+        # the whole module system dark with no modules and no log line. The
+        # known per-module failure modes (invalid manifest, duplicate id,
+        # unsatisfiable/cyclic requirement, install/import error) are logged +
+        # skipped inside discovery and the loader; nothing routine lands here.
         structlog.get_logger("modules.loader").exception("modules.load_all_failed")
 
     # Holds a freshly imported log disabled (`status="processing"`) until every

@@ -47,6 +47,10 @@ data/event_logs/*
 data/module_results/*
 !data/module_results/.gitkeep
 data/users/
+data/staging/
+data/uploaded_modules/
+data/module-uploads/
+data/uv-python/
 data/.multi_user_migrated
 data/metadata.db
 data/metadata.db-wal

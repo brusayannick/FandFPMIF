@@ -173,7 +173,7 @@ function Readout({ value, sub }: { value: string; sub: string }) {
 function CpuCard({ data }: { data: SystemResources }) {
   const { cpu, history } = data;
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader className="gap-1">
         <CardTitle className="flex items-center gap-2 text-sm">
           <Cpu className="h-4 w-4" /> CPU
@@ -198,7 +198,7 @@ function CpuCard({ data }: { data: SystemResources }) {
 function MemoryCard({ data }: { data: SystemResources }) {
   const { memory, history } = data;
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader className="gap-1">
         <CardTitle className="flex items-center gap-2 text-sm">
           <MemoryStick className="h-4 w-4" /> Memory
@@ -226,7 +226,7 @@ function MemoryCard({ data }: { data: SystemResources }) {
 function CoreCard({ data }: { data: SystemResources }) {
   const { cpu } = data;
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader className="gap-1">
         <CardTitle className="flex items-center gap-2 text-sm">
           <Activity className="h-4 w-4" /> CPU by core / thread
@@ -274,7 +274,7 @@ function BreakdownCard({
   const colors = breakdownColors(slices);
   const hasData = slices.some((s) => s.value > 0);
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm">
           <Server className="h-4 w-4" /> {title}
@@ -313,7 +313,7 @@ function BreakdownCard({
 function RunningJobs({ data }: { data: SystemResources }) {
   const jobs = data.running_jobs;
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle className="text-sm">Running jobs ({jobs.length})</CardTitle>
       </CardHeader>

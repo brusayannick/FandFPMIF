@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   MarkerType,
   useEdgesState,
@@ -17,7 +17,6 @@ import { PtOperatorNode, type PtOperatorNodeData } from "../nodes/pt-operator-no
 import type { ProcessTreeData, ProcessTreeNode } from "../types";
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
 import { CanvasLayoutSkeleton } from "@/components/visualizations/canvases/shared/canvas-skeleton";
-import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import {
   useGeneralSettings,
   useNodePositions,
@@ -85,9 +84,14 @@ function flatten(
 
 interface ProcessTreeCanvasProps {
   data: ProcessTreeData;
+  /** Popover body of the canvas control cluster (see `canvas-toolbar.tsx`).
+   *  Composed by the panel because it also holds the model choice. */
+  settings?: ReactNode;
+  /** A re-mine is in flight while the previous tree stays on screen. */
+  busy?: boolean;
 }
 
-export function ProcessTreeCanvas({ data }: ProcessTreeCanvasProps) {
+export function ProcessTreeCanvas({ data, settings, busy }: ProcessTreeCanvasProps) {
   const general = useGeneralSettings();
   const [pt] = useProcessTreeSettings();
   const persistedPositions = useNodePositions("process_tree");
@@ -152,7 +156,15 @@ export function ProcessTreeCanvas({ data }: ProcessTreeCanvasProps) {
       fitViewKey={key}
       miniMap={general.showMinimap}
       showGrid={general.showGrid}
-      toolbarSlot={<CanvasResetButton onReset={() => resetPositions("process_tree")} />}
+      busy={busy}
+      settings={settings}
+      // Clearing the store isn't enough: `persistedPositions` is deliberately
+      // not a dep of the seeding effect (it changes on every drag persist), so
+      // reset also re-seeds React Flow from the raw `laidNodes`.
+      onReset={() => {
+        resetPositions("process_tree");
+        setNodes([...laidNodes]);
+      }}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeDragStop={onNodeDragStop}

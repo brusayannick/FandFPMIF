@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   MarkerType,
   Position,
@@ -11,7 +11,6 @@ import {
 } from "@xyflow/react";
 
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
-import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import { formatNumber } from "@/lib/format";
 import { useVizSettings } from "@/lib/stores/visualization-settings";
 
@@ -30,7 +29,16 @@ const SIDE_COLOR: Record<"a" | "b", string> = {
 /** Render ONE log of the diff as a standalone single-log DFG (discovery style):
  *  keep the activities/edges present on that side and size edges by frequency.
  *  Two of these sit side by side so A and B can be read independently. */
-export function SideBySideDfg({ data, side }: { data: DfgDiffData; side: "a" | "b" }) {
+export function SideBySideDfg({
+  data,
+  side,
+  settings,
+}: {
+  data: DfgDiffData;
+  side: "a" | "b";
+  /** Popover body of the canvas control cluster (see `canvas-toolbar.tsx`). */
+  settings?: ReactNode;
+}) {
   const general = useVizSettings((s) => s.general);
   const { nodes: laidNodes, edges: laidEdges } = useMemo(() => {
     // An element is on side A unless it's comparison-only, and vice versa.
@@ -127,7 +135,8 @@ export function SideBySideDfg({ data, side }: { data: DfgDiffData; side: "a" | "
         fitViewKey={`${data.other_log_id}-${side}-${resetNonce}-${nodes.length}`}
         miniMap={general.showMinimap}
         showGrid={general.showGrid}
-        toolbarSlot={<CanvasResetButton onReset={() => setResetNonce((n) => n + 1)} />}
+        settings={settings}
+        onReset={() => setResetNonce((n) => n + 1)}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
       />

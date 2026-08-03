@@ -30,6 +30,8 @@ from mate.api.schemas.event_log_data import (
     ActiveFilterResult,
     ActiveFilterUpdate,
     ActivitiesPage,
+    ActivityCasesPage,
+    ActivityDetail,
     ActivityRow,
     BulkFillBody,
     BulkFillResult,
@@ -503,4 +505,36 @@ async def list_activities(log_id: str, session: SessionDep, user: CurrentUserDep
     return ActivitiesPage(
         rows=[ActivityRow(activity=a, count=n) for a, n in counts],
         total=len(counts),
+    )
+
+
+# The activity name travels as a query param, not a path segment: names are
+# arbitrary strings (may contain `/`, `%`, unicode) and the prod proxy chain
+# can normalize percent-escapes inside path segments; query strings pass
+# through untouched.
+
+
+@router.get("/activities/detail", response_model=ActivityDetail)
+async def get_activity_detail(
+    log_id: str,
+    session: SessionDep,
+    user: CurrentUserDep,
+    name: Annotated[str, Query(min_length=1)],
+) -> ActivityDetail:
+    log_row = await _require_ready(log_id, session, user.id)
+    return await log_aggregates.activity_detail(log_row, user.id, name)
+
+
+@router.get("/activities/cases", response_model=ActivityCasesPage)
+async def list_activity_cases(
+    log_id: str,
+    session: SessionDep,
+    user: CurrentUserDep,
+    name: Annotated[str, Query(min_length=1)],
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> ActivityCasesPage:
+    await _require_ready(log_id, session, user.id)
+    return await log_aggregates.activity_cases_page(
+        log_id, user.id, name, offset=offset, limit=limit
     )

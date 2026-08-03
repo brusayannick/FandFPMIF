@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FileBox } from "lucide-react";
@@ -9,12 +10,22 @@ import { EmptyState } from "@/components/empty-state";
 import { PageContainer } from "@/components/page";
 import { PanelSkeleton } from "@/components/skeletons";
 import { useModules } from "@/lib/queries";
-import { getModulePanel } from "@/lib/module-panels";
+import { getModulePanel, prefetchModulePanel } from "@/lib/module-panels";
 import { LogFilterProvider } from "@/components/processes/log-filter";
 
 export default function ModulePage() {
   const params = useParams<{ logId: string; moduleId: string }>();
   const { logId, moduleId } = params;
+
+  // Start the panel bundle + runtime on mount rather than after `useModules`
+  // resolves. The route already knows which module it is, so gating the two
+  // large transfers behind the module-list round trip only serialised them.
+  // A deep link or reload (no hover prefetch from the grid) used to pay all
+  // three back to back. Rendering still waits for the query below - this only
+  // moves the fetch off the critical path, it does not mount anything early.
+  useEffect(() => {
+    prefetchModulePanel(moduleId);
+  }, [moduleId]);
 
   const { data: modules, isLoading, isError } = useModules(logId);
 
@@ -58,11 +69,11 @@ export default function ModulePage() {
         <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
           <p className="text-sm font-medium">This module is disabled</p>
           <p className="mt-2 text-sm text-muted-foreground">
-            Enable it under{" "}
+            Enable it on the{" "}
             <Link href={`/modules/${mod.id}`} className="underline underline-offset-2">
-              Settings → Modules
+              Modules
             </Link>{" "}
-            to open it.
+            page to open it.
           </p>
         </div>
       ) : (mod.availability?.status ?? "available") === "unavailable" ? (

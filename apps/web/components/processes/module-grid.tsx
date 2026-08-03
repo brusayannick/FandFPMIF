@@ -26,11 +26,10 @@ const CATEGORIES: { id: string; label: string }[] = [
   { id: "other", label: "Other" },
 ];
 
-// Empty/error states sit on a frosted glass card with a faint dot-pattern
-// behind them – the liquid-glass treatment for zero-data surfaces.
-function GlassEmpty(props: React.ComponentProps<typeof EmptyState>) {
+// Empty/error states sit on a plain card with a faint dot-pattern behind them.
+function CardEmpty(props: React.ComponentProps<typeof EmptyState>) {
   return (
-    <Card variant="glass" className="relative overflow-hidden py-0">
+    <Card className="relative overflow-hidden py-0">
       <DotPattern
         className="text-muted-foreground/50 [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]"
         dotOpacity={0.15}
@@ -195,7 +194,7 @@ export function ModuleGrid({
   return (
     <div data-tour="module-grid">
       {visibleCount === 0 ? (
-        <GlassEmpty
+        <CardEmpty
           icon={FileBox}
           title={
             q

@@ -54,6 +54,11 @@ export const queryKeys = {
     ["event-logs", logId, "variants", variantId, "cases", offset, limit] as const,
   dataQuality: (logId: string) => ["event-logs", logId, "data-quality"] as const,
   activities: (logId: string) => ["event-logs", logId, "activities"] as const,
+  // Nested under the `activities` prefix so existing invalidations cover them.
+  activityDetail: (logId: string, name: string) =>
+    ["event-logs", logId, "activities", "detail", name] as const,
+  activityCases: (logId: string, name: string, offset: number, limit: number) =>
+    ["event-logs", logId, "activities", "detail", name, "cases", offset, limit] as const,
   ocelOverview: (logId: string) => ["event-logs", logId, "ocel", "overview"] as const,
   ocelObjectTypes: (logId: string) => ["event-logs", logId, "ocel", "object-types"] as const,
   ocelObjects: (logId: string, params: OcelListParams) =>

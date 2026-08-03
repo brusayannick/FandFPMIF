@@ -15,9 +15,9 @@ import type { ExperienceLevel } from "@/lib/stores/onboarding";
 export interface OnboardingState {
   completed: boolean;
   experience_level: ExperienceLevel | null;
-  /** Interactive product tour (process-discovery walkthrough) finished/skipped.
-   *  Separate from `completed` so the tour can auto-chain after the wizard yet
-   *  be replayed without re-opening it. */
+  /** Interactive product tour (the high-level platform walkthrough)
+   *  finished/skipped. Separate from `completed` so the tour can auto-chain
+   *  after the wizard yet be replayed without re-opening it. */
   tour_completed: boolean;
 }
 

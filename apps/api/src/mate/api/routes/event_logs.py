@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ from mate.api.auth import (
 )
 from mate.api.db.models import EventLog
 from mate.api.db.session import SessionDep
+from mate.api.ingest import staging
 from mate.api.ingest.compression import decompressed
 from mate.api.ingest.detect import (
     detect_format,
@@ -30,6 +32,7 @@ from mate.api.ingest.detect import (
     sniff_format,
 )
 from mate.api.ingest.dispatch import IMPORT_JOB_TYPE
+from mate.api.ingest.probe import probe_staged
 from mate.api.ingest.storage import log_paths
 from mate.api.jobs.runtime import JobRuntime, get_job_runtime
 from mate.api.schemas.event_logs import (
@@ -40,6 +43,8 @@ from mate.api.schemas.event_logs import (
     EventLogUpdate,
     JsonColumnMapping,
     JsonProbeResponse,
+    LogProbeResponse,
+    ProbeColumn,
     RemapColumnRoles,
     XmlColumnMapping,
     XmlProbeResponse,
@@ -65,6 +70,104 @@ _RuntimeDep = Annotated[JobRuntime, Depends(_runtime_dep)]
 
 
 @router.post(
+    "/stage",
+    response_model=LogProbeResponse,
+)
+async def stage_event_log(
+    user: CurrentUserDep,
+    file: Annotated[
+        UploadFile,
+        File(
+            description="XES, CSV, XML, JSON, or OCEL (.jsonocel/.xmlocel/.sqlite) upload, "
+            "optionally compressed (.gz/.bz2/.xz/.zip)"
+        ),
+    ],
+) -> LogProbeResponse:
+    """Stage an upload and describe its columns for the import wizard.
+
+    The bytes are written once, under `data/staging/{user}/{token}/`, and then
+    sampled: the response carries the source columns with real example values
+    plus the role mapping the import *would* apply (`roles`) and how confident
+    each guess is (`quality`). Nothing is created in the database - the client
+    posts `staging_token` back to `POST /event-logs` to confirm, or walks away
+    and lets the TTL sweep reclaim the bytes.
+    """
+    if file.filename is None:
+        raise HTTPException(status_code=400, detail="Upload is missing a filename.")
+
+    try:
+        coarse_format = detect_format(file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+
+    if await asyncio.to_thread(over_quota_sync):
+        raise HTTPException(
+            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+            detail="Storage quota reached. Delete data or have the operator raise "
+            "STORAGE_S3_QUOTA_BYTES.",
+        )
+
+    token = uuid7_str()
+    root = await asyncio.to_thread(staging.create_staging_dir, user.id, token)
+    staged_path = root / f"original.{original_extension(file.filename, coarse_format).lstrip('.')}"
+
+    try:
+        async with aiofiles.open(staged_path, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                await out.write(chunk)
+
+        try:
+            source_format, ocel_flavor = await asyncio.to_thread(
+                sniff_format, staged_path, coarse_format, filename=file.filename
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=415, detail=str(exc)) from exc
+
+        try:
+            probe = await asyncio.to_thread(probe_staged, staged_path, source_format)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            log.warning("event_log.probe_failed", format=source_format, error=str(exc))
+            raise HTTPException(
+                status_code=400, detail=f"Could not read the uploaded file: {exc}"
+            ) from exc
+
+        await asyncio.to_thread(
+            staging.write_manifest,
+            root,
+            {
+                "filename": file.filename,
+                "source_format": source_format,
+                "ocel_flavor": ocel_flavor,
+            },
+        )
+    except Exception:
+        # Never leave bytes behind for a staging attempt that failed - the TTL
+        # sweep would eventually get them, but a 415 should cost nothing.
+        await asyncio.to_thread(shutil.rmtree, root, True)
+        raise
+
+    return LogProbeResponse(
+        staging_token=token,
+        source_format=source_format,
+        log_model="object_centric" if probe.log_model == "object_centric" else "case_centric",
+        needs_mapping=probe.needs_mapping,
+        columns=[
+            ProbeColumn(name=c.name, coverage=c.coverage, samples=c.samples) for c in probe.columns
+        ],
+        roles=probe.roles,
+        quality=probe.quality,
+        events_sampled=probe.events_sampled,
+        size_bytes=staged_path.stat().st_size,
+        filename=file.filename,
+        delimiter=probe.delimiter,
+        event_element=probe.event_element,
+        event_path=probe.event_path,
+    )
+
+
+@router.post(
     "",
     response_model=EventLogCreateResponse,
     status_code=status.HTTP_202_ACCEPTED,
@@ -74,25 +177,52 @@ async def create_event_log(
     runtime: _RuntimeDep,
     user: CurrentUserDep,
     file: Annotated[
-        UploadFile,
+        UploadFile | None,
         File(
             description="XES, CSV, XML, JSON, or OCEL (.jsonocel/.xmlocel/.sqlite) upload, "
-            "optionally compressed (.gz/.bz2/.xz/.zip)"
+            "optionally compressed (.gz/.bz2/.xz/.zip). Omit when passing staging_token."
         ),
-    ],
+    ] = None,
+    staging_token: Annotated[
+        str | None,
+        Form(description="Token from POST /event-logs/stage - confirms an already-staged upload"),
+    ] = None,
     name: Annotated[str | None, Form()] = None,
     csv_mapping: Annotated[str | None, Form(description="JSON-encoded CsvColumnMapping")] = None,
     xml_mapping: Annotated[str | None, Form(description="JSON-encoded XmlColumnMapping")] = None,
     json_mapping: Annotated[str | None, Form(description="JSON-encoded JsonColumnMapping")] = None,
+    column_roles: Annotated[
+        str | None,
+        Form(description="JSON-encoded {role: source column} override, from the wizard"),
+    ] = None,
     folder_id: Annotated[str | None, Form()] = None,
 ) -> EventLogCreateResponse:
-    if file.filename is None:
-        raise HTTPException(status_code=400, detail="Upload is missing a filename.")
+    if (file is None) == (staging_token is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Provide either a file upload or a staging_token, not both.",
+        )
 
-    try:
-        coarse_format = detect_format(file.filename)
-    except ValueError as exc:
-        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    staged: staging.StagedUpload | None = None
+    if staging_token is not None:
+        staged = await asyncio.to_thread(staging.resolve_staged, user.id, staging_token)
+        if staged is None:
+            raise HTTPException(
+                status_code=404,
+                detail="This upload is no longer staged - it expired or was already imported. "
+                "Choose the file again.",
+            )
+        source_filename = staged.filename
+        coarse_format = staged.source_format or "csv"
+    else:
+        assert file is not None  # narrowed by the XOR check above
+        if file.filename is None:
+            raise HTTPException(status_code=400, detail="Upload is missing a filename.")
+        source_filename = file.filename
+        try:
+            coarse_format = detect_format(file.filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=415, detail=str(exc)) from exc
 
     parsed_mapping: CsvColumnMapping | None = None
     if csv_mapping:
@@ -115,12 +245,27 @@ async def create_event_log(
         except (ValueError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=422, detail=f"Invalid json_mapping: {exc}") from exc
 
+    parsed_roles: dict[str, str] | None = None
+    if column_roles:
+        try:
+            loaded = json.loads(column_roles)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid column_roles: {exc}") from exc
+        if not isinstance(loaded, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in loaded.items()
+        ):
+            raise HTTPException(
+                status_code=422, detail="column_roles must be an object of role → column strings."
+            )
+        parsed_roles = {k: v for k, v in loaded.items() if v} or None
+
     if folder_id is not None:
         await get_owned_folder(session, folder_id, user.id)
 
     # Reject up-front when the bucket is at its quota (S3 mode + quota set only),
     # before staging any bytes. A guardrail: an unknown usage never blocks.
-    if await asyncio.to_thread(over_quota_sync):
+    # (A staged upload already paid this check at /stage time.)
+    if staged is None and await asyncio.to_thread(over_quota_sync):
         raise HTTPException(
             status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
             detail="Storage quota reached. Delete data or have the operator raise "
@@ -131,26 +276,36 @@ async def create_event_log(
     paths = log_paths(log_id, user.id)
     paths.ensure()
 
-    ext = original_extension(file.filename, coarse_format)
-    original_path = paths.original_for(ext)
+    if staged is not None:
+        # Already on disk and already sniffed at /stage time: move the bytes into
+        # the log directory instead of re-uploading them.
+        original_path = paths.root / staged.file.name
+        await asyncio.to_thread(shutil.move, str(staged.file), str(original_path))
+        await asyncio.to_thread(staged.discard)
+        source_format = staged.source_format
+        ocel_flavor = staged.ocel_flavor
+    else:
+        assert file is not None  # narrowed at the top of the handler
+        ext = original_extension(source_filename, coarse_format)
+        original_path = paths.original_for(ext)
 
-    async with aiofiles.open(original_path, "wb") as out:
-        while chunk := await file.read(1024 * 1024):
-            await out.write(chunk)
+        async with aiofiles.open(original_path, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                await out.write(chunk)
 
-    # Refine the coarse extension guess by inspecting the staged file: plain
-    # .json / .xml auto-route to the object-centric (OCEL) or case-centric path,
-    # and a bare .zip resolves to its single member's format. ValueError =
-    # empty/ambiguous archive → reject before any DB row exists.
-    try:
-        source_format, ocel_flavor = await asyncio.to_thread(
-            sniff_format, original_path, coarse_format, filename=file.filename
-        )
-    except ValueError as exc:
-        await asyncio.to_thread(paths.remove)
-        raise HTTPException(status_code=415, detail=str(exc)) from exc
+        # Refine the coarse extension guess by inspecting the staged file: plain
+        # .json / .xml auto-route to the object-centric (OCEL) or case-centric path,
+        # and a bare .zip resolves to its single member's format. ValueError =
+        # empty/ambiguous archive → reject before any DB row exists.
+        try:
+            source_format, ocel_flavor = await asyncio.to_thread(
+                sniff_format, original_path, coarse_format, filename=source_filename
+            )
+        except ValueError as exc:
+            await asyncio.to_thread(paths.remove)
+            raise HTTPException(status_code=415, detail=str(exc)) from exc
 
-    display_name = (name or file.filename).strip() or file.filename
+    display_name = (name or source_filename).strip() or source_filename
 
     session.add(
         EventLog(
@@ -158,7 +313,7 @@ async def create_event_log(
             user_id=user.id,
             name=display_name,
             source_format=source_format,
-            source_filename=file.filename,
+            source_filename=source_filename,
             status="importing",
             folder_id=folder_id,
             created_at=datetime.now(UTC).replace(tzinfo=None),
@@ -179,6 +334,7 @@ async def create_event_log(
             "csv_mapping": parsed_mapping.model_dump() if parsed_mapping else None,
             "xml_mapping": parsed_xml_mapping.model_dump() if parsed_xml_mapping else None,
             "json_mapping": parsed_json_mapping.model_dump() if parsed_json_mapping else None,
+            "column_roles": parsed_roles,
         },
     )
 

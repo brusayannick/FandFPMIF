@@ -59,6 +59,7 @@ async def record_tool_call(
     try:
         from mate.api.db.engine import get_sessionmaker
         from mate.api.routes.analytics import record_server_event
+        from mate.api.services.analytics_objects import ObjectRef
 
         sm = get_sessionmaker()
         async with sm() as session:
@@ -75,6 +76,8 @@ async def record_tool_call(
                     "mutation": mutation,
                     "args": labels,
                 },
+                # The tool is the MCP analogue of the paper's target object.
+                objects=[ObjectRef(f"tool:{tool}", "mcp_tool", "target")],
             )
     except Exception as exc:
         log.warning("mcp.audit.analytics_failed", error=str(exc))

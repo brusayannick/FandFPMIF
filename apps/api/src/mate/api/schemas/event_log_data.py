@@ -230,6 +230,39 @@ class ActivitiesPage(BaseModel):
     total: int
 
 
+class ActivityDetail(BaseModel):
+    """Response for `GET /activities/detail` - drives the activity detail page."""
+
+    activity: str
+    event_count: int
+    event_pct: float
+    case_count: int
+    case_pct: float
+    avg_occurrences_per_case: float | None = None
+    max_occurrences_per_case: int | None = None
+    start_case_count: int
+    start_case_pct: float
+    end_case_count: int
+    end_case_pct: float
+    first_seen: UtcDateTime | None = None
+    last_seen: UtcDateTime | None = None
+    # Variants whose sequence contains the activity (exact membership, unlike
+    # the variants listing's substring `activity_contains`).
+    variant_count: int
+    top_variants: list[VariantRow]
+
+
+class ActivityCase(VariantCase):
+    occurrences: int
+
+
+class ActivityCasesPage(BaseModel):
+    rows: list[ActivityCase]
+    total: int
+    offset: int
+    limit: int
+
+
 class EventEditEntry(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -94,9 +94,10 @@ frontend:
   widgets:
     - id: kpi-card
       entry: ./widgets/KpiCard.tsx
-  page_layout:
-    - section: KPIs
-      widgets: [kpi-card]
+      min_px_w: 320               # see §7 Widgets – declare real pixel floors
+      min_px_h: 220
+      help:
+        what: Headline cycle-time figures for the filtered log.
 
 permissions:
   - read:event_log
@@ -288,7 +289,7 @@ async with ctx.event_log as log:
 
 Prefer DuckDB for aggregations (millions of rows in milliseconds). Use pandas/polars when you need DataFrame semantics. Use `pm4py` only when an algorithm needs the pm4py event log object – it's the heaviest.
 
-### `ctx.open_event_log(log_id)` – reading a *second* log
+### `ctx.open_event_log(log_id, filters=None)` – reading a *second* log
 
 `ctx.event_log` is bound to the one log the invocation is scoped to. When a module genuinely needs another log too (comparison, benchmarking), `ctx.open_event_log(other_log_id)` returns a second `EventLogAccess` with the **same** interface:
 
@@ -298,7 +299,28 @@ async with ctx.event_log as base, await ctx.open_event_log(other_id) as other:
     other_df = await other.pandas()
 ```
 
-It is the only sanctioned cross-log accessor and it **enforces tenant isolation**: the target must be a case-centric log owned by the same user, else it raises (a log belonging to another user is reported as "not found" – never confirmed). The view honours the target log's own committed Events-tab filter, exactly like the primary one. Don't reach into `mate.api.*` internals to open a log yourself – that bypasses the ownership check.
+It is the only sanctioned cross-log accessor and it **enforces tenant isolation**: the target must be a case-centric log owned by the same user, else it raises (a log belonging to another user is reported as "not found" – never confirmed). Don't reach into `mate.api.*` internals to open a log yourself – that bypasses the ownership check.
+
+`filters` decides which rows that view serves (same `{field, op, value}` entries as `active_filter`):
+
+| `filters` | view serves |
+| --- | --- |
+| `None` (default) | the target log's own committed Events-tab filter, exactly like the primary view |
+| a list | **replaces** that committed filter, for this view only – nothing is persisted |
+| `[]` | the raw log, committed filter ignored |
+
+That's what makes *the same log twice* a meaningful pair – the filter, not the log id, is what identifies a view:
+
+```python
+# Two cohorts of one log, compared in a single request.
+north = [{"field": "region", "op": "equals", "value": "north"}]
+south = [{"field": "region", "op": "equals", "value": "south"}]
+async with await ctx.open_event_log(ctx.log_id, north) as a, \
+           await ctx.open_event_log(ctx.log_id, south) as b:
+    ...
+```
+
+Cache accordingly: if you memoise a cross-log result, hash **every** view's `(log_id, filter)` into the key, or two differently filtered comparisons of one log collide on one entry (`modules/process_comparison` is the reference). In-process only – the subprocess/JVM bridge does not proxy `open_event_log`.
 
 ### `ctx.cache`
 
@@ -344,7 +366,9 @@ A module precomputes on import by stacking `@on_event("log.imported")` (or `ocel
 async def precompute(self, ctx, payload): ...
 ```
 
-Declare the edge so it validates and shows up in the jobs UI: `consumes: [discovery.completed]` (+ `optional_modules: [discovery]`). The log stays in `processing` until the **whole** chain finishes; if an upstream fails the platform **skips** your job instead of stranding the log. A `@on_event` *without* `@job` (e.g. a cheap cache refresh) is fire-and-forget and never gates a log.
+Declare the edge so it validates and shows up in the jobs UI: `consumes: [discovery.completed]` (+ `optional_modules: [discovery]`). The log stays in `processing` until the **whole** chain finishes; if an upstream fails the platform **skips** your job instead of stranding the log. A `@on_event` *without* `@job` (e.g. a cheap cache refresh) is fire-and-forget: it never gates a log, and it never appears in the plan or the jobs UI either — only job-backed handlers enter the precompute closure.
+
+The plan the jobs UI renders is emitted in **execution order** (topological; alphabetical by module id within a layer), so your step is always listed after the upstream it waits on. Rely on that order when writing progress copy — don't re-sort it client-side.
 
 ### `ctx.workdir`
 
@@ -415,9 +439,116 @@ export default function Panel({ logId, moduleId, config }: ModulePanelProps) {
 
 Use the shadcn-themed building blocks in `@mate/module-sdk-ts` rather than re-implementing tables, KPI cards, charts. They consume the same CSS variables as the host app, so light/dark and density switches just work.
 
+**Linking entities.** Wherever your UI renders a variant or an activity, make it clickable: build the href with `variantHref(logId, variantId)` / `activityHref(logId, rawActivityName)` from the SDK (or `@/lib/dashboards/drill`) and render it with `next/link` (a runtime external) — the canonical entity views live at those URLs, and a real `<Link>` keeps route skeletons and cmd-click working. Both helpers take **raw** ids/names and encode once — never pre-encode. Filter-style jumps (e.g. "show variants with this activity") stay explicit buttons using the `DRILL_PARAMS` vocabulary; widgets emitting `onDrill({ params: { activity } })` (or `variant`) land on the entity view automatically unless they target a specific module.
+
 ### Widgets
 
-Widgets advertised in `manifest.frontend.widgets` can be embedded by other modules:
+A widget is your module's card on a dashboard. Declare it in `manifest.frontend.widgets`.
+
+```yaml
+widgets:
+  - id: bottlenecks
+    entry: ./widgets/Bottlenecks.tsx
+    title: Bottlenecks
+    description: Slowest activities by median duration.   # one-line palette blurb
+    icon: Timer                                           # Lucide name
+
+    # Sizing. default_*/min_* are units on the fixed 12-column grid.
+    default_w: 4
+    default_h: 9
+    min_w: 3
+    min_h: 6
+    # ...but declare the PIXEL floors too. A grid unit is only a real size once
+    # the board's width is known, so these are what actually stop the card
+    # being shrunk below what it can render. Measure them in the browser.
+    min_px_w: 320
+    min_px_h: 240
+
+    # The ⓘ. `description` is the blurb; this is the real explanation.
+    help:
+      what: Which activities take longest, ranked by median duration.
+      read: Longer bars are slower. The number is the median, not the mean.
+      computed: Median over completed cases only; in-flight cases are excluded.
+      docs_url: https://…                                 # optional
+
+    # Per-card options. Same JSON-Schema dialect as a module's config_schema.
+    config_schema:
+      properties:
+        top_n:
+          type: integer
+          title: Activities shown
+          minimum: 3
+          maximum: 25
+          default: 8
+          ui: { widget: slider }
+
+    # If the card shows several figures, declare them: the user can then pick a
+    # subset per placement, and the chosen ids arrive as `config.kpis`.
+    kpis:
+      - { id: median, title: Median duration, info: Half of cases are faster. }
+      - { id: p95,    title: P95 duration,    default: false }
+
+    # If the card can render more than one of your module's views, declare them
+    # and which config keys apply to each — the card's settings panel then shows
+    # the knobs that actually apply to the selected view.
+    views:
+      - { id: bars,  title: Bar chart, exposes: [top_n] }
+      - { id: table, title: Table,     exposes: [top_n, show_counts] }
+
+    # Where clicking a number in the card navigates. Optional — without it the
+    # platform still offers "open in module" for the declaring module.
+    drill:
+      module_id: performance          # defaults to this module
+      params: { view: bottlenecks }   # merged into every drill from this card
+
+    # Only when your controls can't be expressed as JSON Schema (a canvas with
+    # layout modes, live thresholds, rendering toggles). The card's settings
+    # panel mounts this instead of generating a form. Prefer config_schema.
+    settings_entry: ./widgets/BottlenecksSettings.tsx
+```
+
+**Sizing is the one to get right.** A card whose minimum is too small renders unreadably; one whose minimum is too large can't share a row. Set `min_px_w`/`min_px_h` to the size at which the widget still communicates, then check it on a board at exactly that size.
+
+#### Build the card from the shared kit
+
+Don't hand-roll a card shell or pick your own chart colours — a board shows cards from several modules at once, and it has to read as one product.
+
+```tsx
+import {
+  CardShell, KpiTile, KpiGrid, InfoHint,   // structure
+  seriesColor, sequentialScale, statusColor, CHART_CHROME,   // colour
+} from "@mate/module-sdk-ts";
+
+export default function Bottlenecks({ logId, config, onDrill }) {
+  const { data, isLoading, isError } = useBottlenecks(logId);
+  return (
+    <CardShell loading={isLoading} error={isError} empty={!data?.items.length}>
+      <Bar dataKey="avg" fill={seriesColor(0)}
+           onClick={(b) => onDrill?.({ params: { activity: b.activity } })} />
+    </CardShell>
+  );
+}
+```
+
+- **`CardShell` owns scrolling.** The card frame is `overflow-hidden`; if your widget adds its own scroll container the board gets a scrollbar inside a scrollbar. Pass `scroll` only for genuinely tabular content.
+- **Colour by job, not by looks.** `seriesColor(i)` for distinct things (fixed order, never cycled — colour follows the entity, not its rank, so filtering must not repaint the survivors); `sequentialScale(t)` for magnitude; `divergingScale(t)` for above/below a baseline; `statusColor()` only for good/warning/serious/critical, and always with an icon + label. Past 8 series, fold the tail into "Other" — a 9th hue is indistinguishable under colourblindness.
+- **One series → one colour.** Shading each bar by its own length double-encodes the value and spends the only free channel on information the bar already shows.
+- **Gridlines are solid hairlines** (`CHART_CHROME.grid`). Dashed reads as "threshold".
+- **Never a dual-axis chart.** Two measures of different scale → two cards, or index both to a common base.
+
+#### Drill-down
+
+`onDrill` is passed in by the dashboard (and is `undefined` when a panel embeds your widget, so always call it optionally). It turns a number into a way in:
+
+```tsx
+onDrill?.({ params: { activity } });                    // this module, filtered
+onDrill?.({ moduleId: "performance", params: { activity } });   // another module
+onDrill?.();                                            // just open this module
+```
+
+Use the standard parameter names from `DRILL_PARAMS` (`activity`, `from`/`to`, `case`, `variant`, `object_type`, `ts_from`/`ts_to`, `view`, `metric`) — cross-module links only work because both sides agree on them. On the receiving side read them with `useDrillParams()` rather than parsing the query string by hand.
+
+Widgets can also be embedded by *other* modules:
 
 ```tsx
 import { useWidget } from "@mate/module-sdk-ts";
@@ -427,6 +558,40 @@ return <ThroughputChart logId={logId} config={{}} />;
 ```
 
 `useWidget` lazy-loads, renders a `Skeleton` while loading, and a placeholder card if the source module is missing.
+
+**Removed:** `frontend.page_layout` and `frontend.side_rail` no longer exist — nothing ever rendered them. Manifests still declaring them keep loading; the keys are ignored.
+
+### Canvases (graphs / diagrams) – the shared contract
+
+Every graph, map or diagram view in the platform is **one canvas with one control cluster**. `modules/discovery` → DFG is the reference; new modules inherit it by using the shell instead of building chrome.
+
+Non-negotiables:
+
+- **Render through `CanvasShell`** (`@/components/visualizations/canvases/shared/canvas-shell`). It brings the dotted grid, idle-fading minimap, exact initial fit, drag-threshold guard (a click never persists as a drag) and pseudo-fullscreen. Never mount `<ReactFlow>` yourself and never hand-roll a zoom/fit/fullscreen pill. A non-React-Flow viewer (bpmn-js etc.) renders `CanvasControlCluster` from `…/canvas-toolbar` directly – same pill, same order.
+- **Every control goes in the cluster's settings popover** – `settings={…}` on the canvas, built from the `CanvasSetting*` primitives in `…/canvas-toolbar` (`CanvasSettings`, `CanvasSettingsSection`, `CanvasSettingsSelect`, `CanvasSettingsSwitch`, `CanvasSettingsSegmented`, `CanvasSettingsSlider`, `CanvasSettingsSearch`, `CanvasSettingsActions`). Don't hand-roll rows and **don't put a filter bar above the canvas** – the graph runs full-bleed, and the controls stay reachable in fullscreen. Model/algorithm pickers that drive a fetch belong in there too, in a leading `CanvasSettingsSection title="Model"`.
+- **`onReset`** wires the cluster's reset button (discard dragged positions / re-run the layout). Omit it only when the layout can't be dragged.
+- **Expensive settings commit on release** – `onCommit` on a slider, not `onChange`, so one drag doesn't queue one re-mine per pixel.
+- **Never unmount the canvas to show a spinner.** A refetch triggered from the popover would close the popover mid-interaction. Keep the last result on screen and pass `busy` (the shell renders a "Working…" chip); the discovery panel's `useSticky` helper is the pattern.
+
+```tsx
+<CanvasShell
+  nodes={nodes}
+  edges={edges}
+  nodeTypes={nodeTypes}
+  busy={query.isFetching}
+  settings={
+    <CanvasSettings>
+      <CanvasSettingsSelect label="Edge label" value={mode} onChange={setMode} options={MODES} />
+      <CanvasSettingsSwitch label="Hide self-loops" checked={hide} onChange={setHide} />
+    </CanvasSettings>
+  }
+  onReset={() => resetPositions()}
+  onNodesChange={onNodesChange}
+  onNodeDragStop={onNodeDragStop}
+/>
+```
+
+Both shared files are runtime externals (`apps/web/lib/runtime-externals.json`), so importing them adds nothing to your bundle.
 
 ### Talking to your backend
 
@@ -562,6 +727,13 @@ Before submitting a module:
 - [ ] Precompute that must run after another module subscribes to its `<module_id>.completed` event (not a phantom topic nobody emits), and the job-backed `@on_event` is what gates the log — a `@on_event` without `@job` never holds `processing`.
 - [ ] Sync `def` handlers are fine – don't reach for `asyncio.run` or `loop.run_until_complete`. The SDK auto-wraps.
 - [ ] Tests run green against the platform's `inherit` versions.
+- [ ] Every graph/diagram view goes through `CanvasShell` (or `CanvasControlCluster` for a non-React-Flow viewer), with all its controls in the `settings` popover and no filter bar above the canvas.
+- [ ] Every widget declares `min_px_w`/`min_px_h` measured in the browser, and still reads correctly on a board at exactly that size.
+- [ ] Widgets build on the shared kit (`CardShell`/`KpiTile`/`seriesColor`) — no private `_kit.tsx`, no hardcoded chart hex.
+- [ ] Clickable marks call `onDrill` with a standard `DRILL_PARAMS` name.
+- [ ] Every widget declares `help.what` — a card with no explanation is a card nobody trusts.
+- [ ] A widget showing more than one figure declares `kpis:` so a placement can show a subset.
+- [ ] A widget exposing knobs its module's panel also has declares `views:`/`config_schema` for them, so the card isn't a stripped-down version of the panel.
 - [ ] No platform-level files modified (`apps/api/pyproject.toml`, `apps/web/package.json`, etc.).
 - [ ] `.venv/`, `.dist/`, `node_modules/` gitignored.
 

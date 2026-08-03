@@ -102,6 +102,7 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 
 import { FormatBadge } from "./format-badge";
+import { precomputeProgressForLog, useJobsStore } from "@/lib/stores/jobs";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -492,6 +493,31 @@ function collectSiblings(
 }
 
 // ── Header ────────────────────────────────────────────────────────────────────
+
+/**
+ * "Preparing modules… 3/17" under a `processing` row.
+ *
+ * Its own component so only this subtree re-renders on job ticks - subscribing
+ * every row in the table to the jobs map would repaint the whole list several
+ * times a second during an import. Falls back to the indeterminate bar when the
+ * store has no import job for this log (e.g. a page opened after the fact).
+ */
+function PrecomputeCaption({ logId }: { logId: string }) {
+  const byId = useJobsStore((s) => s.byId);
+  const progress = useMemo(() => precomputeProgressForLog(byId, logId), [byId, logId]);
+
+  return (
+    <div className="mt-1 max-w-xs">
+      <Progress
+        value={progress?.pct}
+        className={cn("h-1", progress === null && "animate-pulse")}
+      />
+      <div className="mt-1 text-xs tabular-nums text-muted-foreground">
+        {progress ? `Preparing modules… ${progress.done}/${progress.total}` : "Preparing modules…"}
+      </div>
+    </div>
+  );
+}
 
 function HeaderRow() {
   return (
@@ -906,15 +932,16 @@ function LogRow({
           >
             <div className="min-w-0" style={{ paddingLeft: depth * 16 + 24 }}>
               <div className="truncate font-medium">{row.name}</div>
-              {busy && (
-                <div className="mt-1 max-w-xs">
-                  <Progress value={undefined} className="h-1" />
-                  {processing && (
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      Preparing modules…
-                    </div>
-                  )}
-                </div>
+              {processing ? (
+                <PrecomputeCaption logId={row.id} />
+              ) : (
+                importing && (
+                  <div className="mt-1 max-w-xs">
+                    {/* Indeterminate: the bar has to pulse or it reads as a stalled 0%. */}
+                    <Progress value={undefined} className="h-1 animate-pulse" />
+                    <div className="mt-1 text-xs text-muted-foreground">Reading the file…</div>
+                  </div>
+                )
               )}
               {failed && (
                 <HoverCard>

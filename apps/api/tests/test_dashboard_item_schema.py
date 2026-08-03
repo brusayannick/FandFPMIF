@@ -11,7 +11,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from mate.api.schemas.dashboards import DashboardItem
+from mate.api.schemas.dashboards import (
+    GRID_COLS,
+    LEGACY_MAX_COLS,
+    MAX_ROW,
+    CanvasSettings,
+    DashboardItem,
+)
 
 
 def test_widget_kind_requires_module_and_widget() -> None:
@@ -66,3 +72,68 @@ def test_viz_kind_roundtrips_mapping_and_options() -> None:
     assert dumped["kind"] == "viz"
     assert dumped["mapping"] == {"x": "activity", "y": "deviations"}
     assert dumped["config"] == {"stacked": True}
+
+
+# ── 12-column grid bounds ────────────────────────────────────────────────────
+
+
+def _widget(**geometry: int) -> DashboardItem:
+    return DashboardItem(i="a", module_id="discovery", widget_id="process-map", **geometry)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("x", LEGACY_MAX_COLS),  # 0-59
+        ("x", -1),
+        ("w", LEGACY_MAX_COLS + 1),  # 1-60
+        ("w", 0),
+        ("y", MAX_ROW + 1),  # y is bounded now; it used to be unbounded
+        ("y", -1),
+        ("h", 49),
+        ("h", 0),
+    ],
+)
+def test_absurd_geometry_is_rejected(field: str, value: int) -> None:
+    with pytest.raises(ValidationError):
+        _widget(**{field: value})
+
+
+def test_legacy_wide_geometry_is_accepted_by_the_schema() -> None:
+    """Wider-than-grid input must parse, or legacy exports could never import.
+
+    A board exported from the 60-column `free` grid carries x/w far past 12.
+    The schema's job is to accept it; `layout_blob` is what guarantees nothing
+    out-of-grid is ever *stored* (see test_dashboards.py).
+    """
+    legacy = _widget(x=48, w=12)
+    assert (legacy.x, legacy.w) == (48, 12)
+    assert legacy.x >= GRID_COLS  # i.e. this would be invalid as stored geometry
+
+
+# ── legacy granularity marker ────────────────────────────────────────────────
+
+
+def test_legacy_granularity_is_read_but_never_re_emitted() -> None:
+    """The marker decodes pre-v2 geometry, then must disappear.
+
+    If it survived a round-trip, a coerced board would be rescaled again on
+    every subsequent write.
+    """
+    settings = CanvasSettings.model_validate({"granularity": "free", "chrome": {"border": False}})
+    assert settings.legacy_granularity == "free"
+
+    dumped = settings.model_dump()
+    assert "granularity" not in dumped
+    assert "legacy_granularity" not in dumped
+    assert dumped["grid_version"] == 2
+    # Unrelated keys still round-trip.
+    assert dumped["chrome"] == {"border": False}
+
+    # Re-validating the dump yields a board with no marker: idempotent.
+    assert CanvasSettings.model_validate(dumped).legacy_granularity is None
+
+
+def test_settings_without_granularity_is_v2() -> None:
+    assert CanvasSettings().legacy_granularity is None
+    assert CanvasSettings().grid_version == 2

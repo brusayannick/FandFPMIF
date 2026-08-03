@@ -81,9 +81,9 @@ frontend:
       title: Concept drifts
       description: Detected drifts with confidence and affected window range.
       icon: Waves
-      default_w: 5
+      default_w: 3
       default_h: 8
-      min_w: 5
+      min_w: 3
       min_h: 6
       config_schema:
         properties:
@@ -97,7 +97,12 @@ frontend:
             default: 0
             ui:
               widget: slider
-
+      min_px_w: 300
+      min_px_h: 220
+      help:
+        what: "What actually changed at each detected drift point."
+        read: "Read this next to the detections: a detection says when, this says what — which activities or paths appeared, vanished, or changed frequency."
+        computed: "Compares process behaviour before and after each detected change point."
 permissions:
   - read:event_log
   - write:module_results

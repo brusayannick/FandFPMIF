@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import { InfoHint } from "./info-hint";
 
 /**
@@ -120,6 +122,24 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     source: HAEREM,
   },
 };
+
+/**
+ * Just the explanation body for a metric — no ⓘ button around it.
+ *
+ * For callers that supply their own affordance. The shared `KpiTile` wraps
+ * whatever it is given in an `InfoHint`, so handing it `MetricInfoHint` would
+ * nest two ⓘ buttons inside one label.
+ */
+export function metricInfoContent(metricKey: string): ReactNode {
+  const info = METRIC_INFO[metricKey];
+  if (!info) return null;
+  return (
+    <>
+      <p>{info.text}</p>
+      <p className="text-muted-foreground">Source: {info.source}</p>
+    </>
+  );
+}
 
 /** ⓘ hint for a metric key; renders nothing when no explanation is mapped. */
 export function MetricInfoHint({

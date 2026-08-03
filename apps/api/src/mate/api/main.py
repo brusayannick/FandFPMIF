@@ -34,6 +34,7 @@ from mate.api.db.models import Job, ModuleInstall, WatchedFolder
 from mate.api.duckdb.pool import get_duckdb_pool
 from mate.api.events import EventBus, set_event_bus
 from mate.api.ingest.dispatch import register_import_handler
+from mate.api.ingest.staging import sweep_staging
 from mate.api.ingest.watch import scan_watch
 from mate.api.jobs.maintenance import prune_old_jobs
 from mate.api.jobs.runtime import JobRuntime, load_persisted_concurrency, set_job_runtime
@@ -47,6 +48,9 @@ from mate.api.modules.processing import ModuleProcessingCoordinator, set_coordin
 from mate.api.routes import v1
 from mate.api.routes.analytics import prune_expired, record_server_event
 from mate.api.schemas.common import HealthResponse
+from mate.api.services.analytics_objects import ObjectRef
+from mate.api.services.usage_recorder import server_event_writer_loop
+from mate.api.shutdown import install_signal_observer, mark_shutting_down
 from mate.api.storage import get_storage_settings
 from mate.api.storage.db_backup import backup_sync, db_backup_loop
 from mate.api.storage.eviction import eviction_loop
@@ -80,6 +84,11 @@ async def _retention_loop() -> None:
                     removed = await prune_old_jobs(session, job_retention_days)
                     if removed:
                         log.info("retention.jobs_pruned", jobs=removed)
+            # Uploads staged by the import wizard and never confirmed (the user
+            # closed the tab on the mapping step) are pure garbage after the TTL.
+            swept = await asyncio.to_thread(sweep_staging)
+            if swept:
+                log.info("retention.staging_swept", directories=swept)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -112,6 +121,11 @@ async def _job_event_recorder_loop(bus: EventBus) -> None:
                     duration_ms: int | None = None
                     if job.started_at and job.finished_at:
                         duration_ms = int((job.finished_at - job.started_at).total_seconds() * 1000)
+                    job_objects = [ObjectRef(f"job:{job.id}", "job", "resource")]
+                    if job.module_id:
+                        job_objects.append(
+                            ObjectRef(f"module:{job.module_id}", "module", "resource")
+                        )
                     await record_server_event(
                         session,
                         user_id=user_id,
@@ -124,6 +138,7 @@ async def _job_event_recorder_loop(bus: EventBus) -> None:
                             "module_id": job.module_id,
                             "error": (job.error or None) and job.error[:240],
                         },
+                        objects=job_objects,
                     )
             except asyncio.CancelledError:
                 raise
@@ -361,6 +376,9 @@ async def lifespan(app: FastAPI):
 
     retention_task = asyncio.create_task(_retention_loop())
     job_event_task = asyncio.create_task(_job_event_recorder_loop(bus))
+    # Batched writer behind the all-requests UsageTrackingMiddleware - drafts
+    # are queued in-memory on the request path and persisted here.
+    usage_writer_task = asyncio.create_task(server_event_writer_loop())
     watch_poll_task = asyncio.create_task(_watched_folder_poll_loop(runtime))
     processing_task = asyncio.create_task(_module_processing_loop(bus, coordinator))
     # S3-mode local-cache reaper: bounds the working set so the bucket can be the
@@ -385,9 +403,22 @@ async def lifespan(app: FastAPI):
         mcp_cm = mcp_session_manager()
         await mcp_cm.__aenter__()
 
+    # Chain onto uvicorn's own SIGINT/SIGTERM handlers (installed before this
+    # lifespan ran) so long-lived SSE streams learn about shutdown at signal
+    # time. Uvicorn drains connections BEFORE running this teardown, so a flag
+    # flipped in the `finally` below arrives far too late: the drain would hit
+    # `--timeout-graceful-shutdown`, force-cancel the open `/events` stream and
+    # print a CancelledError ASGI traceback + a 500 on every `--reload` restart.
+    restore_signals = install_signal_observer()
+
     try:
         yield
     finally:
+        # Belt and braces for a shutdown that reaches the lifespan without a
+        # signal (programmatic teardown, test harness): anything still streaming
+        # gets one more chance to notice and close itself.
+        mark_shutting_down()
+        restore_signals()
         if mcp_cm is not None:
             try:
                 await mcp_cm.__aexit__(None, None, None)
@@ -405,6 +436,7 @@ async def lifespan(app: FastAPI):
         for task in (
             retention_task,
             job_event_task,
+            usage_writer_task,
             watch_poll_task,
             processing_task,
             eviction_task,

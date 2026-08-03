@@ -23,9 +23,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
+import {
+  CanvasSettings,
+  CanvasSettingsSwitch,
+} from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -174,22 +177,8 @@ export default function ConformancePanel({ logId }: { logId: string; moduleId: s
           </div>
 
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
+            <CardHeader>
               <CardTitle className="text-base">Deviations on the model</CardTitle>
-              <div className="flex items-center gap-4">
-                <ToggleSwitch
-                  id="conf-heatmap"
-                  label="Heatmap"
-                  checked={decor.heatmap}
-                  onChange={(v) => setDecor((d) => ({ ...d, heatmap: v }))}
-                />
-                <ToggleSwitch
-                  id="conf-labels"
-                  label="Counts"
-                  checked={decor.labels}
-                  onChange={(v) => setDecor((d) => ({ ...d, labels: v }))}
-                />
-              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="relative h-[640px] w-full overflow-hidden rounded-xl border bg-card">
@@ -199,6 +188,22 @@ export default function ConformancePanel({ logId }: { logId: string; moduleId: s
                     xml={data.bpmn_xml}
                     maps={maps}
                     decor={{ ...decor, alignments: technique === "alignments" }}
+                    // Overlay toggles live in the canvas control cluster, like
+                    // every other canvas – never in a bar above it.
+                    settings={
+                      <CanvasSettings>
+                        <CanvasSettingsSwitch
+                          label="Heatmap"
+                          checked={decor.heatmap}
+                          onChange={(v) => setDecor((d) => ({ ...d, heatmap: v }))}
+                        />
+                        <CanvasSettingsSwitch
+                          label="Deviation counts"
+                          checked={decor.labels}
+                          onChange={(v) => setDecor((d) => ({ ...d, labels: v }))}
+                        />
+                      </CanvasSettings>
+                    }
                   />
                 ) : (
                   <Skeleton className="h-full w-full" />
@@ -265,6 +270,7 @@ export default function ConformancePanel({ logId }: { logId: string; moduleId: s
             </CardHeader>
             <CardContent>
               <DeviationTable
+                logId={logId}
                 perActivity={data.per_activity ?? []}
                 perVariant={data.per_variant ?? []}
                 technique={technique}
@@ -329,27 +335,6 @@ function KpiTile({
           {hint}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function ToggleSwitch({
-  id,
-  label,
-  checked,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <Switch id={id} checked={checked} onCheckedChange={onChange} />
-      <Label htmlFor={id} className="cursor-pointer text-xs text-muted-foreground">
-        {label}
-      </Label>
     </div>
   );
 }

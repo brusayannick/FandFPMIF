@@ -28,10 +28,10 @@ ExperienceLevel = Literal["beginner", "intermediate", "expert"]
 class OnboardingState(BaseModel):
     completed: bool = False
     experience_level: ExperienceLevel | None = None
-    # Whether the interactive product tour (the process-discovery walkthrough)
-    # has been finished or skipped. Tracked separately from ``completed`` (the
-    # setup wizard) so the tour can auto-chain after the wizard yet be replayed
-    # on demand without re-opening the wizard.
+    # Whether the interactive product tour (the high-level platform
+    # walkthrough) has been finished or skipped. Tracked separately from
+    # ``completed`` (the setup wizard) so the tour can auto-chain after the
+    # wizard yet be replayed on demand without re-opening the wizard.
     tour_completed: bool = False
 
 

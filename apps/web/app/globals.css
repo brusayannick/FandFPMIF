@@ -63,6 +63,53 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
 
+  /* Categorical series palette — light mode.
+   *
+   * Eight slots, ASSIGNED IN FIXED ORDER and never cycled: a 9th series folds
+   * into "Other", facets into small multiples, or uses hue x shape. The order
+   * itself is the colourblind-safety mechanism, not a cosmetic choice, so do
+   * not reorder or add steps without re-running the validator.
+   *
+   * Validated (OKLab dE x100, surface #fcfcfb): worst adjacent CVD 9.1
+   * (target >=8), worst adjacent normal-vision 19.6 (floor >=15).
+   *
+   * CAVEAT, light mode only: aqua (3), yellow (4) and magenta (5) fall below
+   * 3:1 against the surface. That is not dismissable — a chart using them must
+   * carry visible direct labels or a table view, never colour alone. See
+   * `seriesColor` in components/dashboards/kit/palette.ts. */
+  --ff-series-1: #2a78d6; /* blue */
+  --ff-series-2: #eb6834; /* orange */
+  --ff-series-3: #1baf7a; /* aqua */
+  --ff-series-4: #eda100; /* yellow */
+  --ff-series-5: #e87ba4; /* magenta */
+  --ff-series-6: #008300; /* green */
+  --ff-series-7: #4a3aa7; /* violet */
+  --ff-series-8: #e34948; /* red */
+
+  /* Sequential (magnitude): one hue, light -> dark. Never a rainbow. */
+  --ff-seq-100: #cde2fb;
+  --ff-seq-250: #86b6ef;
+  --ff-seq-400: #3987e5;
+  --ff-seq-550: #1c5cab;
+  --ff-seq-700: #0d366b;
+
+  /* Diverging (polarity): warm/cool poles + a NEUTRAL midpoint. The midpoint
+   * must read as "nothing", so it is grey, never a third hue. */
+  --ff-div-low: #2a78d6;
+  --ff-div-mid: #f0efec;
+  --ff-div-high: #e34948;
+
+  /* Status — reserved. Never reuse these for "series 4", and never let one
+   * carry meaning alone: they always ship with an icon + label. */
+  --ff-status-good: #0ca30c;
+  --ff-status-warning: #fab219;
+  --ff-status-serious: #ec835a;
+  --ff-status-critical: #d03b3b;
+
+  /* Chart chrome — recessive by design. */
+  --ff-grid-line: #e1e0d9;
+  --ff-axis-line: #c3c2b7;
+
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -186,6 +233,40 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
+
+  /* Categorical series palette — dark mode. The SAME eight hues re-stepped for
+   * a dark surface, not a different palette: slot N is the same series in both
+   * modes, so a chart doesn't change identity when the theme flips. Validated
+   * independently against the dark surface (worst adjacent CVD dE 8.4,
+   * normal-vision 19.3, and unlike light mode all eight clear 3:1). */
+  --ff-series-1: #3987e5;
+  --ff-series-2: #d95926;
+  --ff-series-3: #199e70;
+  --ff-series-4: #c98500;
+  --ff-series-5: #d55181;
+  --ff-series-6: #008300;
+  --ff-series-7: #9085e9;
+  --ff-series-8: #e66767;
+
+  --ff-seq-100: #0d366b;
+  --ff-seq-250: #1c5cab;
+  --ff-seq-400: #3987e5;
+  --ff-seq-550: #86b6ef;
+  --ff-seq-700: #cde2fb;
+
+  --ff-div-low: #3987e5;
+  --ff-div-mid: #383835;
+  --ff-div-high: #e66767;
+
+  /* Status steps are mode-invariant by design — a status colour means the same
+   * thing in both themes. All four clear 3:1 on the dark surface. */
+  --ff-status-good: #0ca30c;
+  --ff-status-warning: #fab219;
+  --ff-status-serious: #ec835a;
+  --ff-status-critical: #d03b3b;
+
+  --ff-grid-line: #2c2c2a;
+  --ff-axis-line: #383835;
 
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
@@ -647,11 +728,26 @@
   border: 1.5px dashed color-mix(in oklab, var(--primary) 45%, transparent);
 }
 
+/* Selected cards. The ring sits on the grid item (not the card) so it tracks
+   the item's transform during a drag, and reads clearly against both the
+   edit-mode resting ring and the hover state on `.dashboard-card-root`. */
+.react-grid-item[data-selected] > * > .dashboard-card-root {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+
 /* Reflow easing: the cards that spring aside when another is dragged, resized,
    or removed ease in snappily. Lower specificity than the `none` rules below
-   (the active card + mount slide), so those still win for the active item. */
+   (the active card + mount slide), so those still win for the active item.
+
+   `transform` ONLY — deliberately not width/height. Reflow never resizes a
+   card (cards that yield move down, they don't shrink), so easing those two
+   bought nothing and cost twice: animating box dimensions forces layout on
+   every frame for every card, and during a resize gesture it made the card
+   lag the grip, since the layout updates per pointer move but the box eased
+   150ms behind it. Size changes now land immediately; position still eases. */
 .react-grid-item {
-  transition-property: transform, width, height;
+  transition-property: transform;
   transition-duration: 150ms;
   transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }

@@ -2,7 +2,7 @@
 
 import { MetricInfoHint } from "../panel/metric-info";
 import { formatMetric, useComplexityV2 } from "../panel/queries";
-import { CardShell } from "./_kit";
+import {CardShell} from "@/components/dashboards/kit";
 
 /** Every Table 3.3 metric, grouped by category, as a compact label→value list. */
 export default function ComplexityCategories({ logId }: { logId: string }) {

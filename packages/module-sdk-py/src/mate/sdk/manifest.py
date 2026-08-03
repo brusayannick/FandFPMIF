@@ -109,13 +109,99 @@ class RuntimeJvm(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+# The platform's dashboard grid, duplicated here rather than imported: the SDK
+# must stay dependency-free. Mirrors `GRID` in apps/web/lib/dashboard-queries.ts
+# and `GRID_COLS` in apps/api/.../schemas/dashboards.py.
+GRID_COLS = 12
+_ROW_HEIGHT_PX = 18
+_ROW_GAP_PX = 8
+
+
+def _rows_for_px(px: int) -> int:
+    """Absolute pixel height -> rows on the dashboard grid."""
+    if px <= 0:
+        return 0
+    return -(-(px + _ROW_GAP_PX) // (_ROW_HEIGHT_PX + _ROW_GAP_PX))
+
+
+class WidgetHelp(BaseModel):
+    """Plain-language explanation of a widget, shown behind its ⓘ.
+
+    Split into three questions a reader actually asks, rather than one blob:
+    `description` stays the one-line palette blurb, this is the real answer.
+    Also used for a module's panel via `ManifestFrontend.panel_help`.
+    """
+
+    # Required once `help:` is declared at all - a help popover with no "what"
+    # is worse than none.
+    what: str
+    read: str | None = None
+    computed: str | None = None
+    docs_url: str | None = None
+
+
+class WidgetKpi(BaseModel):
+    """One figure a multi-KPI widget can show.
+
+    Declaring these lets a placed card render a *subset*: the platform offers
+    the list in the card's settings and passes the chosen ids as `config.kpis`.
+    A widget that shows a single number needs none of this.
+    """
+
+    id: str
+    title: str
+    # Per-KPI ⓘ text, distinct from the widget-level `help`.
+    info: str | None = None
+    # Whether this KPI is on by default when the card is first placed.
+    default: bool = True
+
+
+class WidgetView(BaseModel):
+    """One of the module's views a widget can render.
+
+    This is what lets a dashboard card expose the module's real capabilities
+    instead of a fixed slice of them: a widget that can draw several of its
+    module's views declares them here, and `exposes` names the `config_schema`
+    keys that are meaningful for each one, so the card's settings show the
+    knobs that actually apply to the selected view.
+    """
+
+    id: str
+    title: str
+    description: str | None = None
+    exposes: list[str] = Field(default_factory=list)
+
+
+class WidgetDrill(BaseModel):
+    """Where clicking into this widget navigates.
+
+    Absent, the platform still offers "open in module" targeting the declaring
+    module with no parameters; declare this to point somewhere else (e.g. a
+    discovery card drilling into `performance`) or to pin extra query params.
+    """
+
+    # Defaults to the declaring module.
+    module_id: str | None = None
+    # Static params merged into every drill from this widget; a param the
+    # widget passes at click time wins.
+    params: dict[str, str] = Field(default_factory=dict)
+    label: str | None = None
+    enabled: bool = True
+
+
 class WidgetEntry(BaseModel):
     """A reusable frontend widget ("card") a module exposes.
 
     Beyond the `id`/`entry` the bundler needs, the optional display fields are
     surfaced by the platform's card catalog (`GET /api/v1/modules/cards`) so
     the Dashboards palette can list every module's cards without loading their
-    bundles. `default_w`/`default_h` are react-grid-layout cells (12-col grid).
+    bundles.
+
+    SIZING. `default_w`/`min_w` are columns on the platform's fixed 12-column
+    grid; `default_h`/`min_h` are rows. Declare `min_px_w`/`min_px_h` too: a
+    grid unit is only a real size once the board's width is known, so the pixel
+    floors are what actually keep a card above its usable size. The canvas
+    takes whichever floor is larger.
     """
 
     id: str
@@ -135,12 +221,37 @@ class WidgetEntry(BaseModel):
     # Either way the relevant size (the minimum, or the fixed size) must be large
     # enough to show all of the widget's information.
     resizable: bool = True
-    # Smallest size (react-grid-layout cells) a *resizable* card may be shrunk to.
-    # The Dashboards canvas feeds these to the grid item's `minW`/`minH` and also
+    # Smallest size, in grid units, a *resizable* card may be shrunk to. The
+    # Dashboards canvas feeds these to the grid item's `minW`/`minH` and also
     # grows an under-sized placed card up to them on load. Ignored when
     # `resizable` is false (the card is locked to `default_w`/`default_h`).
     min_w: int = 2
     min_h: int = 3
+    # Absolute pixel floors, independent of the grid - the ones that make a
+    # minimum mean something. Grid units alone can't: a column is a fraction of
+    # the board's width, so the same `min_w` is a different real size on a wide
+    # screen than a narrow one. Measure the widget's genuine minimum in the
+    # browser and declare it here; the canvas resolves `min_px_w` against the
+    # measured column width and `min_px_h` against the row height, then takes
+    # whichever floor (grid or pixel) is larger. 0 = not declared.
+    min_px_w: int = 0
+    min_px_h: int = 0
+    # Plain-language help behind the card's ⓘ (and the palette). See WidgetHelp.
+    help: WidgetHelp | None = None
+    # The module views this widget can render, and which config keys apply to
+    # each. Empty = a single implicit view. See WidgetView.
+    views: list[WidgetView] = Field(default_factory=list)
+    # The individual figures a multi-KPI widget shows, so a placed card can pick
+    # a subset. Empty = the widget is not KPI-structured. See WidgetKpi.
+    kpis: list[WidgetKpi] = Field(default_factory=list)
+    # Where clicking into this widget navigates. See WidgetDrill.
+    drill: WidgetDrill | None = None
+    # Folder-relative path to a settings component for this widget, bundled
+    # alongside it as `widget-<id>-settings.js`. For widgets whose controls
+    # can't be expressed as JSON Schema - a canvas with layout modes, live
+    # thresholds and rendering toggles. The card's settings panel mounts this
+    # instead of generating a form. Prefer `config_schema` when it suffices.
+    settings_entry: str | None = None
     # Optional per-card settings, declared in the same JSON-Schema-flavoured
     # dialect as a module's top-level `config_schema` (`{properties: {...}}`
     # with `type`/`title`/`enum`/`minimum`/`ui.widget` ...). The Dashboards
@@ -159,25 +270,34 @@ class WidgetEntry(BaseModel):
     @model_validator(mode="after")
     def _clamp_defaults_to_min(self) -> Self:
         # For a resizable card the initial drop size must never be below its own
-        # minimum, or RGL would immediately bounce it up. For a fixed card
-        # (`resizable=false`) `default_w/_h` is the authoritative size, so leave
-        # it untouched.
+        # minimum, or the canvas would immediately bounce it up. For a fixed
+        # card (`resizable=false`) `default_w/_h` is the authoritative size, so
+        # leave it untouched.
         if self.resizable:
             self.default_w = max(self.default_w, self.min_w)
-            self.default_h = max(self.default_h, self.min_h)
+            # The pixel floor counts here too: a widget that declares only
+            # `min_px_h` would otherwise drop at a height its own floor
+            # immediately overrides.
+            self.default_h = max(self.default_h, self.min_h, _rows_for_px(self.min_px_h))
+        # A card can never be wider than the grid.
+        self.default_w = min(self.default_w, GRID_COLS)
+        self.min_w = min(self.min_w, GRID_COLS)
         return self
 
 
-class PageLayoutSection(BaseModel):
-    section: str
-    widgets: list[str] = Field(default_factory=list)
-
-
 class ManifestFrontend(BaseModel):
+    """A module's frontend surfaces: its full page, and its dashboard cards.
+
+    `page_layout` and `side_rail` used to live here. Both are gone - nothing
+    ever rendered them. Manifests still declaring them keep loading, because
+    unknown keys are ignored.
+    """
+
     panel: str | None = None
-    side_rail: str | None = None
     widgets: list[WidgetEntry] = Field(default_factory=list)
-    page_layout: list[PageLayoutSection] = Field(default_factory=list)
+    # Plain-language help for the module's *panel*, shown behind the same ⓘ the
+    # dashboard cards use. Same shape as a widget's `help`.
+    panel_help: WidgetHelp | None = None
     # Whether the platform renders its log-scoped filter bar (column filters +
     # time range) above this module's panel. Set false when narrowing the log
     # doesn't apply to what the panel shows - e.g. it reads a user-triggered

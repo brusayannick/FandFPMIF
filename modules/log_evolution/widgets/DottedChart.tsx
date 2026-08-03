@@ -14,10 +14,10 @@ import {
   ZAxis,
 } from "recharts";
 
+import {ChartFrame, LegendDot} from "@/components/dashboards/kit";
 import { cn } from "@/lib/cn";
 
 import { colorAt, formatDay, useDotted } from "../panel/queries";
-import { ChartFrame, LegendDot } from "./_kit";
 
 const fillFor = (name: string, i: number) =>
   name === "Other" ? "var(--muted-foreground)" : colorAt(i);

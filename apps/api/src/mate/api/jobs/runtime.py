@@ -561,8 +561,17 @@ class JobRuntime:
         that also ships the module's import metadata (see `run_offloaded`)."""
         return await self.run_offloaded(None, fn, *args, **kwargs)
 
-    def register(self, type_: str, handler: JobHandler) -> None:
-        if type_ in self._handlers:
+    def register(self, type_: str, handler: JobHandler, *, replace: bool = False) -> None:
+        """Bind *handler* to *type_*.
+
+        Duplicate registration is an error by default - two callers claiming one
+        job type is a bug, and the second would silently shadow the first.
+        `replace=True` is the module loader rebinding a type it already owns
+        after a reload: the handler closes over the module instance, so keeping
+        the original would run every future job against the previous instance
+        (for a subprocess module, one whose worker has already been stopped).
+        """
+        if type_ in self._handlers and not replace:
             raise RuntimeError(f"Job type already registered: {type_}")
         self._handlers[type_] = handler
 

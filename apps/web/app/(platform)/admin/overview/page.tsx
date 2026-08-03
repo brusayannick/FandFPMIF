@@ -493,7 +493,7 @@ function ChartCard({
   children: React.ReactNode;
 }) {
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm">
           <Icon className="h-4 w-4" />

@@ -10,8 +10,12 @@ of these when the request carries a ``template_id``.
 Templates only reference widgets from ``default_enabled`` modules
 (``discovery``, ``performance``, ``complexity``) whose precompute runs on
 ``log.imported``, so a template renders for any freshly imported case-centric
-log with no extra setup. Geometry targets the default ``medium`` granularity
-(a 24-column grid).
+log with no extra setup. Geometry is authored directly on the fixed 12-column
+grid (``schemas.dashboards.GRID_COLS``), so templates carry no legacy marker
+and ``coerce_grid`` is a no-op for them.
+
+These ``DashboardItem``s are constructed at *import* time, so a geometry value
+that violates the schema bounds fails API startup rather than one create call.
 """
 
 from __future__ import annotations
@@ -74,15 +78,15 @@ DASHBOARD_TEMPLATES: list[DashboardTemplateDef] = [
             "directly-follows map, and the most frequent activities."
         ),
         items=[
-            _widget("overview", "discovery", "process-overview", x=0, y=0, w=8, h=8),
-            _widget("map", "discovery", "process-map", x=8, y=0, w=16, h=13),
+            _widget("overview", "discovery", "process-overview", x=0, y=0, w=4, h=8),
+            _widget("map", "discovery", "process-map", x=4, y=0, w=8, h=13),
             _widget(
                 "activities",
                 "discovery",
                 "activity-frequency",
                 x=0,
                 y=8,
-                w=8,
+                w=4,
                 h=9,
                 config={"top_n": 10},
             ),
@@ -96,14 +100,14 @@ DASHBOARD_TEMPLATES: list[DashboardTemplateDef] = [
             "activities, and per-activity throughput."
         ),
         items=[
-            _widget("kpis", "performance", "kpi-overview", x=0, y=0, w=8, h=15),
+            _widget("kpis", "performance", "kpi-overview", x=0, y=0, w=4, h=15),
             _widget(
                 "bottlenecks",
                 "performance",
                 "bottlenecks",
-                x=8,
+                x=4,
                 y=0,
-                w=8,
+                w=4,
                 h=10,
                 config={"top_n": 8},
             ),
@@ -111,9 +115,9 @@ DASHBOARD_TEMPLATES: list[DashboardTemplateDef] = [
                 "throughput",
                 "performance",
                 "activity-throughput",
-                x=16,
+                x=8,
                 y=0,
-                w=8,
+                w=4,
                 h=10,
                 config={"top_n": 10},
             ),
@@ -127,15 +131,15 @@ DASHBOARD_TEMPLATES: list[DashboardTemplateDef] = [
             "comparison, and the activity mix driving variety."
         ),
         items=[
-            _widget("metrics", "complexity", "complexity-metrics", x=0, y=0, w=8, h=15),
-            _widget("entropy", "complexity", "entropy-comparison", x=8, y=0, w=16, h=8),
+            _widget("metrics", "complexity", "complexity-metrics", x=0, y=0, w=4, h=15),
+            _widget("entropy", "complexity", "entropy-comparison", x=4, y=0, w=8, h=8),
             _widget(
                 "activities",
                 "discovery",
                 "activity-frequency",
-                x=8,
+                x=4,
                 y=8,
-                w=16,
+                w=8,
                 h=9,
                 config={"top_n": 12},
             ),

@@ -20,6 +20,7 @@ import { useVariants, type VariantsListParams } from "@/lib/queries";
 import type { EventLogDetail } from "@/lib/api-types";
 import { formatDuration, formatNumber, formatRelative } from "@/lib/format";
 import { displayActivities, getActivityRenameMap } from "@/lib/activity-rename";
+import { variantHref } from "@/lib/dashboards/drill";
 import { cn } from "@/lib/cn";
 import { DEFAULT_VARIANTS_SORT, PROCESS_PAGE_SIZE } from "@/lib/query-keys";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
@@ -177,16 +178,13 @@ export function VariantsTab({ logId, log }: { logId: string; log: EventLogDetail
                     className="h-12 cursor-pointer hover:bg-muted/40"
                   >
                     <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
-                      <Link
-                        href={`/processes/${logId}/variants/${v.variant_id}`}
-                        className="block"
-                      >
+                      <Link href={variantHref(logId, v.variant_id)} className="block">
                         {v.rank}
                       </Link>
                     </TableCell>
                     <TableCell>
                       <Link
-                        href={`/processes/${logId}/variants/${v.variant_id}`}
+                        href={variantHref(logId, v.variant_id)}
                         className="block truncate hover:underline underline-offset-2"
                         title={display.join(" → ")}
                       >

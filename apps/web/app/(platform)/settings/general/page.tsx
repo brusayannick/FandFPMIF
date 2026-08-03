@@ -52,7 +52,7 @@ export default function GeneralSettingsPage() {
 
   return (
     <div className="space-y-4">
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Appearance</CardTitle>
         </CardHeader>
@@ -78,7 +78,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Navigation</CardTitle>
         </CardHeader>
@@ -100,7 +100,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Notifications</CardTitle>
         </CardHeader>
@@ -118,7 +118,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Process proficiency</CardTitle>
         </CardHeader>
@@ -147,7 +147,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Modules</CardTitle>
         </CardHeader>
@@ -170,7 +170,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Location &amp; imports</CardTitle>
         </CardHeader>
@@ -227,7 +227,7 @@ export default function GeneralSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Data &amp; storage</CardTitle>
         </CardHeader>

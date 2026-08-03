@@ -2,13 +2,14 @@
 
 import { useState, type ReactNode } from "react";
 
-import { useRouter } from "next/navigation";
-import { ArrowDown, Gauge, GitBranch, Play, Square, X } from "lucide-react";
+import Link from "next/link";
+import { Activity, ArrowDown, Gauge, GitBranch, Play, Square, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { DRILL_PARAMS, activityHref, modulePath } from "@/lib/dashboards/drill";
 import { formatDuration, formatNumber } from "@/lib/format";
 
 import { useDiscoveryScope } from "./discovery-settings-context";
@@ -37,13 +38,11 @@ export function DfgDetailsPanel({
   const title = node ? node.label : edgeTitle(edge!, data);
 
   return (
-    <aside
-      className="absolute right-3 top-3 bottom-3 z-10 flex w-[480px] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-xl border bg-card/95 shadow-xl backdrop-blur"
-      // Stop scroll/pan/zoom events from bleeding into the React Flow canvas
-      // when the user is reading the panel.
-      onWheelCapture={(e) => e.stopPropagation()}
-      onPointerDownCapture={(e) => e.stopPropagation()}
-    >
+    // No wheel/pointer capture guards here: CanvasShell renders `overlay` as a
+    // sibling of <ReactFlow>, so panel events never traverse the pane that owns
+    // pan/zoom. Capturing pointerdown only starved the ScrollArea's own
+    // scrollbar thumb, which needs it to start a drag.
+    <aside className="absolute right-3 top-3 bottom-3 z-10 flex w-[480px] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-xl border bg-card/95 shadow-xl backdrop-blur">
       <header className="flex items-center justify-between gap-3 border-b px-5 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <Badge
@@ -67,7 +66,12 @@ export function DfgDetailsPanel({
         </Button>
       </header>
 
-      <ScrollArea className="flex-1">
+      {/* `min-h-0` is load-bearing: without it the flex item's `min-height:auto`
+          lets the ScrollArea grow past the panel, so the viewport never
+          overflows and the content is simply clipped by the aside. The viewport
+          override kills Radix's `display:table` inner wrapper, which otherwise
+          shrink-wraps to a long activity label and overflows horizontally. */}
+      <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
         <div className="px-5 py-4 text-sm">
           {node ? (
             <NodeDetails key={node.id} activity={node} data={data} />
@@ -189,33 +193,33 @@ function NodeDetails({ activity, data }: { activity: DfgActivity; data: DfgData 
 }
 
 /** Cross-view jumps for the selected activity – same targets as the node's
- *  right-click menu on the canvas. The activity travels as `?activity=` so the
+ *  right-click menu on the canvas. Real links (loading.tsx fires, cmd-click
+ *  works); the activity travels via the shared drill vocabulary so the
  *  destination can preselect it. */
 function ExploreSection({ activityId }: { activityId: string }) {
   const { logId } = useDiscoveryScope();
-  const router = useRouter();
   const activityParam = encodeURIComponent(activityId);
 
   return (
     <Section title="Explore">
       <div className="grid gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="cursor-pointer justify-start gap-2"
-          onClick={() => router.push(`/processes/${logId}/modules/performance?activity=${activityParam}`)}
-        >
-          <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
-          View performance metrics
+        <Button asChild variant="outline" size="sm" className="cursor-pointer justify-start gap-2">
+          <Link href={activityHref(logId, activityId)}>
+            <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+            Open activity view
+          </Link>
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="cursor-pointer justify-start gap-2"
-          onClick={() => router.push(`/processes/${logId}?tab=variants&activity=${activityParam}`)}
-        >
-          <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-          Show variants with this activity
+        <Button asChild variant="outline" size="sm" className="cursor-pointer justify-start gap-2">
+          <Link href={`${modulePath(logId, "performance")}?${DRILL_PARAMS.activity}=${activityParam}`}>
+            <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
+            View performance metrics
+          </Link>
+        </Button>
+        <Button asChild variant="outline" size="sm" className="cursor-pointer justify-start gap-2">
+          <Link href={`/processes/${logId}?tab=variants&${DRILL_PARAMS.activity}=${activityParam}`}>
+            <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+            Show variants with this activity
+          </Link>
         </Button>
       </div>
     </Section>

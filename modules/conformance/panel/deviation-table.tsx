@@ -1,9 +1,11 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { ArrowUpRight, ChevronDown, ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { activityHref, variantHref } from "@/lib/dashboards/drill";
 import { formatNumber } from "@/lib/format";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
@@ -16,10 +18,12 @@ const LOG_MOVES_TITLE = "Happened in the log but not allowed by the model at tha
 const MODEL_MOVES_TITLE = "Required by the model but skipped in the log";
 
 export function DeviationTable({
+  logId,
   perActivity,
   perVariant,
   technique,
 }: {
+  logId: string;
   perActivity: PerActivityDeviation[];
   perVariant: PerVariant[];
   technique: Technique;
@@ -32,19 +36,21 @@ export function DeviationTable({
         <TabsTrigger value="variant">By variant</TabsTrigger>
       </TabsList>
       <TabsContent value="activity">
-        <ActivityTable rows={perActivity} alignments={alignments} />
+        <ActivityTable logId={logId} rows={perActivity} alignments={alignments} />
       </TabsContent>
       <TabsContent value="variant">
-        <VariantTable rows={perVariant} />
+        <VariantTable logId={logId} rows={perVariant} />
       </TabsContent>
     </Tabs>
   );
 }
 
 function ActivityTable({
+  logId,
   rows,
   alignments,
 }: {
+  logId: string;
   rows: PerActivityDeviation[];
   alignments: boolean;
 }) {
@@ -91,7 +97,18 @@ function ActivityTable({
           {rows.map((r) => (
             <tr key={r.activity} className="border-b border-border last:border-0 hover:bg-muted/30">
               <td className="px-3 py-2">
-                <span className="font-mono text-xs">{r.activity}</span>
+                {/* "not in log" rows name a model-only activity — no page to
+                    link to, so those stay plain text. */}
+                {r.matched ? (
+                  <Link
+                    href={activityHref(logId, r.activity)}
+                    className="font-mono text-xs hover:underline underline-offset-2"
+                  >
+                    {r.activity}
+                  </Link>
+                ) : (
+                  <span className="font-mono text-xs">{r.activity}</span>
+                )}
                 {!r.matched ? (
                   <span
                     className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-500"
@@ -127,7 +144,7 @@ function ActivityTable({
   );
 }
 
-function VariantTable({ rows }: { rows: PerVariant[] }) {
+function VariantTable({ logId, rows }: { logId: string; rows: PerVariant[] }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
     setOpen((prev) => {
@@ -157,7 +174,7 @@ function VariantTable({ rows }: { rows: PerVariant[] }) {
             return (
               <Fragment key={r.variant_id}>
                 <tr
-                  className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/30"
+                  className="group cursor-pointer border-b border-border last:border-0 hover:bg-muted/30"
                   onClick={() => toggle(r.variant_id)}
                 >
                   <td className="px-3 py-2">
@@ -171,6 +188,17 @@ function VariantTable({ rows }: { rows: PerVariant[] }) {
                       <span className="text-xs text-muted-foreground">
                         · {r.activities.length} steps
                       </span>
+                      {/* Row click keeps expand/collapse; this jumps to the
+                          platform's canonical variant view. */}
+                      <Link
+                        href={variantHref(logId, r.variant_id)}
+                        title="Open variant view"
+                        aria-label={`Open variant view for variant ${i + 1}`}
+                        className="ml-0.5 inline-flex align-middle text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ArrowUpRight className="h-3.5 w-3.5" />
+                      </Link>
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatNumber(r.n_cases)}</td>
@@ -193,9 +221,12 @@ function VariantTable({ rows }: { rows: PerVariant[] }) {
                             {idx > 0 ? (
                               <span className="text-muted-foreground/60">→</span>
                             ) : null}
-                            <code className="rounded bg-background/70 px-1.5 py-0.5 font-mono text-[11px]">
+                            <Link
+                              href={activityHref(logId, a)}
+                              className="rounded bg-background/70 px-1.5 py-0.5 font-mono text-[11px] hover:underline underline-offset-2"
+                            >
                               {a}
-                            </code>
+                            </Link>
                           </Fragment>
                         ))}
                       </div>

@@ -445,7 +445,7 @@ function ProviderPicker({
   disabled?: boolean;
 }) {
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle className="text-base">Provider</CardTitle>
       </CardHeader>
@@ -531,7 +531,7 @@ function ProviderConfigCard({
     !disabled && Boolean((config.api_key || storedKeySet) && (!meta.needsBaseUrl || config.base_url));
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle className="text-base">{meta.label} configuration</CardTitle>
       </CardHeader>
@@ -637,7 +637,7 @@ function ModelSelectCard({
     selectedModel !== null && !models.some((m) => m.id === selectedModel);
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle className="text-base">Default model</CardTitle>
       </CardHeader>
@@ -702,7 +702,7 @@ function ClassifierModelCard({
     classifierModel !== null && !models.some((m) => m.id === classifierModel);
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle className="text-base">Navigation classifier model</CardTitle>
       </CardHeader>
@@ -762,7 +762,7 @@ function ProcessDataCard({
   variant: AiEditorVariant;
 }) {
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle className="text-base">Access process data</CardTitle>
       </CardHeader>
@@ -838,7 +838,7 @@ function SystemPromptCard({
   };
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">System prompt</CardTitle>

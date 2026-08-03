@@ -13,7 +13,19 @@ import type { EventName } from "@/lib/analytics/events";
  */
 
 interface QueuedEvent {
-  event_type: "page" | "click" | "custom" | "error" | "perf" | "form";
+  event_type:
+    | "page"
+    | "click"
+    | "custom"
+    | "error"
+    | "perf"
+    | "form"
+    | "input"
+    | "key"
+    | "pointer"
+    | "clipboard"
+    | "drag"
+    | "view";
   event_name: string;
   occurred_at: string;
   path?: string | null;
@@ -189,9 +201,12 @@ export function flushOnUnload(): void {
     return;
   }
   const { sessionId, started } = ensureSession();
+  // keepalive fetches and sendBeacon share a ~64KB in-flight quota; pointer
+  // traces are the bulk of a batch and the least valuable at unload, so drop
+  // them rather than risk the browser silently discarding everything.
   const payload = {
     session: sessionMeta(sessionId, started),
-    events: queue,
+    events: queue.filter((e) => e.event_type !== "pointer"),
   };
   queue = [];
   const body = JSON.stringify(payload);

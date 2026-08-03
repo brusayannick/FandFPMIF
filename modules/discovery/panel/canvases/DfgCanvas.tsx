@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   useEdgesState,
   useNodesState,
@@ -9,6 +9,7 @@ import {
   type Node,
   type NodeMouseHandler,
 } from "@xyflow/react";
+import { toast } from "sonner";
 
 import { formatDuration, formatNumber } from "@/lib/format";
 
@@ -17,9 +18,17 @@ import { celonisFlowLayout } from "../layout/celonis-flow";
 import { ActivityNode, type ActivityNodeData } from "../nodes/activity-node";
 import { TerminalNode, type TerminalNodeData } from "../nodes/terminal-node";
 import { CelonisEdge } from "../edges/celonis-edge";
-import { DfgCanvasControls } from "../dfg-canvas-controls";
+import { WaypointEdge } from "../edges/waypoint-edge";
+import { RoutedEdge } from "../edges/routed-edge";
+import { DfgCanvasSettings } from "../dfg-canvas-controls";
 import { DfgNodeMenu, type DfgNodeMenuTarget } from "../dfg-node-menu";
-import type { DfgData } from "../types";
+import type {
+  DfgData,
+  DfgLayoutAlgorithm,
+  DfgLayoutEdge,
+  DfgLayoutRequest,
+} from "../types";
+import { useDfgServerLayout } from "../queries";
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
 import { CanvasLayoutSkeleton } from "@/components/visualizations/canvases/shared/canvas-skeleton";
 import { computeDfgVisibility } from "../dfg-filter";
@@ -29,10 +38,11 @@ import {
   useGeneralSettings,
   useNodePositions,
   usePersistNodePositions,
+  useResetPositions,
 } from "../discovery-settings-context";
 
 const nodeTypes = { activity: ActivityNode, terminal: TerminalNode } as const;
-const edgeTypes = { celonis: CelonisEdge } as const;
+const edgeTypes = { celonis: CelonisEdge, waypoint: WaypointEdge, routed: RoutedEdge } as const;
 
 /** Pseudo-node ids for the Process-flow terminals (never real activity ids —
  *  activity ids are the activity labels themselves). */
@@ -96,6 +106,70 @@ export function DfgCanvas({
   const [dfg] = useDfgSettings();
   const positions = useNodePositions("dfg");
   const persist = usePersistNodePositions("dfg");
+  const resetPositions = useResetPositions();
+
+  // Connectivity-aware Celonis-style filter (sliders + spanning floor) —
+  // shared between the layout effect and the server-layout request.
+  const filtered = useMemo(() => computeDfgVisibility(data, dfg), [data, dfg]);
+
+  // Server-side layouts (Backbone / Sugiyama): the visible subgraph exists
+  // only client-side, so it is POSTed to the discovery module, which returns
+  // pixel coordinates + per-edge waypoints (cached by graph digest).
+  const isServerLayout = dfg.layoutMode !== "celonis-classic";
+  const layoutRequest = useMemo<DfgLayoutRequest | null>(() => {
+    if (!isServerLayout) return null;
+    const { visibleActivities, visibleEdges } = filtered;
+    if (visibleActivities.length === 0) return null;
+    const startSet = new Set(Object.keys(data.start_activities));
+    const endSet = new Set(Object.keys(data.end_activities));
+    const nodes = visibleActivities.map((a) => ({
+      id: a.id,
+      width: CELONIS_NODE_SIZE.width,
+      height: CELONIS_NODE_SIZE.height,
+    }));
+    const edges: [string, string][] = visibleEdges.map((e) => [e.source, e.target]);
+    // Same terminal-injection predicate as the render effect below: the
+    // server pins these as the paper's artificial source/sink.
+    const visibleStarts = visibleActivities.filter((a) => startSet.has(a.id));
+    const visibleEnds = visibleActivities.filter((a) => endSet.has(a.id));
+    let startId: string | null = null;
+    let endId: string | null = null;
+    if (visibleStarts.length > 0) {
+      startId = START_ID;
+      nodes.push({
+        id: START_ID,
+        width: CELONIS_TERMINAL_SIZE.width,
+        height: CELONIS_TERMINAL_SIZE.height,
+      });
+      for (const a of visibleStarts) edges.push([START_ID, a.id]);
+    }
+    if (visibleEnds.length > 0) {
+      endId = END_ID;
+      nodes.push({
+        id: END_ID,
+        width: CELONIS_TERMINAL_SIZE.width,
+        height: CELONIS_TERMINAL_SIZE.height,
+      });
+      for (const a of visibleEnds) edges.push([a.id, END_ID]);
+    }
+    return {
+      algorithm: dfg.layoutMode as DfgLayoutAlgorithm,
+      nodes,
+      edges,
+      start_id: startId,
+      end_id: endId,
+    };
+  }, [isServerLayout, dfg.layoutMode, filtered, data]);
+
+  const layoutQuery = useDfgServerLayout(logId, layoutRequest);
+  const serverLayout = isServerLayout ? layoutQuery.data : undefined;
+  const serverLayoutFailed = isServerLayout && layoutQuery.isError;
+
+  useEffect(() => {
+    if (serverLayoutFailed) {
+      toast.error("Server layout failed — showing Process flow (Celonis) instead.");
+    }
+  }, [serverLayoutFailed]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -129,12 +203,13 @@ export function DfgCanvas({
     const startSet = new Set(Object.keys(data.start_activities));
     const endSet = new Set(Object.keys(data.end_activities));
 
-    // Connectivity-aware Celonis-style filter (sliders + spanning floor).
-    const { visibleActivities, visibleEdges } = computeDfgVisibility(data, dfg);
+    const { visibleActivities, visibleEdges } = filtered;
 
-    // The DFG has exactly one layout — the Celonis clone. Persisted legacy
-    // layoutMode values from older builds render as Celonis too.
-    const isCelonis = true;
+    // Which path renders this pass: the synchronous client-side Celonis clone,
+    // or a server-computed layout (backbone / sugiyama). A failed or empty
+    // server request falls back to the Celonis path so the map never blanks.
+    const isCelonis = !isServerLayout || serverLayoutFailed || layoutRequest === null;
+    // The node/edge SKIN stays the measured Celonis look in every mode.
     const isClassic = true;
 
     const activityNodes: Node<ActivityNodeData>[] = visibleActivities.map((a) => ({
@@ -154,7 +229,8 @@ export function DfgCanvas({
             ? 0
             : (a.frequency / Math.max(maxFreq, 1)) * general.colorIntensity,
         highlighted: a.id === highlightedActivityId,
-        ...(isCelonis ? { handleOrientation: "vertical" as const } : {}),
+        // Every mode is top-down: source handle bottom, target handle top.
+        handleOrientation: "vertical" as const,
         ...(isClassic
           ? {
               variant: "celonis" as const,
@@ -165,7 +241,13 @@ export function DfgCanvas({
       },
     }));
 
-    const edgeType = "celonis" as const;
+    // Backbone v2 ships a finished path per edge; the other server layouts ship
+    // waypoints the client splines itself.
+    const edgeType = isCelonis
+      ? ("celonis" as const)
+      : dfg.layoutMode === "backbone-v2"
+        ? ("routed" as const)
+        : ("waypoint" as const);
 
     const dfgEdges: Edge[] = visibleEdges.map((e) => {
       // Edge label modes: explicit (no silent fall-through to count when
@@ -206,11 +288,12 @@ export function DfgCanvas({
 
     // Process-flow terminals: pseudo-nodes bracketing the map (Celonis's
     // "Process start"/"Process end"), one dashed edge per visible start/end
-    // activity. Injected only for this layout so the other modes stay
-    // untouched. Labels only in count mode — terminals have no duration.
+    // activity. Injected in every mode — the server layouts pin them as the
+    // artificial source/sink. Labels only in count mode — terminals have no
+    // duration.
     const celonisNodes: Node[] = [...activityNodes];
     const celonisEdges: Edge[] = [...dfgEdges];
-    if (isCelonis) {
+    {
       const terminalStyle = {
         stroke: "var(--dfg-edge, rgb(36, 148, 153))",
         strokeWidth: 1,
@@ -237,7 +320,7 @@ export function DfgCanvas({
             id: `${START_ID}__${a.id}`,
             source: START_ID,
             target: a.id,
-            type: "celonis",
+            type: edgeType,
             label:
               dfg.edgeLabel === "count" && metric !== "performance"
                 ? isClassic
@@ -269,7 +352,7 @@ export function DfgCanvas({
             id: `${a.id}__${END_ID}`,
             source: a.id,
             target: END_ID,
-            type: "celonis",
+            type: edgeType,
             label:
               dfg.edgeLabel === "count" && metric !== "performance"
                 ? isClassic
@@ -303,14 +386,27 @@ export function DfgCanvas({
     const nodeSize = CELONIS_NODE_SIZE;
     const termSize = CELONIS_TERMINAL_SIZE;
 
-    const modeChanged = lastModeRef.current !== null && lastModeRef.current !== dfg.layoutMode;
-    lastModeRef.current = dfg.layoutMode;
+    // Pin every node to the exact pixel size the layout assumed: activity
+    // cards are content-sized by default, so their real handle x would drift
+    // from the layout's columns and trip the edge renderers' drag-fallbacks.
+    for (const n of celonisNodes) {
+      n.style = {
+        ...(n.style ?? {}),
+        width: n.type === "terminal" ? termSize.width : nodeSize.width,
+        height: n.type === "terminal" ? termSize.height : nodeSize.height,
+      };
+    }
 
     /** Merge persisted (dragged) positions, then commit – animating the node
      *  movement when this re-layout replaces an already-rendered one, so a
-     *  layout switch morphs instead of snapping. */
+     *  layout switch morphs instead of snapping. `modeChanged` is decided
+     *  HERE, not in the effect body: server layouts apply asynchronously, so
+     *  the mode ref may only advance once a layout for the new mode actually
+     *  lands (else the refit nonce never bumps). */
     const apply = (result: { nodes: Node<ActivityNodeData>[]; edges: Edge[] }) => {
       if (cancelled) return;
+      const modeChanged = lastModeRef.current !== null && lastModeRef.current !== dfg.layoutMode;
+      lastModeRef.current = dfg.layoutMode;
       const merged = result.nodes.map((n) => {
         const p = positions[n.id];
         return p ? { ...n, position: p } : n;
@@ -368,18 +464,6 @@ export function DfgCanvas({
       // Process flow (Celonis look): custom Sugiyama — DP max-frequency spine
       // pinned to the center column, loop-backs in outside lanes, terminal
       // pseudo-nodes. Synchronous, so the morph animation runs same-tick.
-      //
-      // Pin every node to the exact pixel width the layout assumed: activity
-      // cards are content-sized by default, so their real handle x would
-      // drift from the layout's column centers and trip the edge renderer's
-      // drag-fallback into straight beziers through the map.
-      for (const n of celonisNodes) {
-        n.style = {
-          ...(n.style ?? {}),
-          width: n.type === "terminal" ? termSize.width : nodeSize.width,
-          height: n.type === "terminal" ? termSize.height : nodeSize.height,
-        };
-      }
       const maxStartCount = Math.max(1, ...Object.values(data.start_activities));
       const significantStarts = new Set(
         Object.entries(data.start_activities)
@@ -415,6 +499,62 @@ export function DfgCanvas({
       // node-position morph keeps its existing same-tick start.
       if (didFirstLayout.current) runLayout();
       else cancelAfterPaint = runAfterPaint(runLayout);
+    } else if (serverLayout && !layoutQuery.isPlaceholderData) {
+      // Server layout (backbone / sugiyama). Placeholder frames (previous
+      // graph's geometry kept alive by keepPreviousData) are NOT applied —
+      // the previous frame is already on screen; applying only the fresh
+      // response makes mode switches refit and slider tweaks morph.
+      const covers = celonisNodes.every(
+        (n) => serverLayout.x[n.id] !== undefined && serverLayout.y[n.id] !== undefined,
+      );
+      if (covers) {
+        const positioned = celonisNodes.map((n) => ({
+          ...n,
+          position: { x: serverLayout.x[n.id]!, y: serverLayout.y[n.id]! },
+        }));
+        const routeByPair = new Map<string, DfgLayoutEdge>();
+        for (const routed of serverLayout.edges) {
+          routeByPair.set(`${routed.source} ${routed.target}`, routed);
+        }
+        const routedEdges = celonisEdges.map((e) => {
+          const route = routeByPair.get(`${e.source} ${e.target}`);
+          return {
+            ...e,
+            data: {
+              ...(e.data ?? {}),
+              waypoints: route?.waypoints ?? [],
+              selfLoop: route?.self_loop ?? e.source === e.target,
+              bidirectional: route?.bidirectional ?? false,
+              backEdge: route?.back_edge ?? false,
+              // Backbone v2 only — the router's finished geometry. Undefined
+              // for the other algorithms, which makes RoutedEdge degrade to
+              // the same bezier it uses for a dragged node.
+              path: route?.path,
+              polyline: route?.polyline,
+              arrow: route?.arrow ?? null,
+              labelAt: route?.label_at ?? null,
+              // Layout-time node positions: the waypoint edge compares them
+              // against the live rects to detect drags (then falls back to a
+              // plain bezier, mirroring the Celonis edge's contract).
+              expected: {
+                sx: serverLayout.x[e.source]!,
+                sy: serverLayout.y[e.source]!,
+                tx: serverLayout.x[e.target]!,
+                ty: serverLayout.y[e.target]!,
+              },
+            },
+            // Paper convention: upward (loop-back) edges read red.
+            style: route?.back_edge
+              ? { ...(e.style ?? {}), stroke: "var(--dfg-edge-back, rgb(198, 78, 60))" }
+              : e.style,
+          };
+        });
+        didFirstLayout.current = true;
+        apply({ nodes: positioned as Node<ActivityNodeData>[], edges: routedEdges });
+      }
+      // Fresh data that doesn't cover the current subgraph (a stale cache
+      // entry racing a filter change): keep the previous frame; the query
+      // refetches and this effect re-runs when the right response lands.
     }
 
     return () => {
@@ -435,6 +575,13 @@ export function DfgCanvas({
     dfg.edgeTopPercent,
     dfg.edgeLabel,
     dfg.layoutMode,
+    filtered,
+    // Server-layout inputs: re-apply when a response lands, flips to error,
+    // or stops being a keepPreviousData placeholder.
+    serverLayout,
+    serverLayoutFailed,
+    layoutQuery.isPlaceholderData,
+    layoutRequest,
     // Re-layout when persisted node positions change — this is what makes
     // "Reset layout" morph the graph back WITHOUT a reload (the store slice
     // identity changes on reset and after every real drag; both re-merge).
@@ -524,7 +671,10 @@ export function DfgCanvas({
       fitViewKey={`${data.kind}-${data.activities.length}-${fitNonce}`}
       miniMap={general.showMinimap}
       showGrid={general.showGrid}
-      toolbarSlot={<DfgCanvasControls data={data} />}
+      settings={<DfgCanvasSettings data={data} />}
+      settingsTourId="discovery-filters"
+      onReset={() => resetPositions()}
+      resetDescription="All dragged node positions for this module on this log will be discarded and the auto-layout will be reapplied. This cannot be undone."
       overlay={
         <>
           {menu ? (

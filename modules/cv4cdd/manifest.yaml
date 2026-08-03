@@ -96,9 +96,9 @@ frontend:
       title: CV drift detections
       description: Computer-vision-detected concept drifts with type and confidence.
       icon: AlertTriangle
-      default_w: 5
+      default_w: 3
       default_h: 8
-      min_w: 5
+      min_w: 3
       min_h: 6
       config_schema:
         properties:
@@ -112,7 +112,12 @@ frontend:
             default: 0
             ui:
               widget: slider
-
+      min_px_w: 300
+      min_px_h: 220
+      help:
+        what: "Points in time where the process appears to change."
+        read: "A detection marks WHEN behaviour shifted, not what changed — use the drift explainer for that."
+        computed: "Detected by the configured computer-vision drift model over the log's time series."
 # Data-only output for the platform's generic visualization layer.
 datasets:
   - id: detections

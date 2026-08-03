@@ -43,7 +43,7 @@ export const vizRegistry: Record<string, VizSpec> = {
     group: "table",
     accepts: ["table"],
     fields: [],
-    defaults: { w: 8, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 4, h: 8, minW: 2, minH: 5 },
     Component: TableViz,
   },
   "kpi-grid": {
@@ -53,7 +53,7 @@ export const vizRegistry: Record<string, VizSpec> = {
     group: "kpi",
     accepts: ["kpi"],
     fields: [],
-    defaults: { w: 7, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 4, h: 8, minW: 2, minH: 5 },
     Component: KpiGridViz,
   },
   bar: {
@@ -68,7 +68,7 @@ export const vizRegistry: Record<string, VizSpec> = {
       { key: "series", label: "Series (color)", accepts: CAT },
     ],
     options: { properties: { stacked: { type: "boolean", title: "Stacked" } } },
-    defaults: { w: 7, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 4, h: 8, minW: 2, minH: 5 },
     Component: BarViz,
   },
   line: {
@@ -82,7 +82,7 @@ export const vizRegistry: Record<string, VizSpec> = {
       { key: "y", label: "Measure (Y)", accepts: NUM, multiple: true, required: true },
       { key: "series", label: "Series (color)", accepts: CAT },
     ],
-    defaults: { w: 7, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 4, h: 8, minW: 2, minH: 5 },
     Component: LineViz,
   },
   area: {
@@ -97,7 +97,7 @@ export const vizRegistry: Record<string, VizSpec> = {
       { key: "series", label: "Series (color)", accepts: CAT },
     ],
     options: { properties: { stacked: { type: "boolean", title: "Stacked" } } },
-    defaults: { w: 7, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 4, h: 8, minW: 2, minH: 5 },
     Component: AreaViz,
   },
   scatter: {
@@ -110,7 +110,7 @@ export const vizRegistry: Record<string, VizSpec> = {
       { key: "x", label: "X (numeric)", accepts: NUM, required: true },
       { key: "y", label: "Y (numeric)", accepts: NUM, required: true },
     ],
-    defaults: { w: 6, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 3, h: 8, minW: 2, minH: 5 },
     Component: ScatterViz,
   },
   pie: {
@@ -123,7 +123,7 @@ export const vizRegistry: Record<string, VizSpec> = {
       { key: "category", label: "Category", accepts: CAT, required: true },
       { key: "value", label: "Value", accepts: NUM, required: true },
     ],
-    defaults: { w: 5, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 3, h: 8, minW: 2, minH: 5 },
     Component: PieViz,
   },
   histogram: {
@@ -146,7 +146,7 @@ export const vizRegistry: Record<string, VizSpec> = {
         },
       },
     },
-    defaults: { w: 6, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 3, h: 8, minW: 2, minH: 5 },
     Component: HistogramViz,
   },
   heatmap: {
@@ -160,7 +160,7 @@ export const vizRegistry: Record<string, VizSpec> = {
       { key: "y", label: "Y (category)", accepts: CAT, required: true },
       { key: "value", label: "Value", accepts: NUM, required: true },
     ],
-    defaults: { w: 7, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 4, h: 8, minW: 2, minH: 5 },
     Component: HeatmapViz,
   },
   "number-tile": {
@@ -170,7 +170,7 @@ export const vizRegistry: Record<string, VizSpec> = {
     group: "kpi",
     accepts: ["kpi"],
     fields: [],
-    defaults: { w: 4, h: 4, minW: 3, minH: 3 },
+    defaults: { w: 2, h: 4, minW: 2, minH: 3 },
     Component: NumberTileViz,
   },
   gauge: {
@@ -180,7 +180,7 @@ export const vizRegistry: Record<string, VizSpec> = {
     group: "kpi",
     accepts: ["kpi"],
     fields: [],
-    defaults: { w: 5, h: 6, minW: 4, minH: 5 },
+    defaults: { w: 3, h: 6, minW: 2, minH: 5 },
     Component: GaugeViz,
   },
   "radial-bar": {
@@ -190,7 +190,7 @@ export const vizRegistry: Record<string, VizSpec> = {
     group: "kpi",
     accepts: ["kpi"],
     fields: [],
-    defaults: { w: 6, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 3, h: 8, minW: 2, minH: 5 },
     Component: RadialBarViz,
   },
   radar: {
@@ -203,7 +203,7 @@ export const vizRegistry: Record<string, VizSpec> = {
       { key: "category", label: "Category", accepts: CAT, required: true },
       { key: "value", label: "Value", accepts: NUM, required: true },
     ],
-    defaults: { w: 6, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 3, h: 8, minW: 2, minH: 5 },
     Component: RadarViz,
   },
   funnel: {
@@ -216,7 +216,7 @@ export const vizRegistry: Record<string, VizSpec> = {
       { key: "category", label: "Stage", accepts: CAT, required: true },
       { key: "value", label: "Value", accepts: NUM, required: true },
     ],
-    defaults: { w: 6, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 3, h: 8, minW: 2, minH: 5 },
     Component: FunnelViz,
   },
   treemap: {
@@ -229,7 +229,7 @@ export const vizRegistry: Record<string, VizSpec> = {
       { key: "category", label: "Category", accepts: CAT, required: true },
       { key: "value", label: "Value", accepts: NUM, required: true },
     ],
-    defaults: { w: 7, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 4, h: 8, minW: 2, minH: 5 },
     Component: TreemapViz,
   },
   bubble: {
@@ -243,7 +243,7 @@ export const vizRegistry: Record<string, VizSpec> = {
       { key: "y", label: "Y (numeric)", accepts: NUM, required: true },
       { key: "size", label: "Size (numeric)", accepts: NUM },
     ],
-    defaults: { w: 6, h: 8, minW: 4, minH: 5 },
+    defaults: { w: 3, h: 8, minW: 2, minH: 5 },
     Component: BubbleViz,
   },
   "process-map": {
@@ -253,7 +253,7 @@ export const vizRegistry: Record<string, VizSpec> = {
     group: "graph",
     accepts: ["graph"],
     fields: [],
-    defaults: { w: 8, h: 12, minW: 6, minH: 8 },
+    defaults: { w: 4, h: 12, minW: 3, minH: 8 },
     Component: ProcessMapViz,
   },
   tree: {
@@ -263,7 +263,7 @@ export const vizRegistry: Record<string, VizSpec> = {
     group: "tree",
     accepts: ["tree"],
     fields: [],
-    defaults: { w: 6, h: 10, minW: 4, minH: 6 },
+    defaults: { w: 3, h: 10, minW: 2, minH: 6 },
     Component: TreeViz,
   },
 };

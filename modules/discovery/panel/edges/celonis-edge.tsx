@@ -98,7 +98,7 @@ export function CelonisEdge(props: EdgeProps) {
   );
 }
 
-function renderLabel({
+export function renderLabel({
   label,
   labelX,
   labelY,

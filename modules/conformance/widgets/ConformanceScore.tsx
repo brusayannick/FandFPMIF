@@ -1,7 +1,7 @@
 "use client";
 
 import { useConformanceResultsAuto } from "../panel/queries";
-import { CardShell, KpiTile } from "./_kit";
+import {CardShell, KpiTile} from "@/components/dashboards/kit";
 
 function pct(value: number | null | undefined): string {
   if (value === undefined || value === null) return "–";
@@ -28,7 +28,7 @@ export default function ConformanceScore({ logId }: { logId: string }) {
           <KpiTile
             label="Deviations"
             value={String(k.total_deviations)}
-            title="Steps where the recorded process differs from the reference model — either an activity happened that the model doesn't allow, or a required activity was skipped."
+            info="Steps where the recorded process differs from the reference model — either an activity happened that the model doesn't allow, or a required activity was skipped."
           />
         </div>
       ) : null}

@@ -70,20 +70,42 @@ frontend:
       description: Headline EPA-based measures - magnitude, variety, entropy, Lempel–Ziv.
       icon: Layers
       # Metric scorecard (8 tiles): min sized to show them all.
-      default_w: 7
+      default_w: 4
       default_h: 15
-      min_w: 7
-      min_h: 15
+      min_w: 3
+      min_h: 6
+      # Ids match FIGURES in widgets/ComplexityMetrics.tsx and the keys in
+      # panel/metric-info, so a card's ⓘ cites the same source as the panel.
+      kpis:
+        - { id: magnitude, title: Magnitude, info: Number of events in the log. }
+        - { id: variety, title: Variety, info: Number of distinct activities. }
+        - { id: distinct_traces_pct, title: Distinct traces, info: Share of cases whose path is unique. }
+        - { id: trace_length, title: Avg trace length }
+        - { id: variant_entropy, title: Variant entropy, info: How unpredictable the mix of paths is. }
+        - { id: sequence_entropy, title: Sequence entropy, default: false }
+        - { id: lempel_ziv, title: Lempel-Ziv, default: false }
+        - { id: pentland_process, title: Pentland process complexity, default: false }
+      min_px_w: 300
+      min_px_h: 360
+      help:
+        what: "How structurally complicated the process is, as a set of established complexity measures."
+        read: "Higher generally means harder to understand and to standardise. The measures disagree by design — they capture different kinds of complexity."
+        computed: "Computed over the filtered log; see the module page for each measure's definition."
     - id: entropy-comparison
       entry: ./widgets/EntropyComparison.tsx
       title: Entropy comparison
       description: Normalized variant vs sequence entropy (incl. forgetting).
       icon: BarChart3
-      default_w: 6
+      default_w: 3
       default_h: 8
-      min_w: 5
+      min_w: 3
       min_h: 6
-
+      min_px_w: 300
+      min_px_h: 220
+      help:
+        what: "Variation in the process, compared across entropy-based measures."
+        read: "Higher entropy means less predictable behaviour — more distinct paths carrying meaningful share."
+        computed: "Entropy over the log's variant distribution."
 # Data-only output for the platform's generic visualization layer.
 datasets:
   - id: metrics

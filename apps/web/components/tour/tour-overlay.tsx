@@ -24,11 +24,29 @@ const VIEWPORT_MARGIN = 12;
 const TARGET_GAP = 14;
 const DIM = "rgba(2, 6, 23, 0.55)";
 
-/** Prefer a fully-imported log so the discovery leg spotlights real, rendered
- *  output. `null` → no ready log yet → the tour takes its short path. */
-function pickDemoLog(logs: { id: string; status: string }[] | undefined): string | null {
+/**
+ * The log the tour walks through.
+ *
+ * The wizard's own upload wins outright, even though it is still `importing` -
+ * a brand-new user has no `ready` log, and skipping their freshly imported data
+ * to spotlight nothing was the whole reason the first run felt disjointed. The
+ * detail page and the list row both explain the in-flight state, so an importing
+ * log is a perfectly good thing to look at.
+ *
+ * Otherwise prefer a `ready` log (fully rendered output), then any log that
+ * isn't `failed`. `null` → the log-bound steps render as centered cards.
+ */
+function resolveTourLogId(
+  storeLogId: string | null,
+  logs: { id: string; status: string }[] | undefined,
+): string | null {
+  if (storeLogId) return storeLogId;
   if (!logs || logs.length === 0) return null;
-  return logs.find((l) => l.status === "ready")?.id ?? null;
+  return (
+    logs.find((l) => l.status === "ready")?.id ??
+    logs.find((l) => l.status !== "failed")?.id ??
+    null
+  );
 }
 
 function near(a: Rect | null, b: Rect | null): boolean {
@@ -101,6 +119,7 @@ function TourRunner() {
   const prev = useTour((s) => s.prev);
   const stop = useTour((s) => s.stop);
   const auto = useTour((s) => s.auto);
+  const tourLogId = useTour((s) => s.logId);
 
   const router = useProgressRouter();
   const pathname = usePathname();
@@ -108,8 +127,8 @@ function TourRunner() {
   const onboarding = useOnboardingState();
   const updateOnboarding = useUpdateOnboarding();
 
-  const demoLogId = useMemo(() => pickDemoLog(logs), [logs]);
-  const steps = useMemo(() => buildTourSteps(demoLogId, { auto }), [demoLogId, auto]);
+  const logId = useMemo(() => resolveTourLogId(tourLogId, logs), [tourLogId, logs]);
+  const steps = useMemo(() => buildTourSteps(logId, { auto }), [logId, auto]);
 
   const step: TourStep | undefined = steps[stepIndex];
   const isLast = stepIndex >= steps.length - 1;
@@ -160,9 +179,19 @@ function TourRunner() {
     if (stepIndex >= steps.length) finish();
   }, [stepIndex, steps.length, finish]);
 
-  // Drive navigation: ensure we're on the step's route before resolving its target.
+  // Drive navigation: ensure we're on the step's route before resolving its
+  // target. Compares path *and* query, because `/processes/{id}?tab=events` has
+  // the same pathname as the overview but mounts none of the overview's anchors
+  // - a user parked on another tab would otherwise sit there while the step
+  // burned its find timeout into a centered fallback. `/processes/{id}` is the
+  // canonical overview URL (the page deletes `?tab=` for it), so this is exact.
+  // Read `window.location.search` rather than `useSearchParams()` to avoid
+  // forcing a Suspense boundary around this layout-level overlay; the tour
+  // blocks clicks, so the query can only change at step entry anyway.
   useEffect(() => {
-    if (step?.route && pathname !== step.route) router.push(step.route);
+    if (!step?.route) return;
+    const search = typeof window === "undefined" ? "" : window.location.search;
+    if (pathname + search !== step.route) router.push(step.route);
   }, [step?.route, pathname, router]);
 
   // Locate + track the target. Polls (rAF) so a target that mounts after a route

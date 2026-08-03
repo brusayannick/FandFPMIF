@@ -411,7 +411,12 @@ export async function api<T = unknown>(
 export async function apiUpload<T = unknown>(
   path: string,
   file: File,
-  opts: { fieldName?: string; onProgress?: (pct: number) => void } = {},
+  opts: {
+    fieldName?: string;
+    /** Extra multipart form fields sent alongside the file. */
+    fields?: Record<string, string>;
+    onProgress?: (pct: number) => void;
+  } = {},
 ): Promise<T> {
   const token = await browserToken();
   if (!token) {
@@ -423,6 +428,9 @@ export async function apiUpload<T = unknown>(
     new Promise<T>((resolve, reject) => {
       const body = new FormData();
       body.append(opts.fieldName ?? "file", file);
+      for (const [key, value] of Object.entries(opts.fields ?? {})) {
+        body.append(key, value);
+      }
       const xhr = new XMLHttpRequest();
       xhr.open("POST", `${apiBase()}${path}`);
       xhr.setRequestHeader("Authorization", `Bearer ${bearer}`);

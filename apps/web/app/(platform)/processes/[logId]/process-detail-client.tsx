@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Inbox, Loader2, Settings2 } from "lucide-react";
+import { AlertTriangle, Inbox, Settings2 } from "lucide-react";
 
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,8 @@ import { VariantsTab } from "@/components/processes/variants-tab";
 import { ActivitiesTab } from "@/components/processes/activities-tab";
 import { SettingsTab } from "@/components/processes/settings-tab";
 import { OcelOverviewPanel } from "@/components/processes/ocel/ocel-overview-panel";
+import { LogStatStrip } from "@/components/processes/log-stat-strip";
+import { LogStatusBanner } from "@/components/processes/log-status-banner";
 import { OcelObjectsTab } from "@/components/processes/ocel/ocel-objects-tab";
 import { OcelEventsTab } from "@/components/processes/ocel/ocel-events-tab";
 import { OcelRelationshipsTab } from "@/components/processes/ocel/ocel-relationships-tab";
@@ -114,8 +116,6 @@ export function ProcessDetailClient({ logId }: { logId: string }) {
     );
   }
 
-  const importing = log.status === "importing";
-  const failed = log.status === "failed";
   const ready = log.status === "ready";
 
   // Counts only appear once the log is ready; the data tabs are disabled until
@@ -200,23 +200,20 @@ export function ProcessDetailClient({ logId }: { logId: string }) {
             </Button>
           </div>
         )}
-        {importing && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Import is still in progress. Modules and analytics become available once it finishes.
-          </div>
-        )}
-        {failed && (
-          <div className="mb-4 flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>Import failed: {log.error ?? "Unknown error"}</span>
-          </div>
-        )}
+        <LogStatusBanner log={log} />
 
         <TabsContent value="overview">
-          {objectCentric && ready && (
+          {/* OCEL gets its own native summary; case-centric logs get the stat
+              strip (also the tour's "read the log's shape" anchor). */}
+          {objectCentric ? (
+            ready && (
+              <div className="mb-6">
+                <OcelOverviewPanel logId={logId} />
+              </div>
+            )
+          ) : (
             <div className="mb-6">
-              <OcelOverviewPanel logId={logId} />
+              <LogStatStrip log={log} />
             </div>
           )}
           <ModuleGrid

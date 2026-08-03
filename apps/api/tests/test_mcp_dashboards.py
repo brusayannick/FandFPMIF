@@ -49,6 +49,9 @@ ITEMS = [
         "config": {"metric": "avg_duration"},
     }
 ]
+# Deliberately carries the pre-v2 `granularity` key: an MCP client (or a saved
+# script) can still post a legacy board, so create must coerce it. `fine` was a
+# 40-column grid, so the `w: 6` card above rescales to `w: 2` on the 12-col grid.
 SETTINGS = {
     "granularity": "fine",
     "chrome": {"border": False},
@@ -174,7 +177,12 @@ async def test_create_get_update_list_roundtrip(client: AsyncClient) -> None:
 
     detail = await tools.get_dashboard(_ctx(), dash_id)
     assert detail["items"][0]["config"] == {"metric": "avg_duration"}
-    assert detail["settings"]["granularity"] == "fine"
+    # The legacy `granularity` was consumed to decode the geometry and is never
+    # echoed back, so the board converges to v2 on its own.
+    assert "granularity" not in detail["settings"]
+    assert detail["settings"]["grid_version"] == 2
+    # 40-col `w: 6` -> 12-col `w: 2`; x stays 0.
+    assert (detail["items"][0]["x"], detail["items"][0]["w"]) == (0, 2)
     assert detail["settings"]["active_preset_id"] == "p1"
     assert detail["settings"]["presets"][0]["filters"][0]["value"] == "late"
 
@@ -184,7 +192,9 @@ async def test_create_get_update_list_roundtrip(client: AsyncClient) -> None:
     assert updated["name"] == "Renamed"
     assert updated["description"] == "daily ops"  # omitted → unchanged
     assert len(updated["items"]) == 2
-    assert updated["settings"]["granularity"] == "fine"
+    # Settings survive an items-only update, still without the legacy marker.
+    assert updated["settings"]["grid_version"] == 2
+    assert updated["settings"]["active_preset_id"] == "p1"
 
     only_desc = await tools.update_dashboard(_ctx(), dash_id, description="new text")
     assert only_desc["name"] == "Renamed" and only_desc["description"] == "new text"

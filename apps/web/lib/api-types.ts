@@ -40,6 +40,43 @@ export interface EventLogSummary {
   mapping_needs_review?: boolean;
 }
 
+// ── Import wizard: staged upload + column probe (POST /event-logs/stage) ─────
+
+/** How a canonical role was matched to a source column – the wizard's
+ * confidence chip. `user` = the user picked it, `exact` = header matched a
+ * canonical name/alias outright, `fuzzy` = substring match, `fallback` = guessed
+ * from the data itself. */
+export type ColumnRoleQuality = "user" | "exact" | "fuzzy" | "fallback";
+
+export interface ProbeColumn {
+  name: string;
+  /** Fraction of sampled rows carrying a non-empty value (0–1). */
+  coverage: number;
+  samples: string[];
+}
+
+/** Result of staging an upload: the bytes are on the server (referenced by
+ * `staging_token`), described well enough to confirm the mapping before the
+ * import job is queued. */
+export interface LogProbeResponse {
+  staging_token: string;
+  /** The sniffed format – a `.json` that turned out to be OCEL reads "ocel". */
+  source_format: string;
+  log_model: LogModel;
+  /** False for object-centric logs, whose schema the OCEL parser owns. */
+  needs_mapping: boolean;
+  columns: ProbeColumn[];
+  /** role → source column, from the same resolver the import job runs. */
+  roles: Record<string, string>;
+  quality: Record<string, ColumnRoleQuality>;
+  events_sampled: number;
+  size_bytes: number;
+  filename: string | null;
+  delimiter: string | null;
+  event_element: string | null;
+  event_path: string | null;
+}
+
 // ── Object-centric (OCEL) data shapes (GET /event-logs/{id}/ocel/*) ──────────
 
 export interface OcelObjectTypeEntry {
@@ -392,6 +429,35 @@ export interface ActivitiesPage {
   total: number;
 }
 
+export interface ActivityDetail {
+  activity: string;
+  event_count: number;
+  event_pct: number;
+  case_count: number;
+  case_pct: number;
+  avg_occurrences_per_case: number | null;
+  max_occurrences_per_case: number | null;
+  start_case_count: number;
+  start_case_pct: number;
+  end_case_count: number;
+  end_case_pct: number;
+  first_seen: string | null;
+  last_seen: string | null;
+  variant_count: number;
+  top_variants: VariantRow[];
+}
+
+export interface ActivityCase extends VariantCase {
+  occurrences: number;
+}
+
+export interface ActivityCasesPage {
+  rows: ActivityCase[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export interface EventEditEntry {
   id: number;
   log_id: string;
@@ -491,8 +557,9 @@ export type EventSource = "client" | "server";
 /** XES trace (case) notion for the event-log export. */
 export type ExportCaseNotion = "session" | "user";
 
-/** Output format for the behaviour export. */
-export type ExportFormat = "xes" | "ndjson" | "csv";
+/** Output format for the behaviour export. The ``ocel-*`` variants download
+ * the object-centric UI log as OCEL 2.0 (GET /admin/export/events-ocel2). */
+export type ExportFormat = "xes" | "ndjson" | "csv" | "ocel-json" | "ocel-sqlite" | "ocel-xml";
 
 /** Optional filters shared by every /admin/export/* route. Empty/undefined
  * fields add no predicate (the export then spans everything). Mirrors the

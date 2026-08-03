@@ -19,7 +19,7 @@ import { ActivityNode, type ActivityNodeData } from "../nodes/activity-node";
 import type { DfgData } from "../types";
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
 import { CanvasLayoutSkeleton } from "@/components/visualizations/canvases/shared/canvas-skeleton";
-import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
+import { HeuristicsCanvasSettings } from "../heuristics-canvas-controls";
 import {
   useGeneralSettings,
   useHeuristicsRenderSettings,
@@ -32,9 +32,11 @@ const nodeTypes = { activity: ActivityNode } as const;
 
 interface HeuristicsNetCanvasProps {
   data: DfgData;
+  /** A re-fetch (threshold change) is in flight while the previous net stays. */
+  busy?: boolean;
 }
 
-export function HeuristicsNetCanvas({ data }: HeuristicsNetCanvasProps) {
+export function HeuristicsNetCanvas({ data, busy }: HeuristicsNetCanvasProps) {
   const general = useGeneralSettings();
   const [heur] = useHeuristicsRenderSettings();
   const positions = useNodePositions("heuristics");
@@ -47,6 +49,11 @@ export function HeuristicsNetCanvas({ data }: HeuristicsNetCanvasProps) {
   // First layout is deferred past first paint (skeleton) so elkjs' synchronous
   // main-thread solver doesn't block it; re-layouts run inline.
   const didFirstLayout = useRef(false);
+  // Last ELK result BEFORE persisted drags are merged in – what "Reset layout"
+  // puts back. `positions` is deliberately not an effect dep (it changes on
+  // every drag persist and would re-run the solver), so clearing the store
+  // alone leaves the dragged nodes on screen; reset has to re-seed too.
+  const autoNodesRef = useRef<Node[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,6 +125,7 @@ export function HeuristicsNetCanvas({ data }: HeuristicsNetCanvasProps) {
         defaultSize: { width: 200, height: 64 },
       }).then((result) => {
         if (cancelled) return;
+        autoNodesRef.current = result.nodes;
         const merged = result.nodes.map((n) => {
           const p = positions[n.id];
           return p ? { ...n, position: p } : n;
@@ -163,7 +171,12 @@ export function HeuristicsNetCanvas({ data }: HeuristicsNetCanvasProps) {
       fitViewKey={`hn-${data.activities.length}`}
       miniMap={general.showMinimap}
       showGrid={general.showGrid}
-      toolbarSlot={<CanvasResetButton onReset={() => resetPositions("heuristics")} />}
+      busy={busy}
+      settings={<HeuristicsCanvasSettings />}
+      onReset={() => {
+        resetPositions("heuristics");
+        setNodes([...autoNodesRef.current]);
+      }}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeDragStop={onNodeDragStop}

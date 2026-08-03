@@ -231,15 +231,37 @@ class DashboardCard(BaseModel):
     # fixed size (locked to `default_w`/`default_h`); when true it can be resized
     # no smaller than `min_w`/`min_h`.
     resizable: bool = True
-    # Smallest size the card may be resized to on a dashboard (RGL cells). The
-    # canvas applies these as the grid item's `minW`/`minH`. Ignored when the
-    # card is not resizable.
+    # Smallest size the card may be resized to, in units of the fixed 12-column
+    # grid. Ignored when the card is not resizable.
     min_w: int = 2
     min_h: int = 3
+    # Absolute pixel floors. These are what make a minimum real: a grid unit is
+    # only a size once the board's width is known, so the canvas resolves these
+    # against the measured width and takes whichever floor is larger. 0 = the
+    # widget declares none.
+    min_px_w: int = 0
+    min_px_h: int = 0
     # Per-card settings schema (same dialect as module `config_schema`). The
     # palette renders a settings form from this for each placed card in edit
     # mode. ``None`` ⇒ the card has no options beyond its title.
     config_schema: dict[str, Any] | None = None
+    # Structured help behind the card's ⓘ: {what, read, computed, docs_url}.
+    # Passed through verbatim from the manifest.
+    help: dict[str, Any] | None = None
+    # The module views this card can render, and the config keys each exposes:
+    # [{id, title, description, exposes: [...]}]. Empty = one implicit view.
+    views: list[dict[str, Any]] = Field(default_factory=list)
+    # The figures a multi-KPI card shows, so a placement can pick a subset:
+    # [{id, title, info, default}]. Empty = the card is not KPI-structured.
+    kpis: list[dict[str, Any]] = Field(default_factory=list)
+    # Drill target for "open in module" and in-card clicks:
+    # {module_id, params, label, enabled}. ``None`` ⇒ the platform still offers
+    # the declaring module with no params.
+    drill: dict[str, Any] | None = None
+    # Whether this widget ships its own settings component. The URL is
+    # conventional (`assets/widget-<id>-settings.js`), so the client only needs
+    # to know whether to fetch it.
+    has_settings_entry: bool = False
     # Log data model(s) this card applies to. The Dashboards palette only shows
     # a card whose models include the board's model (case-centric vs OCEL).
     log_models: list[LogModel] = Field(default_factory=lambda: ["case_centric"])
@@ -279,7 +301,14 @@ async def list_cards(session: SessionDep, user: CurrentUserDep) -> list[Dashboar
                     resizable=w.resizable,
                     min_w=w.min_w,
                     min_h=w.min_h,
+                    min_px_w=w.min_px_w,
+                    min_px_h=w.min_px_h,
                     config_schema=w.config_schema,
+                    help=w.help.model_dump(exclude_none=True) if w.help else None,
+                    views=[v.model_dump() for v in w.views],
+                    kpis=[k.model_dump(exclude_none=True) for k in w.kpis],
+                    drill=w.drill.model_dump(exclude_none=True) if w.drill else None,
+                    has_settings_entry=w.settings_entry is not None,
                     log_models=w.log_models,
                 )
             )

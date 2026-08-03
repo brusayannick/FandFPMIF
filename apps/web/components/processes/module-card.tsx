@@ -35,7 +35,7 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
   const tooltipReasons = isJobRunning
     ? ["A job for this module is currently running. Wait for it to finish before opening."]
     : isDisabled
-    ? ["Disabled in Settings → Modules. Enable it to open the module page."]
+    ? ["Disabled on the Modules page. Enable it there to open the module."]
     : reasons;
 
   // A real <Link> (not router.push) so navigation flows through an <a>: that
@@ -47,14 +47,13 @@ export function ModuleCard({ module, logId }: ModuleCardProps) {
 
   const card = (
     <Card
-      variant="glass"
       data-tour={`module-${module.id}`}
       className={cn(
         // Tile-style card: drop the default outer py/gap so CardContent's
         // p-4 fully owns the card's padding.
         "group relative flex h-full flex-col gap-0 py-0 transition-all",
-        isAvailable && "cursor-pointer hover:-translate-y-0.5 hover:shadow-[var(--shadow-glass-md)]",
-        isDegraded && "cursor-pointer hover:shadow-[var(--shadow-glass-md)]",
+        isAvailable && "cursor-pointer hover:-translate-y-0.5 hover:shadow-lg",
+        isDegraded && "cursor-pointer hover:shadow-lg",
         (isUnavailable || isDisabled || isJobRunning) && "cursor-not-allowed opacity-60",
       )}
       aria-disabled={isUnavailable || isDisabled || isJobRunning}

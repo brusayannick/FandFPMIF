@@ -92,26 +92,44 @@ frontend:
       entry: ./widgets/FidelityScorecard.tsx
       title: Simulation fidelity
       description: NGD / AEDD / CEDD / REDD / CTDD distance of the latest simulation to the real log (lower is better).
-      default_w: 9
+      default_w: 5
       default_h: 7
-      min_w: 8
+      min_w: 4
       min_h: 6
+      min_px_w: 300
+      min_px_h: 220
+      help:
+        what: "How closely the simulated process matches the real log, across five distance measures."
+        read: "LOWER IS BETTER for all five — these are distances, not scores. A near-zero set means the simulation reproduces the real behaviour well."
+        computed: "Computed against the real log after the most recent simulation run."
     - id: cycle-time-comparison
       entry: ./widgets/CycleTimeComparison.tsx
       title: Cycle time – real vs simulated
       description: Case-duration distribution of the real log overlaid with the simulated logs.
-      default_w: 6
+      default_w: 3
       default_h: 7
-      min_w: 5
+      min_w: 3
       min_h: 6
+      min_px_w: 300
+      min_px_h: 220
+      help:
+        what: "Real versus simulated cycle-time distribution."
+        read: "The closer the two shapes, the more trustworthy the simulation's predictions. A simulation matching the mean but not the spread will mislead about worst cases."
+        computed: "Distributions from the real log and the latest simulation."
     - id: arrivals-comparison
       entry: ./widgets/ArrivalsComparison.tsx
       title: Case arrivals – real vs simulated
       description: New cases started over time, real vs simulated.
-      default_w: 6
+      default_w: 3
       default_h: 7
-      min_w: 5
+      min_w: 3
       min_h: 6
+      min_px_w: 300
+      min_px_h: 220
+      help:
+        what: "Real versus simulated case arrivals over time."
+        read: "Arrival mismatch is the usual cause of an otherwise-good simulation drifting: if work arrives differently, queues differ."
+        computed: "Arrival rates from the real log and the latest simulation."
   page_layout:
     - section: Fidelity
       widgets: [fidelity-scorecard]

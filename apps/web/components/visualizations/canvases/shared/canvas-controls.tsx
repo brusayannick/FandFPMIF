@@ -277,3 +277,275 @@ export function fitBpmnViewport(canvas: BpmnCanvasLike, margin = 0.05): void {
   canvas.zoom("fit-viewport", "auto");
   canvas.zoom(canvas.zoom() * (1 - 2 * margin), "auto");
 }
+
+// --------------------------------------------------------------------------
+// Smooth bpmn-js zoom
+// --------------------------------------------------------------------------
+
+/** diagram-js's `Canvas.viewbox()` reading. */
+export interface BpmnViewbox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale: number;
+  /** Bounding box of the active layer's elements, in diagram coordinates. */
+  inner: { x: number; y: number; width: number; height: number };
+  /** The viewport, in CSS pixels. */
+  outer: { width: number; height: number };
+}
+
+/**
+ * The slice of the diagram-js `canvas` service `useSmoothBpmnZoom` drives.
+ *
+ * Declared with method syntax, not function properties: that keeps the check
+ * bivariant, so the narrower inline `canvas` types the other bpmn viewers
+ * already declare stay assignable to this one.
+ */
+export interface BpmnZoomCanvas {
+  zoom(scale?: number | string, center?: string | { x: number; y: number }): number;
+  viewbox(box?: { x: number; y: number; width: number; height: number }): BpmnViewbox;
+}
+
+/** diagram-js's own wheel-zoom limits (`ZoomScroll`'s RANGE), mirrored so the
+ *  buttons and the wheel bottom out at the same scale. */
+const ZOOM_MIN = 0.2;
+const ZOOM_MAX = 4;
+/** One button click / one Fit. */
+const ZOOM_TWEEN_MS = 220;
+/** Log-space scale change per pixel of pinch delta. Matched to diagram-js's
+ *  effective pinch rate (one ~16% step per ~6.7px of accumulated delta), so
+ *  the speed is unchanged – what this drops is the quantisation. */
+const WHEEL_ZOOM_RATE = 0.022;
+/** Per-event ceiling. A mouse notch reports `deltaY` ≈ 100, which at the rate
+ *  above would be a ~9x leap; diagram-js dodges that by ignoring the magnitude
+ *  entirely and always moving exactly one step. */
+const WHEEL_ZOOM_MAX_STEP = 1.18;
+
+/**
+ * Clamp to diagram-js's zoom range, widened to always admit `current`.
+ *
+ * A fit on a very large diagram legitimately lands *below* `ZOOM_MIN`, and a
+ * hard clamp there would make a zoom-out step come back at 0.2 – i.e. zoom in.
+ * Widening keeps every step monotonic in the direction the user asked for.
+ */
+const clampZoom = (scale: number, current: number) =>
+  Math.min(Math.max(ZOOM_MAX, current), Math.max(Math.min(ZOOM_MIN, current), scale));
+const easeOutCubic = (p: number) => 1 - (1 - p) ** 3;
+const prefersReducedMotion = () =>
+  typeof window !== "undefined" &&
+  (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
+/** Wheel delta normalised to CSS pixels – Firefox reports lines / pages. */
+const wheelPixels = (e: WheelEvent) =>
+  e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+
+export interface BpmnZoomControls {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  /** Animated fit-to-viewport – wire this to the cluster's Fit button. */
+  fit: () => void;
+  /** Instant fit, for re-frames the user didn't ask for (import, resize). */
+  fitNow: () => void;
+}
+
+/**
+ * Smooth zooming for a standalone bpmn-js viewer.
+ *
+ * diagram-js's zoom is chunky by design: `ZoomScroll._zoom` *snaps* the scale
+ * onto a fixed logarithmic grid (`round(level / step) * step`) before stepping
+ * once, so a continuous trackpad pinch lands as a run of ~16% jumps and the
+ * toolbar buttons teleport. This replaces both paths:
+ *
+ * - **Buttons / Fit** tween over `ZOOM_TWEEN_MS`, interpolated in *log* space so
+ *   every frame is the same ratio step (interpolating the scale linearly reads
+ *   as a slowdown). Repeated clicks compound onto the pending target rather than
+ *   re-aiming from wherever the tween happens to be.
+ * - **Pinch / ctrl+wheel** zoom continuously at the cursor, unsnapped, capped
+ *   per event so a coarse mouse notch can't leap.
+ *
+ * Plain wheel is left alone – that's diagram-js panning the canvas – as is the
+ * minimap, which handles its own wheel events. `prefers-reduced-motion` collapses
+ * the tweens to an instant jump; the wheel path is direct manipulation, so it
+ * stays continuous either way.
+ *
+ * `containerRef` must be the element handed to the viewer as its `container`:
+ * diagram-js binds its own wheel listener on a `.djs-container` child of it, so
+ * a capture-phase listener here is what gets to pre-empt the stepped zoom.
+ */
+export function useSmoothBpmnZoom(
+  getCanvas: () => BpmnZoomCanvas | null,
+  containerRef: React.RefObject<HTMLElement | null>,
+  { margin = 0.05, onActivity }: { margin?: number; onActivity?: () => void } = {},
+): BpmnZoomControls {
+  // Read through refs so the wheel effect can stay mounted for the component's
+  // lifetime instead of re-binding whenever a caller's closure changes.
+  const getCanvasRef = useRef(getCanvas);
+  getCanvasRef.current = getCanvas;
+  const onActivityRef = useRef(onActivity);
+  onActivityRef.current = onActivity;
+  const marginRef = useRef(margin);
+  marginRef.current = margin;
+
+  const rafRef = useRef<number | null>(null);
+  // Where the in-flight tween is heading, so a burst of button clicks compounds
+  // (1.3x, 1.69x, …) instead of each click re-aiming from the current frame.
+  const targetRef = useRef<number | null>(null);
+
+  const stop = useCallback(() => {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    targetRef.current = null;
+  }, []);
+  useEffect(() => stop, [stop]);
+
+  const zoomBy = useCallback((factor: number) => {
+    const canvas = getCanvasRef.current();
+    if (!canvas) return;
+    const base = targetRef.current ?? canvas.zoom();
+    if (!Number.isFinite(base) || base <= 0) return;
+    const to = clampZoom(base * factor, base);
+    const from = canvas.zoom();
+    if (!Number.isFinite(from) || from <= 0) return;
+
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    targetRef.current = to;
+    onActivityRef.current?.();
+
+    if (prefersReducedMotion()) {
+      canvas.zoom(to, "auto");
+      targetRef.current = null;
+      return;
+    }
+    const ratio = to / from;
+    // Already there (clamped at a limit, or a no-op click).
+    if (Math.abs(Math.log(ratio)) < 1e-3) return;
+
+    const t0 = performance.now();
+    const frame = (now: number) => {
+      // Re-read: the viewer can be torn down mid-tween.
+      if (getCanvasRef.current() !== canvas) {
+        rafRef.current = null;
+        targetRef.current = null;
+        return;
+      }
+      const p = Math.min(1, (now - t0) / ZOOM_TWEEN_MS);
+      canvas.zoom(from * ratio ** easeOutCubic(p), "auto");
+      if (p < 1) {
+        rafRef.current = requestAnimationFrame(frame);
+      } else {
+        rafRef.current = null;
+        targetRef.current = null;
+      }
+    };
+    rafRef.current = requestAnimationFrame(frame);
+  }, []);
+
+  const fitNow = useCallback(() => {
+    const canvas = getCanvasRef.current();
+    if (canvas) fitBpmnViewport(canvas, marginRef.current);
+  }, []);
+
+  const fit = useCallback(() => {
+    const canvas = getCanvasRef.current();
+    if (!canvas) return;
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    targetRef.current = null;
+    onActivityRef.current?.();
+
+    const m = marginRef.current;
+    const vb = canvas.viewbox();
+    const { inner, outer } = vb;
+    // Nothing measurable yet – an empty diagram, no element bbox, or a viewport
+    // with no size. Nothing to interpolate towards, so just land on it.
+    if (
+      !(inner.width > 0) ||
+      !(inner.height > 0) ||
+      !(outer.width > 0) ||
+      !(outer.height > 0) ||
+      !(vb.scale > 0) ||
+      prefersReducedMotion()
+    ) {
+      fitBpmnViewport(canvas, m);
+      return;
+    }
+    // The framing `fitBpmnViewport` lands on, computed rather than applied so we
+    // can animate into it: diagram-js's fit scale, inset by `margin` per side,
+    // centred on the element bbox.
+    const to = {
+      cx: inner.x + inner.width / 2,
+      cy: inner.y + inner.height / 2,
+      s: Math.min(1, outer.width / inner.width, outer.height / inner.height) * (1 - 2 * m),
+    };
+    const from = { cx: vb.x + vb.width / 2, cy: vb.y + vb.height / 2, s: vb.scale };
+    const ratio = to.s / from.s;
+    const t0 = performance.now();
+    const frame = (now: number) => {
+      if (getCanvasRef.current() !== canvas) {
+        rafRef.current = null;
+        return;
+      }
+      const p = Math.min(1, (now - t0) / ZOOM_TWEEN_MS);
+      const e = easeOutCubic(p);
+      // Scale in log space, the centre linearly – the viewbox setter derives the
+      // scale from width/height, so both ratios have to resolve to `s`.
+      const s = from.s * ratio ** e;
+      const width = outer.width / s;
+      const height = outer.height / s;
+      canvas.viewbox({
+        x: from.cx + (to.cx - from.cx) * e - width / 2,
+        y: from.cy + (to.cy - from.cy) * e - height / 2,
+        width,
+        height,
+      });
+      rafRef.current = p < 1 ? requestAnimationFrame(frame) : null;
+    };
+    rafRef.current = requestAnimationFrame(frame);
+  }, []);
+
+  // Continuous cursor-anchored pinch / ctrl+wheel zoom. Native and non-passive:
+  // React registers wheel listeners passively, so `preventDefault` from an
+  // `onWheel` prop is not honoured (same reason the dashboard canvas binds its
+  // own). Capture phase so `stopPropagation` keeps diagram-js's stepped zoom –
+  // bound on the `.djs-container` child – from firing on top of this.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      // Browsers report a trackpad pinch as ctrl+wheel. Plain wheel is a pan
+      // and belongs to diagram-js.
+      if (!e.ctrlKey && !e.metaKey) return;
+      // The minimap does its own thing with the wheel.
+      if ((e.target as Element | null)?.closest?.(".djs-minimap")) return;
+      const canvas = getCanvasRef.current();
+      if (!canvas) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const current = canvas.zoom();
+      if (!Number.isFinite(current) || current <= 0) return;
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      targetRef.current = null;
+
+      const step = Math.min(
+        WHEEL_ZOOM_MAX_STEP,
+        Math.max(1 / WHEEL_ZOOM_MAX_STEP, Math.exp(-wheelPixels(e) * WHEEL_ZOOM_RATE)),
+      );
+      const rect = el.getBoundingClientRect();
+      canvas.zoom(clampZoom(current * step, current), {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      });
+      onActivityRef.current?.();
+    };
+    el.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    return () => el.removeEventListener("wheel", onWheel, { capture: true });
+  }, [containerRef]);
+
+  const zoomIn = useCallback(() => zoomBy(1.3), [zoomBy]);
+  const zoomOut = useCallback(() => zoomBy(1 / 1.3), [zoomBy]);
+
+  return { zoomIn, zoomOut, fit, fitNow };
+}

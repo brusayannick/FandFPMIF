@@ -394,6 +394,11 @@ async def test_aggregate_reads_shapes_and_no_raw_rows(client: AsyncClient) -> No
     assert by_name["register order"] == 3 and by_name["ship"] == 2
     assert acts["items"][0]["count"] == 3  # frequency-ordered
 
+    act = await tools.get_activity(_ctx(), log_id=log_id, name="ship")
+    assert act["event_count"] == 2 and act["case_count"] == 2
+    assert act["end_case_count"] == 2 and act["variant_count"] == 1
+    assert act["top_variants"][0]["activities"] == ["register order", "check stock", "ship"]
+
     variants = await tools.get_variants(_ctx(), log_id=log_id)
     assert variants["total"] == 2 and variants["next_cursor"] is None
     top = variants["items"][0]

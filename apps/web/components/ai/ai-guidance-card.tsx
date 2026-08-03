@@ -38,7 +38,7 @@ interface Props {
   moduleId?: string;
   /** Optional override for the call-to-action button label. */
   ctaLabel?: string;
-  /** Optional className applied to the outer <Card variant="glass">. */
+  /** Optional className applied to the outer <Card>. */
   className?: string;
 }
 

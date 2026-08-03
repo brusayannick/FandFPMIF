@@ -80,9 +80,9 @@ frontend:
       title: Complexity V2 trend
       description: A Complexity V2 metric plotted over evenly-sized time slices.
       icon: TrendingUp
-      default_w: 8
+      default_w: 4
       default_h: 8
-      min_w: 6
+      min_w: 3
       min_h: 6
       config_schema:
         properties:
@@ -127,7 +127,12 @@ frontend:
             default: 12
             ui:
               widget: slider
-
+      min_px_w: 320
+      min_px_h: 220
+      help:
+        what: "How the extended complexity measures move over time."
+        read: "Diverging lines mean different kinds of complexity are changing independently."
+        computed: "Recomputed per time slice."
 permissions:
   - read:event_log
   - write:module_results

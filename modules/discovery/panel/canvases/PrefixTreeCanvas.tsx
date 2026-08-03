@@ -19,7 +19,6 @@ import { mapEdgeType } from "../layout/direction";
 import type { PrefixTreeData, PrefixTreeNodeFlat } from "../types";
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
 import { CanvasLayoutSkeleton } from "@/components/visualizations/canvases/shared/canvas-skeleton";
-import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import {
   useGeneralSettings,
   useNodePositions,
@@ -182,7 +181,13 @@ export function PrefixTreeCanvas({ data }: PrefixTreeCanvasProps) {
       fitViewKey={key}
       miniMap={general.showMinimap}
       showGrid={general.showGrid}
-      toolbarSlot={<CanvasResetButton onReset={() => resetPositions("prefix_tree")} />}
+      // Clearing the store isn't enough: `persistedPositions` is deliberately
+      // not a dep of the seeding effect (it changes on every drag persist), so
+      // reset also re-seeds React Flow from the raw `laidNodes`.
+      onReset={() => {
+        resetPositions("prefix_tree");
+        setNodes([...laidNodes]);
+      }}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeDragStop={onNodeDragStop}

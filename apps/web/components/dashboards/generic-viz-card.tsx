@@ -3,12 +3,7 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { VizEmpty } from "@/components/visualizations/viz-shell";
 import { FieldMappingForm, type VizPatch } from "@/components/visualizations/field-mapping-form";
-import { WidgetFilterEditor } from "@/components/dashboards/widget-filter-editor";
-import {
-  configWithoutWidgetFilter,
-  readWidgetFilter,
-  writeWidgetFilter,
-} from "@/components/dashboards/widget-filter";
+import { configWithoutWidgetFilter } from "@/components/dashboards/widget-filter";
 import { vizRegistry } from "@/lib/visualizations/registry";
 import { useDatasetData } from "@/lib/visualizations/use-dataset-data";
 import type { DashboardItem } from "@/lib/dashboard-queries";
@@ -56,14 +51,11 @@ export function VizSettings({
   onChange: (patch: VizPatch) => void;
 }) {
   const { envelope, shape } = useDatasetData(item, logId);
-  return (
-    <div className="space-y-3.5">
-      <FieldMappingForm item={item} dataset={envelope} shape={shape} onChange={onChange} />
-      <WidgetFilterEditor
-        logId={logId}
-        value={readWidgetFilter(item.config)}
-        onChange={(filter) => onChange({ config: writeWidgetFilter(item.config, filter) })}
-      />
-    </div>
-  );
+  // The per-card filter editor used to sit below the mapping form. It's gone:
+  // one filter row above the board scopes everything, and a second filter
+  // hidden inside a single card contradicts it. A filter already stored on a
+  // card is still applied (`readWidgetFilter` in `use-dataset-data`) so no
+  // existing board silently changes what it shows — there is just no longer a
+  // way to author a new one.
+  return <FieldMappingForm item={item} dataset={envelope} shape={shape} onChange={onChange} />;
 }

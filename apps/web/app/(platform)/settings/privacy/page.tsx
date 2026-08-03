@@ -55,9 +55,9 @@ export default function PrivacySettingsPage() {
 
   function patch(partial: Partial<AnalyticsConfig>) {
     if (!cfg) return;
-    // Single global switch: when tracking is on, capture everything and keep
-    // data forever. The granular flags + retention live in the backend
-    // config for forward compatibility but are no longer user-configurable.
+    // The base kinds (clicks/perf/errors) ride the global switch; the UI-log
+    // kinds (inputs/keyboard/pointer) have their own toggles below and are
+    // passed through from the current config unless the patch changes them.
     const next: AnalyticsConfig = {
       ...cfg,
       ...partial,
@@ -74,6 +74,9 @@ export default function PrivacySettingsPage() {
           captureClicks: saved.capture_clicks,
           capturePerf: saved.capture_perf,
           captureErrors: saved.capture_errors,
+          captureInputs: saved.capture_inputs,
+          captureKeyboard: saved.capture_keyboard,
+          capturePointer: saved.capture_pointer,
         });
         if (partial.enabled === true) trackCustom(EV.ANALYTICS_OPT_IN);
         if (partial.enabled === false) trackCustom(EV.ANALYTICS_OPT_OUT);
@@ -82,18 +85,22 @@ export default function PrivacySettingsPage() {
     });
   }
 
-  async function onExport() {
+  async function onExport(format: "ndjson" | "ocel-json" | "ocel-sqlite") {
     // A plain `<a href={apiUrl(...)} download>` navigates the browser straight
     // to the API, which omits the bearer token (only `@/lib/api`'s fetch
     // wrappers attach it) and yields a 401. Fetch with auth, then save the blob.
     try {
-      const res = await rawFetch("/api/v1/usage/export");
+      const res = await rawFetch(`/api/v1/usage/export?format=${format}`);
       if (!res.ok) throw new Error(`Export failed (${res.status})`);
       const blob = await res.blob();
+      const name =
+        format === "ndjson"
+          ? "analytics-export.ndjson"
+          : `ui-log.ocel.${format.slice(5)}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "analytics-export.ndjson";
+      a.download = name;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -118,18 +125,19 @@ export default function PrivacySettingsPage() {
 
   return (
     <div className="space-y-4">
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Behaviour tracking</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            Captures which pages you visit, which buttons you click and where
-            they take you, how features perform, and - on the server - the
-            timing of operations like AI calls and imports plus how your jobs
-            finish. Data never leaves your machine - it lives in the same SQLite
-            file as your processes. Helps us improve the platform when you
-            choose to share your usage during development.
+            Records your interactions as a research-grade UI log (Abb &amp;
+            Rehse reference model): pages, every click with its on-screen
+            context, committed form values, keyboard shortcuts, sampled mouse
+            movement, and - on the server - API operations and job outcomes.
+            Data never leaves your machine - it lives in the same SQLite file
+            as your processes, and you can export it as an object-centric OCEL
+            2.0 event log below.
           </p>
 
           <Label className="flex items-center justify-between gap-3">
@@ -147,10 +155,62 @@ export default function PrivacySettingsPage() {
               className="cursor-pointer"
             />
           </Label>
+
+          <div className="space-y-3 border-t border-border pt-3">
+            <p className="text-xs text-muted-foreground">
+              Detailed UI-log capture (used for task mining and the OCEL
+              export). Each kind can be turned off individually.
+            </p>
+            <Label className="flex items-center justify-between gap-3">
+              <span className="space-y-0.5">
+                <span className="block text-sm font-medium">Form input values</span>
+                <span className="block text-xs text-muted-foreground">
+                  The text you commit into fields. Passwords and fields marked
+                  sensitive are never captured, regardless of this switch.
+                </span>
+              </span>
+              <Switch
+                checked={!!cfg?.capture_inputs}
+                onCheckedChange={(v) => patch({ capture_inputs: v })}
+                disabled={!cfg || !cfg.enabled}
+                className="cursor-pointer"
+              />
+            </Label>
+            <Label className="flex items-center justify-between gap-3">
+              <span className="space-y-0.5">
+                <span className="block text-sm font-medium">Keyboard shortcuts</span>
+                <span className="block text-xs text-muted-foreground">
+                  Modifier combos and special keys only (Ctrl+S, Escape, …) -
+                  plain typing is never recorded key-by-key.
+                </span>
+              </span>
+              <Switch
+                checked={!!cfg?.capture_keyboard}
+                onCheckedChange={(v) => patch({ capture_keyboard: v })}
+                disabled={!cfg || !cfg.enabled}
+                className="cursor-pointer"
+              />
+            </Label>
+            <Label className="flex items-center justify-between gap-3">
+              <span className="space-y-0.5">
+                <span className="block text-sm font-medium">Mouse movement &amp; scrolling</span>
+                <span className="block text-xs text-muted-foreground">
+                  Sampled pointer traces (a few points per second while moving)
+                  and scroll depth.
+                </span>
+              </span>
+              <Switch
+                checked={!!cfg?.capture_pointer}
+                onCheckedChange={(v) => patch({ capture_pointer: v })}
+                disabled={!cfg || !cfg.enabled}
+                className="cursor-pointer"
+              />
+            </Label>
+          </div>
         </CardContent>
       </Card>
 
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Your data</CardTitle>
         </CardHeader>
@@ -201,9 +261,25 @@ export default function PrivacySettingsPage() {
               variant="outline"
               size="sm"
               disabled={!cfg?.enabled}
-              onClick={() => void onExport()}
+              onClick={() => void onExport("ndjson")}
             >
               Export NDJSON
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!cfg?.enabled}
+              onClick={() => void onExport("ocel-json")}
+            >
+              Export OCEL 2.0 JSON
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!cfg?.enabled}
+              onClick={() => void onExport("ocel-sqlite")}
+            >
+              Export OCEL 2.0 SQLite
             </Button>
             <AlertDialog open={wipeOpen} onOpenChange={setWipeOpen}>
               <AlertDialogTrigger asChild>
@@ -236,7 +312,7 @@ export default function PrivacySettingsPage() {
         </CardContent>
       </Card>
 
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Anonymous identifier</CardTitle>
         </CardHeader>
@@ -254,18 +330,27 @@ export default function PrivacySettingsPage() {
         </CardContent>
       </Card>
 
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">What is never captured</CardTitle>
         </CardHeader>
         <CardContent className="text-xs text-muted-foreground">
           <ul className="list-disc space-y-1 pl-4">
-            <li>Form field values</li>
+            <li>
+              Passwords and credential fields (redacted even when form input
+              capture is on; other form values are only captured while that
+              toggle is enabled)
+            </li>
+            <li>Plain typing, key by key (only shortcuts and special keys)</li>
+            <li>Clipboard contents (only that a copy/cut/paste happened)</li>
             <li>AI chat message content</li>
-            <li>File names or contents of imported processes</li>
+            <li>Contents of imported processes</li>
             <li>URL query parameters</li>
             <li>Raw user-agent string</li>
-            <li>Anything inside a UI element marked <code>data-no-track</code></li>
+            <li>
+              Anything inside a UI element marked <code>data-no-track</code>{" "}
+              (values also via <code>data-no-capture-value</code>)
+            </li>
           </ul>
         </CardContent>
       </Card>

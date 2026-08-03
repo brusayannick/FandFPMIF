@@ -164,7 +164,7 @@ async def list_dashboards(
 @mcp_tool(toolset="dashboards", idempotent=True)
 async def get_dashboard(ctx: MCPContext, dashboard_id: str) -> dict[str, Any]:
     """Full detail of one dashboard: card placements (``items``) + canvas
-    ``settings`` (filters, presets, granularity).
+    ``settings`` (filters, presets, chrome).
 
     Works for boards you own AND boards shared with you (directly or via a
     team); ``is_owner: false`` marks a shared, read-only board - mutating
@@ -311,13 +311,19 @@ async def create_dashboard(
     ``event_log_id`` must be one of your logs with the same model (omit it for
     an unbound board). ``items`` is the list of card placements:
     ``{"i": "<unique placement id>", "module_id": "...", "widget_id": "...",
-    "title"?: str, "x": 0-59, "y": int, "w": 1-60, "h": 1-48, "config": {}}``
-    - discover valid module_id/widget_id pairs, sizes and each card's
-    ``config`` schema via get_dashboard_card_catalog. ``settings`` holds the
-    board-level canvas preferences and filters:
-    ``{"granularity": "free|fine|medium|low", "chrome": {"border": bool},
-    "presets": [{"id", "name", "filters": [...]}], "active_preset_id"?,
-    "column_filters"?: [...], "time_filters"?: [...]}``. Both default to empty.
+    "title"?: str, "x": 0-11, "y": 0-400, "w": 1-12, "h": 1-48, "config": {}}``
+    - the board is a fixed 12-column grid. Discover valid module_id/widget_id
+    pairs, sizes and each card's ``config`` schema via
+    get_dashboard_card_catalog. ``settings`` holds the board-level canvas
+    preferences and filters:
+    ``{"chrome": {"border": bool}, "presets": [{"id", "name", "filters":
+    [...]}], "active_preset_id"?, "column_filters"?: [...], "time_filters"?:
+    [...]}``. Both default to empty.
+
+    Legacy boards: passing the old ``settings.granularity``
+    (free|fine|medium|low) makes the server read ``items`` as that many
+    columns and rescale them onto the 12-column grid once. It is never
+    returned, so a coerced board is never rescaled twice.
     """
     p = await authz(ctx, SCOPE_DASHBOARDS_WRITE, write=True)
     data: dict[str, Any] = {"name": name, "log_model": log_model}

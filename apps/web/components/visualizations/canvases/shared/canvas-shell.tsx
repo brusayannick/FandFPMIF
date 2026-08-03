@@ -24,17 +24,16 @@ import {
 
 import "@xyflow/react/dist/style.css";
 
-import { Button } from "@/components/ui/button";
-import { Frame, Minus, Plus } from "lucide-react";
-
 import { cn } from "@/lib/cn";
+import { useCanvasIdleVisibility, useFullscreen } from "./canvas-controls";
 import {
-  CanvasFullscreenButton,
-  useCanvasIdleVisibility,
-  useFullscreen,
-} from "./canvas-controls";
+  CanvasBusyChip,
+  CanvasControlCluster,
+  type CanvasResetSlotProps,
+  type CanvasSettingsSlotProps,
+} from "./canvas-toolbar";
 
-interface CanvasShellProps {
+interface CanvasShellProps extends CanvasSettingsSlotProps, CanvasResetSlotProps {
   nodes: Node[];
   edges: Edge[];
   nodeTypes?: NodeTypes;
@@ -43,6 +42,12 @@ interface CanvasShellProps {
   className?: string;
   miniMap?: boolean;
   showGrid?: boolean;
+  /** A refetch/re-layout is in flight while the current graph stays mounted →
+   *  a small "Working…" chip instead of unmounting the canvas (which would
+   *  close the settings popover the user just changed something in). */
+  busy?: boolean;
+  /** Rare canvas-specific toolbar buttons, appended after settings + reset and
+   *  before the fullscreen toggle (which always stays rightmost). */
   toolbarSlot?: ReactNode;
   /** Optional content rendered as an absolute-positioned overlay on top of
    *  the canvas – used for the click-to-inspect details panel. */
@@ -75,6 +80,9 @@ interface CanvasShellProps {
 // inconsistent across browsers.
 const minimapNodeColor = (_node: Node): string => "rgb(148, 163, 184)"; // slate-400
 
+/** Movement below this (px, canvas space) is a click, not a drag – see below. */
+const DRAG_PERSIST_THRESHOLD_PX = 2;
+
 function CanvasInner({
   nodes,
   edges,
@@ -83,6 +91,7 @@ function CanvasInner({
   fitViewKey,
   miniMap = true,
   showGrid = true,
+  busy = false,
   toolbarSlot,
   overlay,
   proOptions,
@@ -96,6 +105,14 @@ function CanvasInner({
   selectionOnDrag = false,
   panOnDrag = true,
   onSelectionChange,
+  settings,
+  settingsLabel,
+  settingsClassName,
+  onReset,
+  resetLabel,
+  resetTitle,
+  resetDescription,
+  resetConfirmLabel,
   isFullscreen,
   onToggleFullscreen,
 }: Omit<CanvasShellProps, "className"> & {
@@ -146,6 +163,31 @@ function CanvasInner({
 
   const onFit = useCallback(() => fitView({ duration: 200, padding: 0.2 }), [fitView]);
 
+  // Persist-on-drag guard, applied for every canvas. A plain click can end as a
+  // zero-distance "drag" (React Flow still fires onNodeDragStop), and a canvas
+  // that persists dragged positions would freeze the node wherever it happened
+  // to sit – including mid-layout-animation. Only forward drags that actually
+  // moved the node; belt to `nodeDragThreshold` below.
+  const dragStartPos = useRef<{ x: number; y: number } | null>(null);
+  const handleNodeDragStart = useCallback<OnNodeDrag<Node>>((_, node) => {
+    dragStartPos.current = { x: node.position.x, y: node.position.y };
+  }, []);
+  const handleNodeDragStop = useCallback<OnNodeDrag<Node>>(
+    (event, node, dragged) => {
+      const from = dragStartPos.current;
+      dragStartPos.current = null;
+      if (
+        from &&
+        Math.abs(from.x - node.position.x) <= DRAG_PERSIST_THRESHOLD_PX &&
+        Math.abs(from.y - node.position.y) <= DRAG_PERSIST_THRESHOLD_PX
+      ) {
+        return;
+      }
+      onNodeDragStop?.(event, node, dragged);
+    },
+    [onNodeDragStop],
+  );
+
   return (
     // Fade the whole canvas in once it mounts with data – charts/graphs land
     // softly instead of popping. Opacity-only, so xyflow's own layout math is
@@ -192,7 +234,8 @@ function CanvasInner({
         onPaneClick={onPaneClick}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onNodeDragStop={onNodeDragStop}
+        onNodeDragStart={handleNodeDragStart}
+        onNodeDragStop={handleNodeDragStop}
         onSelectionChange={onSelectionChange}
         defaultEdgeOptions={{
           interactionWidth: 24,
@@ -230,42 +273,24 @@ function CanvasInner({
         )}
       </ReactFlow>
 
-      <div className="pointer-events-none absolute right-3 top-3 flex gap-1.5">
-        <div className="pointer-events-auto flex items-center gap-1 rounded-md border bg-card/80 p-1 shadow-sm backdrop-blur">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 cursor-pointer"
-            onClick={() => zoomOut({ duration: 150 })}
-            aria-label="Zoom out"
-            title="Zoom out"
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 cursor-pointer"
-            onClick={() => zoomIn({ duration: 150 })}
-            aria-label="Zoom in"
-            title="Zoom in"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 cursor-pointer"
-            onClick={onFit}
-            aria-label="Fit to view"
-            title="Fit to view"
-          >
-            <Frame className="h-3.5 w-3.5" />
-          </Button>
-          <CanvasFullscreenButton isFullscreen={isFullscreen} onToggle={onToggleFullscreen} />
-          {toolbarSlot}
-        </div>
-      </div>
+      <CanvasControlCluster
+        onZoomIn={() => zoomIn({ duration: 150 })}
+        onZoomOut={() => zoomOut({ duration: 150 })}
+        onFit={onFit}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={onToggleFullscreen}
+        settings={settings}
+        settingsLabel={settingsLabel}
+        settingsClassName={settingsClassName}
+        onReset={onReset}
+        resetLabel={resetLabel}
+        resetTitle={resetTitle}
+        resetDescription={resetDescription}
+        resetConfirmLabel={resetConfirmLabel}
+        extra={toolbarSlot}
+      />
+
+      {busy && <CanvasBusyChip />}
 
       {overlay}
     </div>

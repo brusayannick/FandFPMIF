@@ -409,9 +409,7 @@ class SubprocessBridge:
         self._failed = message
         # Wake any `call_handler` blocked on the ready event so it fails now.
         self._ready_evt.set()
-        log.error(
-            "modules.subprocess.worker_failed", module_id=self.manifest.id, error=message
-        )
+        log.error("modules.subprocess.worker_failed", module_id=self.manifest.id, error=message)
 
     def _kill_worker_group(self) -> None:
         """SIGKILL the worker's whole process group. SIGKILL (not TERM) because
@@ -459,6 +457,16 @@ class SubprocessBridge:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._server.wait_closed(), timeout=5.0)
         shutil.rmtree(self._socket_dir, ignore_errors=True)
+        # Leave the bridge unmistakably dead. `_on_connect`'s teardown skips
+        # clearing these while `_stopping` is set, so a stopped bridge used to
+        # keep a set `_ready_evt` and a closed `_conn` - `call_handler` sailed
+        # past both guards and wrote to the dead transport, and the caller got
+        # uvloop's `unable to perform operation on <UnixTransport closed=True
+        # ...>; the handler is closed` instead of a diagnosis. Callers should no
+        # longer reach a stopped bridge at all (handlers resolve through
+        # `ModuleLoader._live_handler`), but a stale reference must fail loudly.
+        self._conn = None
+        self._ready_evt.clear()
 
     async def _drain_pipe(self, stream, label: str) -> None:
         while True:
@@ -495,7 +503,20 @@ class SubprocessBridge:
             conn.register(method, handler)
         conn.register("ready", self._on_ready)
 
-        await conn.run()
+        # A worker that dies mid-read (our own SIGKILL on cancel/shutdown, or a
+        # crash) tears the socket down under `readline`. That's the *expected*
+        # end of this connection, not a fault: let it fall through to the
+        # teardown below instead of escaping into asyncio's
+        # `client_connected_cb` handler, which logged a bare BrokenPipeError
+        # traceback on every reload.
+        try:
+            await conn.run()
+        except (BrokenPipeError, ConnectionResetError, asyncio.IncompleteReadError) as exc:
+            log.debug(
+                "modules.subprocess.connection_lost",
+                module_id=self.manifest.id,
+                error=str(exc) or type(exc).__name__,
+            )
 
         # The connection ended - the worker exited (cancel kill, crash, or
         # clean shutdown). Close our transport half too: Python 3.12's
@@ -549,6 +570,13 @@ class SubprocessBridge:
         # 35s per call waiting for a respawn that will never come.
         if self._failed is not None:
             raise SubprocessHostError(self._failed)
+        # Same for a torn-down bridge: `stop()` will never signal ready again,
+        # so waiting on `_ready_evt` below could only time out after 35s.
+        if self._stopping:
+            raise SubprocessHostError(
+                f"Worker for {self.manifest.id!r} was stopped (module unloaded or "
+                "reloaded). Retry the call against the reloaded module."
+            )
         # A cancel/crash may be mid-respawn - wait for the fresh worker rather
         # than dispatching onto a dead connection.
         if not self._ready_evt.is_set():

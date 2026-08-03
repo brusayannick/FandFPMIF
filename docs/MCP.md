@@ -120,6 +120,7 @@ Legend: **W** = write (needs the write scope; blocked in read-only mode) · **D*
 | `list_processes` | Your event logs with aggregate stats (filter by `status`, `q`; paginated) |
 | `get_process` | Full metadata for one log: counts, dates, column roles, schema, applied filter |
 | `get_activities` | Unique activities + event counts, frequency-ordered |
+| `get_activity` | One activity in depth: counts/shares, per-case occurrences, start/end role, containing variants |
 | `get_variants` | Aggregate variants: sequence, case count/pct, durations (sort/filter/paginate) |
 | `get_variant` | One variant in depth: durations incl. histogram, attribute breakdowns |
 | `get_variant_cases` | Case-level rows for a variant (case_id, start/end, duration, event count) |

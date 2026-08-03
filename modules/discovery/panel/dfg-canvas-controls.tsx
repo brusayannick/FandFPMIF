@@ -1,108 +1,79 @@
 "use client";
 
-import { cn } from "@/lib/cn";
-import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  CanvasResetButton,
-  CanvasSettingsPopover,
+  CanvasSettings,
+  CanvasSettingsBadgeToggle,
+  CanvasSettingsSelect,
+  CanvasSettingsSlider,
 } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 
 import type { DfgData } from "./types";
 import { computeDfgVisibility } from "./dfg-filter";
-import { useDfgSettings, useResetPositions } from "./discovery-settings-context";
+import { useDfgSettings } from "./discovery-settings-context";
 
 /**
- * DFG canvas controls, rendered inside the canvas's top-right control bar
- * (CanvasShell `toolbarSlot`) so they're available in fullscreen too:
+ * DFG settings – the popover body of the canvas control cluster
+ * (`CanvasShell settings=…`), so they're reachable in fullscreen too. This is
+ * the reference every other canvas follows: NO filter bar above the canvas,
+ * every control built from the shared `CanvasSetting*` primitives.
  *
- *  - a config popover with the four kept settings (Activities / Connections
- *    sliders incl. Auto, Layout, Edge label),
- *  - a reset button (replaces the old header "Reset layout") that discards
- *    dragged node positions and re-applies the auto layout.
- *
- * The popover + reset button come from the shared, canvas-agnostic toolbar
- * (`canvas-toolbar.tsx`); only the DFG-specific slider/select body lives here.
+ * Reset (dragged node positions) is the cluster's own button – see `DfgCanvas`.
  */
-export function DfgCanvasControls({ data }: { data: DfgData }) {
+export function DfgCanvasSettings({ data }: { data: DfgData }) {
   const [dfg, setDfg] = useDfgSettings();
-  const resetPositions = useResetPositions();
 
   const filtered = computeDfgVisibility(data, dfg);
-  const counts = {
-    totalActivities: data.activities.length,
-    shownActivities: filtered.visibleActivities.length,
-    candidateEdges: filtered.candidateEdges.length,
-    shownEdges: filtered.visibleEdges.length,
-  };
 
   return (
-    <>
-      <CanvasSettingsPopover tourId="discovery-filters">
-        <div className="space-y-4">
-          <RankSlider
-            label="Activities"
-            fraction={filtered.resolvedActivitiesShown}
-            shown={counts.shownActivities}
-            total={counts.totalActivities}
-            auto={filtered.autoActivities}
-            onChange={(v) => setDfg({ activitiesShown: v })}
-            onAuto={() => setDfg({ activitiesShown: "auto" })}
-          />
-          <RankSlider
-            label="Connections"
-            fraction={filtered.resolvedConnectionsShown}
-            shown={counts.shownEdges}
-            total={counts.candidateEdges}
-            auto={filtered.autoConnections}
-            onChange={(v) => setDfg({ connectionsShown: v })}
-            onAuto={() => setDfg({ connectionsShown: "auto" })}
-          />
-          <div className="flex items-center justify-between gap-3">
-            <Label className="text-xs font-normal text-muted-foreground">Layout</Label>
-            <Select value="celonis-classic" onValueChange={() => undefined}>
-              <SelectTrigger className="h-7 w-44 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="celonis-classic">Process flow (Celonis)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <Label className="text-xs font-normal text-muted-foreground">Edge label</Label>
-            <Select
-              value={dfg.edgeLabel}
-              onValueChange={(v) => setDfg({ edgeLabel: v as typeof dfg.edgeLabel })}
-            >
-              <SelectTrigger className="h-7 w-44 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="count">Count</SelectItem>
-                <SelectItem value="duration">Duration</SelectItem>
-                <SelectItem value="off">Off</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </CanvasSettingsPopover>
-
-      <CanvasResetButton
-        onReset={() => resetPositions()}
-        description="All dragged node positions for this module on this log will be discarded and the auto-layout will be reapplied. This cannot be undone."
+    <CanvasSettings>
+      <RankSlider
+        label="Activities"
+        fraction={filtered.resolvedActivitiesShown}
+        shown={filtered.visibleActivities.length}
+        total={data.activities.length}
+        auto={filtered.autoActivities}
+        onChange={(v) => setDfg({ activitiesShown: v })}
+        onAuto={() => setDfg({ activitiesShown: "auto" })}
       />
-    </>
+      <RankSlider
+        label="Connections"
+        fraction={filtered.resolvedConnectionsShown}
+        shown={filtered.visibleEdges.length}
+        total={filtered.candidateEdges.length}
+        auto={filtered.autoConnections}
+        onChange={(v) => setDfg({ connectionsShown: v })}
+        onAuto={() => setDfg({ connectionsShown: "auto" })}
+      />
+      <CanvasSettingsSelect
+        label="Layout"
+        value={dfg.layoutMode}
+        onChange={(v) =>
+          setDfg({
+            layoutMode: v as "celonis-classic" | "backbone" | "backbone-v2" | "sugiyama",
+          })
+        }
+        options={[
+          { value: "celonis-classic", label: "Process flow (Celonis)" },
+          { value: "backbone", label: "Backbone (optimized)" },
+          { value: "backbone-v2", label: "Backbone (smooth routing)" },
+          { value: "sugiyama", label: "Layered (Sugiyama)" },
+        ]}
+      />
+      <CanvasSettingsSelect
+        label="Edge label"
+        value={dfg.edgeLabel}
+        onChange={(v) => setDfg({ edgeLabel: v })}
+        options={[
+          { value: "count", label: "Count" },
+          { value: "duration", label: "Duration" },
+          { value: "off", label: "Off" },
+        ]}
+      />
+    </CanvasSettings>
   );
 }
 
+/** Frequency-rank slider with a shown/total readout and the "Auto" (knee) pill. */
 function RankSlider({
   label,
   fraction,
@@ -121,43 +92,26 @@ function RankSlider({
   onAuto: () => void;
 }) {
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <Label className="text-xs font-normal text-muted-foreground">{label}</Label>
-        <div className="flex items-center gap-2">
-          <span className="text-xs tabular-nums text-muted-foreground">
-            {shown} / {total}
-          </span>
-          {/* Plain title (not a floating tooltip): the popover can open with
-              the pointer already over this badge, and a tooltip firing on
-              open looks broken. */}
-          <button
-            type="button"
-            onClick={auto ? undefined : onAuto}
-            aria-pressed={auto}
-            title={
-              auto
-                ? `Auto: knee of the frequency curve (showing ${shown})`
-                : "Reset to the computed threshold (knee of the frequency curve)"
-            }
-            className={cn(
-              "h-5 shrink-0 rounded-md border px-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors",
-              auto
-                ? "cursor-default border-primary/40 bg-primary/15 text-primary"
-                : "cursor-pointer border-border bg-transparent text-muted-foreground hover:border-primary/40 hover:text-foreground",
-            )}
-          >
-            Auto
-          </button>
-        </div>
-      </div>
-      <Slider
-        value={[fraction]}
-        min={0}
-        max={1}
-        step={0.005}
-        onValueChange={(v) => onChange(v[0] ?? 0)}
-      />
-    </div>
+    <CanvasSettingsSlider
+      label={label}
+      value={fraction}
+      min={0}
+      max={1}
+      step={0.005}
+      onChange={onChange}
+      format={() => `${shown} / ${total}`}
+      badge={
+        <CanvasSettingsBadgeToggle
+          label="Auto"
+          active={auto}
+          onActivate={onAuto}
+          title={
+            auto
+              ? `Auto: knee of the frequency curve (showing ${shown})`
+              : "Reset to the computed threshold (knee of the frequency curve)"
+          }
+        />
+      }
+    />
   );
 }

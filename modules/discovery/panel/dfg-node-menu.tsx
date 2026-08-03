@@ -1,8 +1,10 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { Gauge, GitBranch } from "lucide-react";
+import Link from "next/link";
+import { Activity, Gauge, GitBranch } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+
+import { DRILL_PARAMS, activityHref, modulePath } from "@/lib/dashboards/drill";
 
 /** Context-menu target: an activity node + the viewport point that was clicked. */
 export interface DfgNodeMenuTarget {
@@ -16,12 +18,13 @@ export interface DfgNodeMenuTarget {
 }
 
 const MENU_WIDTH = 248;
-const MENU_HEIGHT = 96;
+const MENU_HEIGHT = 128;
 
 /**
  * Right-click menu on a DFG activity node offering jumps into other views of
- * the same log: the performance module and the variants tab, both preselecting
- * the clicked activity via the `activity` query param.
+ * the same log: the canonical activity view, the performance module and the
+ * variants tab. Entries are real links (loading.tsx fires, cmd-click works);
+ * the activity travels via the shared drill vocabulary.
  *
  * Rendered `position: fixed` at the pointer, with a full-viewport backdrop
  * that swallows the next click (and right-click) to dismiss.
@@ -35,13 +38,6 @@ export function DfgNodeMenu({
   logId: string;
   onClose: () => void;
 }) {
-  const router = useRouter();
-
-  const go = (href: string) => {
-    onClose();
-    router.push(href);
-  };
-
   const activityParam = encodeURIComponent(target.activityId);
   const left = Math.max(8, Math.min(target.x, window.innerWidth - MENU_WIDTH - 8));
   const top = Math.max(8, Math.min(target.y, window.innerHeight - MENU_HEIGHT - 8));
@@ -69,14 +65,22 @@ export function DfgNodeMenu({
           {target.label}
         </div>
         <MenuItem
+          icon={Activity}
+          label="Open activity view"
+          href={activityHref(logId, target.activityId)}
+          onClose={onClose}
+        />
+        <MenuItem
           icon={Gauge}
           label="View performance metrics"
-          onClick={() => go(`/processes/${logId}/modules/performance?activity=${activityParam}`)}
+          href={`${modulePath(logId, "performance")}?${DRILL_PARAMS.activity}=${activityParam}`}
+          onClose={onClose}
         />
         <MenuItem
           icon={GitBranch}
           label="Show variants with this activity"
-          onClick={() => go(`/processes/${logId}?tab=variants&activity=${activityParam}`)}
+          href={`/processes/${logId}?tab=variants&${DRILL_PARAMS.activity}=${activityParam}`}
+          onClose={onClose}
         />
       </div>
     </>
@@ -86,21 +90,23 @@ export function DfgNodeMenu({
 function MenuItem({
   icon: Icon,
   label,
-  onClick,
+  href,
+  onClose,
 }: {
   icon: LucideIcon;
   label: string;
-  onClick: () => void;
+  href: string;
+  onClose: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <Link
       role="menuitem"
+      href={href}
       className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground"
-      onClick={onClick}
+      onClick={onClose}
     >
       <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 truncate">{label}</span>
-    </button>
+    </Link>
   );
 }

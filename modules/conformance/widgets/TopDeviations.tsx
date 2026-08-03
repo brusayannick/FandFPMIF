@@ -10,11 +10,11 @@ import {
   YAxis,
 } from "recharts";
 
+import {CardShell} from "@/components/dashboards/kit";
 import { formatNumber } from "@/lib/format";
 
 import { CONF_COLORS } from "../panel/conformance-decorate";
 import { useConformanceResultsAuto } from "../panel/queries";
-import { CardShell } from "./_kit";
 
 /** Activities with the most conformance deviations. */
 export default function TopDeviations({

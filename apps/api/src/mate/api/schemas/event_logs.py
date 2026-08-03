@@ -104,6 +104,43 @@ class JsonProbeResponse(BaseModel):
     auto_mapping: JsonColumnMapping | None = None
 
 
+class ProbeColumn(BaseModel):
+    """One source column of a staged upload, as the mapping wizard sees it."""
+
+    name: str
+    # Fraction of sampled rows where the column carries a non-empty value.
+    coverage: float
+    samples: list[str] = Field(default_factory=list)
+
+
+class LogProbeResponse(BaseModel):
+    """Result of `POST /event-logs/stage` - drives the import wizard.
+
+    The upload is already on the server at this point (referenced by
+    ``staging_token``); the client shows ``columns`` + ``roles`` + ``quality``
+    for confirmation and then posts the token back to `POST /event-logs`.
+    """
+
+    staging_token: str
+    # The *sniffed* format, not the extension: a .json that turned out to be
+    # OCEL arrives here as "ocel".
+    source_format: str
+    log_model: LogModel = "case_centric"
+    # False for object-centric logs, whose schema the OCEL parser owns.
+    needs_mapping: bool = True
+    columns: list[ProbeColumn] = Field(default_factory=list)
+    # role → source column, from the same resolver the import job uses.
+    roles: dict[str, str] = Field(default_factory=dict)
+    # role → "user" | "exact" | "fuzzy" | "fallback"; the UI's confidence chip.
+    quality: dict[str, str] = Field(default_factory=dict)
+    events_sampled: int = 0
+    size_bytes: int = 0
+    filename: str | None = None
+    delimiter: str | None = None
+    event_element: str | None = None
+    event_path: str | None = None
+
+
 class ImportPayload(BaseModel):
     """Optional metadata sent alongside a multipart upload (form-encoded JSON)."""
 

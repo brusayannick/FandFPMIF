@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiUpload } from "@/lib/api";
 import {
@@ -17,6 +17,8 @@ import {
 import type {
   ActiveFilterResult,
   ActivitiesPage,
+  ActivityCasesPage,
+  ActivityDetail,
   BulkFillBody,
   BulkFillResult,
   CellPatch,
@@ -32,6 +34,7 @@ import type {
   FilterEntry,
   FolderSummary,
   JobDetail,
+  LogProbeResponse,
   ModuleSummary,
   OcelEventsPage,
   OcelObjectsPage,
@@ -136,23 +139,66 @@ export function useModules(logId?: string | null) {
   });
 }
 
+/**
+ * Resolve a module id to its display name, for surfaces that only carry ids
+ * (the precompute checklist, job payloads). Shares the `useModules(null)` cache
+ * with the module grid and `/modules`, so it's normally a cache hit.
+ *
+ * The fallback is the **raw id, verbatim** - never prettified. The jobs drawer's
+ * filter box matches on ids, and a module the user has since uninstalled showing
+ * its id is the correct diagnostic.
+ */
+export function useModuleNames(): (moduleId: string) => string {
+  const { data } = useModules(null);
+  return useMemo(() => {
+    const byId = new Map((data ?? []).map((m) => [m.id, m.name]));
+    return (moduleId: string) => byId.get(moduleId) ?? moduleId;
+  }, [data]);
+}
+
+/** Upload a file to the staging area and get its columns back.
+ *
+ * This is the import wizard's *only* upload: the file goes up once, the server
+ * samples it, and `useImportEventLog` later confirms it by token. Exposes
+ * `progress` (0–100) for the upload-bytes phase via XHR; it holds at 100 while
+ * the server sniffs + probes the staged file, then resets to `null` on settle. */
+export function useStageUpload() {
+  const [progress, setProgress] = useState<number | null>(null);
+  const mutation = useMutation({
+    mutationFn: (file: File) =>
+      apiUpload<LogProbeResponse>("/api/v1/event-logs/stage", file, {
+        onProgress: (pct) => setProgress(Math.round(pct)),
+      }),
+    onMutate: () => setProgress(0),
+    onSettled: () => setProgress(null),
+  });
+  return Object.assign(mutation, { progress });
+}
+
 export function useImportEventLog() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: {
-      file: File;
+      /** Raw upload. Mutually exclusive with `stagingToken`. */
+      file?: File;
+      /** Token from `useStageUpload` – the bytes are already on the server. */
+      stagingToken?: string;
       name?: string;
       csvMapping?: unknown;
       xmlMapping?: unknown;
       jsonMapping?: unknown;
+      /** Confirmed role → source column mapping; wins over the server's guess. */
+      columnRoles?: Record<string, string>;
       folderId?: string | null;
     }) => {
       const fd = new FormData();
-      fd.append("file", input.file);
+      if (input.file) fd.append("file", input.file);
+      if (input.stagingToken) fd.append("staging_token", input.stagingToken);
       if (input.name) fd.append("name", input.name);
       if (input.csvMapping) fd.append("csv_mapping", JSON.stringify(input.csvMapping));
       if (input.xmlMapping) fd.append("xml_mapping", JSON.stringify(input.xmlMapping));
       if (input.jsonMapping) fd.append("json_mapping", JSON.stringify(input.jsonMapping));
+      if (input.columnRoles) fd.append("column_roles", JSON.stringify(input.columnRoles));
       if (input.folderId) fd.append("folder_id", input.folderId);
       return api<EventLogCreateResponse>("/api/v1/event-logs", { method: "POST", body: fd });
     },
@@ -879,6 +925,36 @@ export function useActivities(logId: string) {
     queryKey: queryKeys.activities(logId),
     queryFn: () => api<ActivitiesPage>(`/api/v1/event-logs/${logId}/activities`),
     enabled: !!logId,
+    staleTime: 30_000,
+  });
+}
+
+export function useActivityDetail(logId: string, name: string | null) {
+  return useQuery({
+    queryKey: name
+      ? queryKeys.activityDetail(logId, name)
+      : ["event-logs", logId, "activities", "detail", "noop"],
+    queryFn: () =>
+      api<ActivityDetail>(
+        `/api/v1/event-logs/${logId}/activities/detail?name=${encodeURIComponent(name ?? "")}`,
+      ),
+    enabled: !!logId && !!name,
+    staleTime: 30_000,
+  });
+}
+
+export function useActivityCases(logId: string, name: string | null, offset = 0, limit = 100) {
+  return useQuery({
+    queryKey: name
+      ? queryKeys.activityCases(logId, name, offset, limit)
+      : ["event-logs", logId, "activities", "detail", "noop", "cases"],
+    queryFn: () =>
+      api<ActivityCasesPage>(
+        `/api/v1/event-logs/${logId}/activities/cases?name=${encodeURIComponent(
+          name ?? "",
+        )}&offset=${offset}&limit=${limit}`,
+      ),
+    enabled: !!logId && !!name,
     staleTime: 30_000,
   });
 }

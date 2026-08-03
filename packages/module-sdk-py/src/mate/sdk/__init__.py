@@ -47,6 +47,11 @@ from mate.sdk.manifest import (
     RuntimeJvm,
     RuntimePython,
     Source,
+    WidgetDrill,
+    WidgetEntry,
+    WidgetHelp,
+    WidgetKpi,
+    WidgetView,
 )
 from mate.sdk.module import Module
 
@@ -77,6 +82,11 @@ __all__ = [
     "RuntimeJvm",
     "RuntimePython",
     "Source",
+    "WidgetDrill",
+    "WidgetEntry",
+    "WidgetHelp",
+    "WidgetKpi",
+    "WidgetView",
     "job",
     "on_event",
     "route",

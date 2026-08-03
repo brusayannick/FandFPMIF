@@ -4,17 +4,16 @@
 // module bundler (esbuild) has no loaders for the font assets the BPMN font CSS
 // references. See apps/web/app/layout.tsx.
 
-import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Maximize, Minus, Plus } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import {
-  CanvasFullscreenButton,
   fitBpmnViewport,
   useCanvasIdleVisibility,
   useFullscreen,
 } from "@/components/visualizations/canvases/shared/canvas-controls";
+import { CanvasControlCluster } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 
 // bpmn-js / bpmn-auto-layout are bundled straight into this panel - they are
 // intentionally NOT in runtime-externals.json. The host runs `next dev --turbo`,
@@ -65,6 +64,9 @@ export interface ConformanceBpmnCanvasProps {
   searchQuery?: string;
   searchNonce?: number;
   onSearchResult?: (found: boolean) => void;
+  /** Settings-popover body for the canvas control cluster (see
+   *  `canvas-toolbar.tsx`). Every canvas keeps its controls in here. */
+  settings?: ReactNode;
 }
 
 type ModelerHandle = BpmnModelerLike & {
@@ -81,6 +83,7 @@ export function ConformanceBpmnCanvas({
   searchQuery,
   searchNonce,
   onSearchResult,
+  settings,
 }: ConformanceBpmnCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const modelerRef = useRef<ModelerHandle | null>(null);
@@ -222,19 +225,16 @@ export function ConformanceBpmnCanvas({
       onPointerDownCapture={notifyActivity}
     >
       <div ref={containerRef} className="h-full w-full" />
-      {/* Top-right so the minimap owns bottom-right, matching the RF canvases. */}
-      <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md border bg-card/90 p-1 shadow-sm backdrop-blur">
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => zoomBy(1.2)} title="Zoom in">
-          <Plus className="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => zoomBy(1 / 1.2)} title="Zoom out">
-          <Minus className="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fit} title="Fit to view">
-          <Maximize className="h-4 w-4" />
-        </Button>
-        <CanvasFullscreenButton isFullscreen={isFullscreen} onToggle={toggleFullscreen} />
-      </div>
+      {/* Same cluster as every React-Flow canvas – top-right, minimap owns
+          bottom-right. Never hand-roll this pill. */}
+      <CanvasControlCluster
+        onZoomIn={() => zoomBy(1.2)}
+        onZoomOut={() => zoomBy(1 / 1.2)}
+        onFit={fit}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={toggleFullscreen}
+        settings={settings}
+      />
     </div>
   );
 }

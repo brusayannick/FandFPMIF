@@ -21,6 +21,8 @@ set.
 from __future__ import annotations
 
 import asyncio
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -73,16 +75,21 @@ def _parse_case_centric(
     csv_mapping_data: dict[str, Any] | None,
     xml_mapping_data: dict[str, Any] | None,
     json_mapping_data: dict[str, Any] | None,
+    on_progress: Callable[[int], None] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any] | None]:
     """Parse the staged upload into rows (sync; runs in a worker thread).
 
     The staged original may be compressed (gz / bz2 / xz / zip, possibly
     nested) - `decompressed` magic-sniffs the bytes and hands the parser a
     plain temp copy that lives only for the duration of the parse.
+
+    ``on_progress`` is called with the running row count by the streaming
+    parsers (see `_progress_bridge`). CSV/JSON parse in one shot, so they stay
+    silent and the job's "parsing" stage remains indeterminate for them.
     """
     with decompressed(original_path) as src:
         if source_format in {"xes", "xes.gz"}:
-            rows, detected = parse_xes(src, on_progress=lambda n: None)
+            rows, detected = parse_xes(src, on_progress=on_progress)
             return rows, detected, None
         if source_format == "csv":
             mapping = (
@@ -94,7 +101,7 @@ def _parse_case_centric(
             xml_mapping = (
                 XmlColumnMapping.model_validate(xml_mapping_data) if xml_mapping_data else None
             )
-            rows, detected, used_xml = parse_xml(src, xml_mapping)
+            rows, detected, used_xml = parse_xml(src, xml_mapping, on_progress=on_progress)
             return rows, detected, used_xml.model_dump()
         if source_format == "json":
             json_mapping = (
@@ -103,6 +110,40 @@ def _parse_case_centric(
             rows, detected, used_json = parse_json(src, json_mapping)
             return rows, detected, used_json.model_dump()
     raise ValueError(f"Source format {source_format!r} is not supported in v1.")
+
+
+# Parsers tick every 1000 rows, which is far too chatty for the bus on a large
+# log. Rate-limit to one event per interval; the DB write throttles itself via
+# `settings.progress_persist_every`.
+_PARSE_PROGRESS_INTERVAL_SECONDS = 0.5
+
+
+def _progress_bridge(handle: JobHandle) -> Callable[[int], None]:
+    """Publish parser row counts from the parse thread onto the event loop.
+
+    The parsers are sync and run inside `asyncio.to_thread`, so they cannot
+    await `handle.progress`. This hands them a plain callable that schedules the
+    coroutine back on the loop, throttled, and *never raises* into the parse:
+    `handle.progress` polls the cancel token, and a cancel is already handled by
+    the `raise_if_cancelled` right after the parse returns.
+    """
+    loop = asyncio.get_running_loop()
+    state = {"last": 0.0}
+
+    def tick(count: int) -> None:
+        now = time.monotonic()
+        if now - state["last"] < _PARSE_PROGRESS_INTERVAL_SECONDS:
+            return
+        state["last"] = now
+        future = asyncio.run_coroutine_threadsafe(
+            handle.progress(count, total=None, stage="parsing", message="Reading events"),
+            loop,
+        )
+        # Retrieve the result so a cancelled/failed publish never surfaces as an
+        # "exception was never retrieved" warning at GC time.
+        future.add_done_callback(lambda f: f.exception() if not f.cancelled() else None)
+
+    return tick
 
 
 def _parse_ocel_source(original_path: Path, flavor: str) -> OcelParseResult:
@@ -146,6 +187,7 @@ async def _import_handler(handle: JobHandle) -> None:
         csv_mapping_data,
         xml_mapping_data,
         json_mapping_data,
+        _progress_bridge(handle),
     )
 
     # The parser ran inside a single uninterruptible `to_thread` - cancel can't
@@ -253,6 +295,10 @@ async def _import_handler(handle: JobHandle) -> None:
         "row_count": len(df),
         "rows_dropped_invalid_timestamp": rows_dropped_invalid_timestamp,
         "column_roles": column_roles,
+        # How each role was matched (user / exact / fuzzy / fallback) - the same
+        # signal the import wizard shows as its confidence chip, kept so the
+        # log's settings can render it after the fact.
+        "column_role_quality": dict(resolution.quality),
         "mapping_needs_review": mapping_needs_review,
     }
 

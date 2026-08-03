@@ -132,7 +132,7 @@ export default function AboutPage() {
 
   return (
     <div className="space-y-4">
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">About PM-MATE</CardTitle>
         </CardHeader>
@@ -144,15 +144,15 @@ export default function AboutPage() {
         </CardContent>
       </Card>
 
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Product tour</CardTitle>
         </CardHeader>
         <CardContent className="flex items-center justify-between gap-4">
           <p className="text-xs text-muted-foreground">
-            Replay the interactive walkthrough of process discovery — the
-            platform&apos;s core feature. It guides you from importing a log to
-            reading your mined process map.
+            Replay the guided walkthrough of the platform — where your data
+            lives, how a log becomes an analysis, and where each module runs.
+            About two minutes.
           </p>
           <Button
             variant="outline"
@@ -165,7 +165,7 @@ export default function AboutPage() {
         </CardContent>
       </Card>
 
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="text-base">Diagnostics</CardTitle>
         </CardHeader>

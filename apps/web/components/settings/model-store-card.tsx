@@ -108,7 +108,7 @@ export function ModelStoreCard({
   };
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
           {title}

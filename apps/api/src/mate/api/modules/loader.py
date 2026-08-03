@@ -1068,6 +1068,10 @@ class ModuleLoader:
     ) -> None:
         module_id = loaded.id
         router = loaded.sub_router
+        # Resolve the implementation per call (see `_live_handler`) - the route
+        # registered here outlives every reload, so it must never capture the
+        # instance it was bound against.
+        attr_name = bound_method.__name__
 
         # Forward any handler kwargs (besides `ctx`) to FastAPI as query
         # params so module routes can take typed inputs without each module
@@ -1077,13 +1081,14 @@ class ModuleLoader:
         if job_spec is None:
 
             async def _endpoint(**kwargs: Any) -> Any:
+                handler = self._require_live_handler(module_id, attr_name)
                 log_id = kwargs.pop("log_id", None)
                 user: CurrentUser = kwargs.pop("__ff_user")
                 filter_override = _decode_event_filter_header(kwargs.pop("__ff_event_filter", None))
                 ctx = await self._make_context(
                     module_id, log_id or "", user.id, filter_override=filter_override
                 )
-                return await self._invoke_handler(bound_method, ctx, **kwargs)
+                return await self._invoke_handler(handler, ctx, **kwargs)
 
             _endpoint.__signature__ = _build_endpoint_signature(extras)  # type: ignore[attr-defined]
         else:
@@ -1096,11 +1101,52 @@ class ModuleLoader:
             # Map of extra-arg name → annotation so the job runner can
             # re-hydrate Pydantic models from the serialized payload.
             extras_by_name = {p.name: p.annotation for p in extras}
+            job_type = f"module.{module_id}.{spec.path.lstrip('/').replace('/', '.') or 'root'}"
+
+            async def _job_handler(handle: JobHandle) -> None:
+                handler = self._live_handler(module_id, attr_name)
+                if handler is None:
+                    raise RuntimeError(
+                        f"Module {module_id!r} is not loaded - it was unloaded "
+                        f"before this job ran. Retry once it is back."
+                    )
+                ctx = await self._make_context(
+                    module_id,
+                    handle.payload.get("log_id", ""),
+                    handle.user_id,
+                    progress=_JobProgressAdapter(handle),
+                    cancellation=_JobCancellation(handle),
+                    filter_override=handle.payload.get("_filter_override"),
+                    job_id=handle.id,
+                )
+                # Tag the ctx with its job id so a subprocess bridge can map
+                # the per-call RPC token → job id and target the soft cancel.
+                ctx._ff_job_id = handle.id  # type: ignore[attr-defined]
+                raw = handle.payload.get("_extras") or {}
+                rebuilt: dict[str, Any] = {}
+                for name, value in raw.items():
+                    ann = extras_by_name.get(name)
+                    if (
+                        isinstance(ann, type)
+                        and issubclass(ann, BaseModel)
+                        and isinstance(value, dict)
+                    ):
+                        rebuilt[name] = ann.model_validate(value)
+                    else:
+                        rebuilt[name] = value
+                await self._invoke_handler(handler, ctx, **rebuilt)
+
+            # Bound once per (re)bind, not lazily on first request: a reload has
+            # to overwrite the previous closure (`replace=True`), or the runtime
+            # keeps running jobs against the module instance this loader replaced.
+            self.runtime.register(job_type, _job_handler, replace=True)
 
             async def _endpoint(**kwargs: Any) -> dict[str, str]:  # type: ignore[misc]
                 ctx_log_id = kwargs.pop("log_id", None) or ""
                 user: CurrentUser = kwargs.pop("__ff_user")
                 filter_override = _decode_event_filter_header(kwargs.pop("__ff_event_filter", None))
+                # 404 rather than queueing a job that can only fail.
+                self._require_live_handler(module_id, attr_name)
 
                 # Serialize forwarded args into the job payload. Pydantic
                 # models dump to dicts; primitives pass through. This is the
@@ -1112,38 +1158,6 @@ class ModuleLoader:
                         serialized_extras[name] = value.model_dump(mode="json")
                     else:
                         serialized_extras[name] = value
-
-                async def _job_handler(handle: JobHandle) -> None:
-                    ctx = await self._make_context(
-                        module_id,
-                        handle.payload.get("log_id", ""),
-                        handle.user_id,
-                        progress=_JobProgressAdapter(handle),
-                        cancellation=_JobCancellation(handle),
-                        filter_override=handle.payload.get("_filter_override"),
-                        job_id=handle.id,
-                    )
-                    # Tag the ctx with its job id so a subprocess bridge can map
-                    # the per-call RPC token → job id and target the soft cancel.
-                    ctx._ff_job_id = handle.id  # type: ignore[attr-defined]
-                    raw = handle.payload.get("_extras") or {}
-                    rebuilt: dict[str, Any] = {}
-                    for name, value in raw.items():
-                        ann = extras_by_name.get(name)
-                        if (
-                            isinstance(ann, type)
-                            and issubclass(ann, BaseModel)
-                            and isinstance(value, dict)
-                        ):
-                            rebuilt[name] = ann.model_validate(value)
-                        else:
-                            rebuilt[name] = value
-                    await self._invoke_handler(bound_method, ctx, **rebuilt)
-
-                # Register a one-shot handler under a unique type tag.
-                job_type = f"module.{module_id}.{spec.path.lstrip('/').replace('/', '.') or 'root'}"
-                if job_type not in self.runtime._handlers:  # type: ignore[attr-defined]
-                    self.runtime.register(job_type, _job_handler)
 
                 # Resolve callable title/subtitle at submission time (§5.6).
                 # The author's callable receives a stub ctx-like dict + the
@@ -1194,6 +1208,9 @@ class ModuleLoader:
     ) -> None:
         topic = sub_spec.topic
         module_id = loaded.id
+        # As in `_bind_route`: resolve the implementation per call so a reload
+        # swaps it (see `_live_handler`).
+        attr_name = bound_method.__name__
         # Record the subscription so `event_subscriber_module_ids` can answer
         # "which modules wait on `log.imported`?" at import time. A module may
         # subscribe via a wildcard (`log.*`) - kept verbatim and matched later.
@@ -1222,12 +1239,15 @@ class ModuleLoader:
                                 # A's module against B's data.
                                 if not await self._user_owns(event_user_id, module_id):
                                     continue
+                                handler = self._live_handler(module_id, attr_name)
+                                if handler is None:
+                                    continue
                                 ctx = await self._make_context(
                                     module_id,
                                     env.payload.get("log_id", ""),
                                     event_user_id,
                                 )
-                                await self._invoke_handler(bound_method, ctx, env.payload)
+                                await self._invoke_handler(handler, ctx, env.payload)
                             except Exception:
                                 log.exception(
                                     "modules.event_handler_failed",
@@ -1245,6 +1265,12 @@ class ModuleLoader:
         job_type = f"module.{module_id}.event.{topic.replace('.', '_')}"
 
         async def _job_handler(handle: JobHandle) -> None:
+            handler = self._live_handler(module_id, attr_name)
+            if handler is None:
+                raise RuntimeError(
+                    f"Module {module_id!r} is not loaded - it was unloaded "
+                    f"before this job ran. Retry once it is back."
+                )
             event_payload = handle.payload.get("_event_payload", {})
             ctx = await self._make_context(
                 module_id,
@@ -1255,10 +1281,11 @@ class ModuleLoader:
                 job_id=handle.id,
             )
             ctx._ff_job_id = handle.id  # type: ignore[attr-defined]
-            await self._invoke_handler(bound_method, ctx, event_payload)
+            await self._invoke_handler(handler, ctx, event_payload)
 
-        if job_type not in self.runtime._handlers:  # type: ignore[attr-defined]
-            self.runtime.register(job_type, _job_handler)
+        # `replace=True`: `_rebind_events` runs on every load/unload, and the
+        # previous closure would otherwise keep serving this topic forever.
+        self.runtime.register(job_type, _job_handler, replace=True)
 
         static_title_default = f"{module_id}.{topic}"
         static_subtitle_default = f"{module_id} · on {topic}"
@@ -1308,6 +1335,39 @@ class ModuleLoader:
                 return
 
         self._sub_event_tasks.append(asyncio.create_task(_runner()))
+
+    def _live_handler(self, module_id: str, attr_name: str) -> Callable[..., Any] | None:
+        """The *currently loaded* bound method for `module_id.attr_name`.
+
+        Routes and job handlers are registered once, but a module can be
+        reloaded underneath them (hot reload in dev, module upgrade) - and
+        FastAPI cannot unbind a route, so `load_one` mounts a second one and
+        Starlette keeps matching the first. Closing over the bound method
+        therefore pinned callers to the *original* instance forever. For a
+        subprocess module that instance is a stub over a `SubprocessBridge`
+        whose worker `unload_one` has already stopped, so every call died
+        writing to a dead socket - surfacing as a raw
+        `unable to perform operation on <UnixTransport closed=True ...>;
+        the handler is closed` instead of anything actionable.
+
+        Resolving per call means a reload swaps the implementation. `None` =
+        the module is gone (unloaded) or no longer declares that handler; the
+        caller turns that into a 404 / a failed job with a clear message.
+        """
+        loaded = self.loaded.get(module_id)
+        if loaded is None:
+            return None
+        handler = getattr(loaded.instance, attr_name, None)
+        return handler if callable(handler) else None
+
+    def _require_live_handler(self, module_id: str, attr_name: str) -> Callable[..., Any]:
+        handler = self._live_handler(module_id, attr_name)
+        if handler is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Module {module_id!r} is not loaded (or no longer has {attr_name!r}).",
+            )
+        return handler
 
     async def _invoke_handler(
         self,
@@ -1543,7 +1603,15 @@ class ModuleLoader:
         # tenant-isolation invariant in one place - we refuse any log the caller
         # doesn't own. The returned view mirrors the primary one: same user, the
         # target log's own committed Events-tab filter.
-        async def _open_event_log(other_log_id: str) -> EventLogAccess:
+        #
+        # An explicit `filters` list REPLACES that committed filter for this
+        # view only - the same precedence the dashboard's ephemeral filter has
+        # (`filter_override` above), and the mechanism behind an A/B comparison
+        # of two *differently filtered* views of the same log. `[]` means "raw
+        # log, ignore the committed filter"; `None` keeps the committed one.
+        async def _open_event_log(
+            other_log_id: str, filters: list[dict[str, Any]] | None = None
+        ) -> EventLogAccess:
             sm_ = get_sessionmaker()
             async with sm_() as session:
                 other = await session.get(EventLog, other_log_id)
@@ -1556,7 +1624,8 @@ class ModuleLoader:
                     f"Event log {other_log_id} is object-centric; "
                     "open_event_log only serves case-centric logs."
                 )
-            return EventLogAccess(other_log_id, user_id, other.active_filter or None)
+            applied = (other.active_filter or None) if filters is None else (filters or None)
+            return EventLogAccess(other_log_id, user_id, applied)
 
         # Object-centric (OCEL) logs bind `object_log` and leave `event_log`
         # unbound; case-centric logs do the opposite. A module only ever runs

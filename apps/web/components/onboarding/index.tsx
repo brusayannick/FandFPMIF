@@ -15,9 +15,9 @@ import { useUpdateAnalyticsConfig, useAnalyticsConfig } from "@/lib/analytics-qu
 import { WelcomeStep } from "./steps/welcome-step";
 import { PrivacyStep } from "./steps/privacy-step";
 import { UploadStep } from "./steps/upload-step";
-import { ModulesStep } from "./steps/modules-step";
+import { AnalysisStep } from "./steps/analysis-step";
 
-type StepKey = "welcome" | "privacy" | "upload" | "modules";
+type StepKey = "welcome" | "privacy" | "upload" | "analysis";
 
 export function OnboardingOverlay() {
   const router = useProgressRouter();
@@ -47,8 +47,8 @@ export function OnboardingOverlay() {
   // choice is never presented.
   const steps: StepKey[] =
     mode === "force"
-      ? ["welcome", "upload", "modules"]
-      : ["welcome", "privacy", "upload", "modules"];
+      ? ["welcome", "upload", "analysis"]
+      : ["welcome", "privacy", "upload", "analysis"];
 
   const current = steps[Math.min(step, steps.length - 1)];
   const isLast = step === steps.length - 1;
@@ -75,13 +75,19 @@ export function OnboardingOverlay() {
     ensurePrivacyDefault();
     // Persist completion per-user so it never re-shows for this account.
     updateOnboarding.mutate({ completed: true, experience_level: experienceLevel });
-    if (uploadedLogId) {
-      router.push(`/processes?focus=${uploadedLogId}`);
-    }
     // Chain straight into the interactive product tour the first time the wizard
     // is finished (skippable, and replayable later from Settings → About). Gated
     // on the per-user flag so it can never re-trigger on a later session.
-    if (!onboardingQuery.data?.tour_completed) startTour({ auto: true });
+    //
+    // The tour owns the navigation from here: its first step routes to
+    // /processes, and `logId` lets it spotlight the log this wizard just queued
+    // even though it is still importing (a brand-new user has no `ready` log to
+    // fall back on). Only when the tour won't run do we route by hand.
+    if (!onboardingQuery.data?.tour_completed) {
+      startTour({ auto: true, logId: uploadedLogId });
+    } else if (uploadedLogId) {
+      router.push(`/processes/${uploadedLogId}`);
+    }
   };
 
   const onNext = () => {
@@ -108,7 +114,7 @@ export function OnboardingOverlay() {
         {current === "upload" && (
           <UploadStep uploadedLogId={uploadedLogId} onUploaded={setUploadedLogId} />
         )}
-        {current === "modules" && <ModulesStep />}
+        {current === "analysis" && <AnalysisStep />}
       </div>
 
       <div className="border-t border-border bg-background">

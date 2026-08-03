@@ -532,6 +532,13 @@ class WireConnection:
         for fut in self._pending.values():
             if not fut.done():
                 fut.set_exception(exc)
+                # By the time the peer dies during shutdown, the task that was
+                # awaiting this future is usually already cancelled - nobody
+                # ever retrieves the exception and asyncio logs a bare "Future
+                # exception was never retrieved" at GC. Reading it here clears
+                # that flag; a task still awaiting the future gets the
+                # exception raised as normal.
+                fut.exception()
         self._pending.clear()
 
     async def send_request(self, method: str, params: dict[str, Any]) -> Any:

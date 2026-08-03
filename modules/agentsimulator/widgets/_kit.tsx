@@ -18,14 +18,29 @@ import type { ReactNode } from "react";
 import { Bot, Loader2, Play } from "lucide-react";
 import { useRouter } from "next/navigation";
 
+import { seriesColor } from "@/components/dashboards/kit";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { useSimulationGate, type MetricCell, type SimJob } from "../panel/queries";
 import { MetricInfoHint } from "./metric-info";
 
-export const COLORS = { real: "#6366f1", sim: "#f59e0b" } as const;
+/**
+ * Real vs. simulated, from the platform's shared series palette.
+ *
+ * These were hardcoded hex (`#6366f1` / `#f59e0b`), so this module's cards
+ * were the only ones on a board not following the theme — and the pair had
+ * never been checked for colourblind separation. Slots 1 and 2 are validated
+ * adjacent and follow light/dark.
+ */
+export const COLORS = { real: seriesColor(0), sim: seriesColor(1) } as const;
 
+/**
+ * NOT the shared `CardShell` — this one gates on simulation state, showing a
+ * run prompt or live progress when there are no results yet. It stays local
+ * because that behaviour is specific to this module, not because the shared
+ * kit was unsuitable for the rest.
+ */
 export function CardShell({
   logId,
   loading,

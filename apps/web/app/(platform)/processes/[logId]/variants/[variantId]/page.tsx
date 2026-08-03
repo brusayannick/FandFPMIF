@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { PageContainer } from "@/components/page";
 import { ChartCardSkeleton } from "@/components/skeletons";
 import { useEventLog, useVariant, useVariantCases } from "@/lib/queries";
-import { displayActivities, getActivityRenameMap } from "@/lib/activity-rename";
+import { displayActivity, getActivityRenameMap } from "@/lib/activity-rename";
 import { VariantHeader } from "@/components/processes/variant-detail/header";
 import { VariantDetailSkeleton } from "@/components/processes/variant-detail/skeleton";
 import { SequenceStrip } from "@/components/processes/variant-detail/sequence-strip";
@@ -61,7 +61,13 @@ export default function VariantDetailPage() {
         <VariantHeader variant={variant} />
       </header>
 
-      <SequenceStrip activities={displayActivities(variant.activities, getActivityRenameMap(log))} />
+      <SequenceStrip
+        logId={logId}
+        items={variant.activities.map((raw) => ({
+          raw,
+          label: displayActivity(raw, getActivityRenameMap(log)),
+        }))}
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-lg border p-4">

@@ -16,21 +16,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useDashboardFilter } from "@/components/dashboards/dashboard-filter";
 import {
-  GRANULARITY,
   type CanvasSettings,
   type CardChrome,
   type FilterPreset,
-  type Granularity,
 } from "@/lib/dashboard-queries";
 
 const NONE = "__none__";
@@ -108,32 +99,10 @@ export function DashboardSettingsDialog({
         </DialogHeader>
 
         <div className="divide-y divide-border">
-          {/* Grid granularity */}
-          <Section
-            title="Grid snapping"
-            description="How precisely cards snap when you move or resize them."
-          >
-            <Select
-              value={settings.granularity}
-              onValueChange={(v) => onChange({ ...settings, granularity: v as Granularity })}
-            >
-              <SelectTrigger className="h-9 w-full text-sm" aria-label="Canvas grid granularity">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(GRANULARITY) as Granularity[]).map((g) => (
-                  <SelectItem key={g} value={g}>
-                    <span className="flex items-baseline gap-2">
-                      <span>{GRANULARITY[g].label}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {GRANULARITY[g].description}
-                      </span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Section>
+          {/* The grid-snapping picker used to live here. It is gone: the board
+              is one fixed 12-column grid, because a per-board column count made
+              every widget's declared minimum size mean something different on
+              every board. */}
 
           {/* Card appearance */}
           <Section title="Card appearance" description="Applies to every card on this board.">

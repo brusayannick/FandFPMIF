@@ -79,18 +79,24 @@ frontend:
       title: Conformance score
       description: Fitness, precision and conforming-trace share of the latest run.
       icon: ShieldCheck
-      default_w: 5
+      default_w: 3
       default_h: 6
-      min_w: 4
+      min_w: 2
       min_h: 5
+      min_px_w: 260
+      min_px_h: 180
+      help:
+        what: "How closely the log matches the reference model."
+        read: "Higher fitness means fewer observed behaviours the model cannot explain. A high score with low precision means the model is permissive, not that the process is clean."
+        computed: "Alignment-based conformance over the filtered log."
     - id: top-deviations
       entry: ./widgets/TopDeviations.tsx
       title: Top deviations
       description: Activities with the most conformance deviations.
       icon: TriangleAlert
-      default_w: 6
+      default_w: 3
       default_h: 9
-      min_w: 5
+      min_w: 3
       min_h: 6
       config_schema:
         properties:
@@ -104,7 +110,12 @@ frontend:
             default: 10
             ui:
               widget: slider
-
+      min_px_w: 320
+      min_px_h: 240
+      help:
+        what: "Where reality departs from the model most often."
+        read: "Longer bars deviate more often. These are the places to look first when standardising."
+        computed: "Counted from alignment results over the filtered log."
 # Data-only outputs for the platform's generic visualization layer. Both point
 # at /results; the adapter slices the relevant part by the declared shape.
 datasets:

@@ -111,7 +111,7 @@ function UserDetail({ d }: { d: AdminUserDetail }) {
   return (
     <div className="space-y-6">
       {/* Identity */}
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-2 text-base">
             {d.label}
@@ -246,7 +246,7 @@ interface ListItem {
 
 function ListCard({ title, items, empty }: { title: string; items: ListItem[]; empty: string }) {
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle className="text-sm">
           {title} <span className="text-muted-foreground">({items.length})</span>

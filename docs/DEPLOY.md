@@ -346,6 +346,23 @@ docker compose logs -f api      # first boot installs module deps – up to ~10 
 Subsequent boots reuse the cached wheels under `data/uv-python/` and start in
 seconds.
 
+## 5a. What does *not* work out of the box
+
+`bootstrap-vm.sh` + `up -d --build` gets you the full platform: schema
+migration, realm import, all bundled modules (venvs + esbuilt panels), and JVM
+modules (the fat jar is committed, the Temurin JRE is baked into the api image
+– no JDK on the VM). The list below is everything that still needs a hand on a
+fresh VM. Nothing here is a bug; each is an opt-in or a per-deployment secret.
+
+| # | Not live yet | What to do |
+| --- | --- | --- |
+| 1 | **Neo4j sidecar** – the `graph` profile is off | `COMPOSE_PROFILES=graph` + `NEO4J_PASSWORD` (+ `NEO4J_HEAP`) in `.env`, then `$DC up -d` (§4b). Without it `actor_performance` is installed and visible but fails on run (setup screen). It declares `consumes: []`, so no precompute → **no red jobs on import**. |
+| 2 | **cv4cdd has no model** – `default_enabled: true` + `consumes: log.imported` | Every log import starts a detect job that **hard-fails without a model** (`modules/cv4cdd/module.py`, `_do_detect`). Upload a `.tar.zst` model, pin one admin-globally (Admin → Controls), or disable the module/card. |
+| 3 | **No platform admin** – the seeded `admin@flows-funds.local` carries realm roles `[user, offline_access, uma_authorization]`, not `admin` | `/admin/*` stays closed until the `admin` realm role is assigned in the Keycloak console. |
+| 4 | **University login points at placeholders** – the realm JSON ships IdP `keycloak-oidc` with `https://idp.uni-muenster.de/REPLACE/...`, and the prod overlay defaults `KEYCLOAK_IDP_HINT: keycloak-oidc` | The first login redirects into nothing. Either set `KEYCLOAK_IDP_HINT=` (empty) in `.env` to keep Keycloak's own form, or run `configure-university-idp.sh` with real credentials (§2 – **delete the imported IdP first**, Keycloak ignores `providerId` on update and the imported type is the wrong one). |
+| 5 | **MCP server** – opt-in | `MCP_ENABLED=1`, `API_BASE_URL`, `MCP_OAUTH_CLIENT_ID=mate-mcp` in `.env`, then `$DC up -d api` – `restart` keeps the old env (see the MCP section). |
+| 6 | **Keycloak admin client** – user deletion doesn't remove the Keycloak account | `configure-admin-client.sh` + the four `KEYCLOAK_ADMIN_*` env vars, else that step no-ops (all Mate-side data is still purged). |
+
 ## 6. Verify (in order – each step rules out one layer)
 
 ```bash

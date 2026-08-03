@@ -208,6 +208,7 @@ export function PerformancePanel({ logId }: { logId: string; moduleId: string })
             <Skeleton className="h-48 w-full" />
           ) : bottlenecks.data ? (
             <BottleneckTable
+              logId={logId}
               items={bottlenecks.data.items}
               selectedActivity={selectedActivity}
               onSelectActivity={setSelectedActivity}

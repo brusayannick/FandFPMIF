@@ -16,6 +16,7 @@ Two techniques feed the same output contract:
 
 from __future__ import annotations
 
+import hashlib
 import math
 from collections import defaultdict
 from typing import Any
@@ -190,13 +191,19 @@ def serialize_conformance(
 
     # ── per-variant ──────────────────────────────────────────────────────────
     per_variant: list[dict[str, Any]] = []
-    for i, (variant, cases) in enumerate(sorted(variant_cases.items(), key=lambda kv: -len(kv[1]))):
+    for variant, cases in sorted(variant_cases.items(), key=lambda kv: -len(kv[1])):
         n = len(cases)
         avg_fit = sum(c["fitness"] for c in cases) / n if n else 0.0
         total_dev = sum(c["n_deviations"] for c in cases)
         per_variant.append(
             {
-                "variant_id": f"v{i}",
+                # The platform's canonical variant id (blake2b-8 over the
+                # "→"-joined sequence, see apps/api ingest/aggregation.py) so
+                # the panel can link straight to /processes/{log}/variants/{id}.
+                # Duplicated here because worker code must stay platform-free.
+                "variant_id": hashlib.blake2b(
+                    "→".join(variant).encode("utf-8"), digest_size=8
+                ).hexdigest(),
                 "activities": list(variant),
                 "n_cases": n,
                 "avg_fitness": round(avg_fit, 4),

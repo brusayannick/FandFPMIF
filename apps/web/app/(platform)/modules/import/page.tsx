@@ -98,7 +98,7 @@ function UploadTab({ onInstalled }: { onInstalled: (jobId: string) => void }) {
   };
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardContent className="space-y-4">
         <div
           onDragOver={(e) => {

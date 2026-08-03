@@ -2,14 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import { useReducedMotion } from "framer-motion";
 import RGL, { WidthProvider, type Layout } from "react-grid-layout";
 
 import { cn } from "@/lib/cn";
+import {
+  drillLabel,
+  resolveDrillHref,
+  type DrillHandler,
+} from "@/lib/dashboards/drill";
 import { DashboardCard } from "@/components/dashboards/dashboard-card";
 import {
   configDefaults,
-  GRANULARITY,
+  GRID,
+  rowsForPx,
+  STACK_BELOW_PX,
   useCardCatalog,
   useDatasetCatalog,
   type CanvasSettings,
@@ -65,17 +73,37 @@ function findTopFit(items: DashboardItem[], w: number, h: number, cols: number):
  * unlike react-grid-layout's built-in `compactType: "vertical"`).
  */
 function reflowFree(snapshot: DashboardItem[], id: string, x: number, y: number): DashboardItem[] {
+  return reflowPinned(snapshot, new Map([[id, { x, y }]]));
+}
+
+/**
+ * The general form: pin any number of cards at given positions and let the
+ * rest yield around them.
+ *
+ * Multi-select drag needs a *set* of fixed obstacles, not one — the selected
+ * cards move together and must not push each other. Everything else (single
+ * drag, resize, keyboard nudge, the palette add-ghost) is the one-card case, so
+ * they all share this implementation and can't drift apart.
+ */
+function reflowPinned(
+  snapshot: DashboardItem[],
+  pinned: Map<string, { x: number; y: number }>,
+): DashboardItem[] {
   const result = snapshot.map((it) => ({ ...it }));
-  const dragged = result.find((it) => it.i === id);
-  if (!dragged) return result;
-  dragged.x = x;
-  dragged.y = y;
-  // The dragged card is the fixed obstacle everyone yields to. Resolve the rest
-  // in reading order, pushing each below whatever it lands on, then add it to the
-  // obstacle set so later cards cascade off it too.
-  const placed: DashboardItem[] = [dragged];
+  // The pinned cards are the fixed obstacles everyone yields to.
+  const placed: DashboardItem[] = [];
+  for (const it of result) {
+    const at = pinned.get(it.i);
+    if (!at) continue;
+    it.x = at.x;
+    it.y = at.y;
+    placed.push(it);
+  }
+  if (placed.length === 0) return result;
+  // Resolve the rest in reading order, pushing each below whatever it lands on,
+  // then add it to the obstacle set so later cards cascade off it too.
   const others = result
-    .filter((it) => it.i !== id)
+    .filter((it) => !pinned.has(it.i))
     .sort((a, b) => a.y - b.y || a.x - b.x);
   for (const it of others) {
     let guard = 0;
@@ -84,6 +112,27 @@ function reflowFree(snapshot: DashboardItem[], id: string, x: number, y: number)
     placed.push(it);
   }
   return result;
+}
+
+/** Move every card in `ids` by a grid delta, clamped to the grid, and reflow
+ * the rest around them. Backs both multi-select drag and keyboard nudge. */
+function reflowDelta(
+  snapshot: DashboardItem[],
+  ids: readonly string[],
+  dx: number,
+  dy: number,
+  cols: number,
+): DashboardItem[] {
+  const pinned = new Map<string, { x: number; y: number }>();
+  for (const id of ids) {
+    const it = snapshot.find((c) => c.i === id);
+    if (!it) continue;
+    pinned.set(id, {
+      x: Math.max(0, Math.min(cols - it.w, it.x + dx)),
+      y: Math.max(0, it.y + dy),
+    });
+  }
+  return reflowPinned(snapshot, pinned);
 }
 
 type FreeDrag = {
@@ -177,30 +226,72 @@ function buildAddItem(req: AddRequest, i: string, x: number, y: number): Dashboa
 /** Layout/child id of the live placeholder shown while adding from the palette. */
 const ADD_GHOST_ID = "__add_ghost__";
 
+/** Stable empty selection — a fresh `[]` default would change identity every
+ * render and invalidate every memo that depends on it. */
+const EMPTY_SELECTION: readonly string[] = [];
+
+/** Placement id for a newly added or duplicated card. */
+function newCardId(): string {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `card-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 /** RGL's own container height (`containerHeight()`): rows × rowHeight plus the
  * inter-row gaps plus top+bottom container padding (which defaults to margin).
  * Exported so the view can compute the fit-to-view zoom without measuring DOM. */
 export function gridPixelHeight(
   items: readonly { y: number; h: number }[],
-  g: { rowHeight: number; margin: [number, number] },
+  g: { rowHeight: number; margin: [number, number] } = GRID,
 ): number {
   const bottom = items.reduce((m, it) => Math.max(m, it.y + it.h), 0);
   return bottom * g.rowHeight + (bottom + 1) * g.margin[1];
 }
 
+/** Pixel height of a card `h` rows tall (the inter-row gaps count too). Used by
+ * stacked mode, which has no grid to lay cards out on. */
+function rowsToPx(h: number): number {
+  return h * GRID.rowHeight + (h - 1) * GRID.margin[1];
+}
+
+/** The measured content width of an element, tracked live.
+ *
+ * The canvas needs this because a widget's `min_px_w` floor can only be turned
+ * into a column count once the column width is known — and that changes with
+ * the viewport, the palette, and the inspector. */
+function useContainerWidth(ref: React.RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      if (entry) setWidth(entry.contentRect.width);
+    });
+    ro.observe(el);
+    setWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, [ref]);
+  return width;
+}
+
 /**
  * The react-grid-layout canvas. In edit mode it accepts adds from the palette
  * (via `startAddRef`), and drag/resize via the card header handle. Geometry
- * changes flow back through `onItemsChange`; the parent owns the item list. The
- * `settings.granularity` chooses the snap resolution (cols), row height, and
- * gutter – never auto-compaction, so cards stay exactly where you place them.
+ * changes flow back through `onItemsChange`; the parent owns the item list.
  *
- * Since no granularity compacts (`compactType: null`), drag is driven here
- * instead of by RGL: RGL won't let the layout prop move non-dragged cards
- * mid-drag, and its null-compaction never springs pushed cards back. So RGL's
- * own drag is disabled and a fully controlled layout is recomputed per pointer
- * move (see `reflowFree`). Palette adds are pointer-driven too (HTML5 drag-drop
- * never reaches the canvas behind the prod proxy); RGL still owns native resize.
+ * One fixed 12-column grid (`GRID`) — there is no per-board snap level. Cards
+ * never auto-compact, so they stay exactly where you place them, and a card's
+ * minimum size comes from its manifest as both grid units and absolute pixel
+ * floors (see `constraintsFor`).
+ *
+ * Drag, resize AND palette adds are all driven here rather than by RGL: RGL
+ * won't let the layout prop move non-dragged cards mid-drag, and without
+ * compaction it never springs pushed cards back. So a fully controlled layout
+ * is recomputed per pointer move (see `reflowFree`), and RGL is left as a pure
+ * positioning engine. (HTML5 drag-drop is unusable regardless — it never
+ * reaches the canvas behind the prod proxy.)
+ *
+ * Below `STACK_BELOW_PX` the grid is abandoned for a read-only single column.
  */
 export function DashboardCanvas({
   items,
@@ -209,6 +300,9 @@ export function DashboardCanvas({
   startAddRef,
   settings,
   zoom = 1,
+  selectedIds = EMPTY_SELECTION,
+  onSelectionChange,
+  historyApplying,
   onItemsChange,
 }: {
   items: DashboardItem[];
@@ -222,11 +316,22 @@ export function DashboardCanvas({
    * `scale(zoom)` layer, so every pointer delta must be divided by this to
    * land back in layout space (drag, resize, palette add). */
   zoom?: number;
-  onItemsChange: (items: DashboardItem[]) => void;
+  /** Currently selected cards. Owned by the view (the inspector is a sibling). */
+  selectedIds?: readonly string[];
+  onSelectionChange?: (ids: string[]) => void;
+  /** True while an undo/redo is being applied — see `handleLayoutChange`. */
+  historyApplying?: () => boolean;
+  /** Geometry changes. The second argument labels the edit for the undo stack. */
+  onItemsChange: (items: DashboardItem[], label?: string) => void;
 }) {
-  const grid = GRANULARITY[settings.granularity] ?? GRANULARITY.medium;
-  const cols = grid.cols;
-  const freeReflow = editing && grid.compactType === null;
+  const grid = GRID;
+  const cols = GRID.cols;
+  // Below the stack threshold the board is a single column and read-only, so
+  // no gesture may start (see `stacked` below).
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const containerWidth = useContainerWidth(wrapRef);
+  const stacked = containerWidth > 0 && containerWidth < STACK_BELOW_PX;
+  const freeReflow = editing && !stacked;
   // Gestures read the zoom through a ref so a mid-gesture zoom change (ctrl+
   // wheel while dragging) can't leave a stale factor in the closures.
   const zoomRef = useRef(zoom);
@@ -282,6 +387,31 @@ export function DashboardCanvas({
   // A placed item only stores its identity, so (like `schemaFor`) we resolve the
   // description from the catalog: widget cards by `(module_id, widget_id)`, viz
   // cards by their dataset ref `(module_id, dataset_id)`.
+  // Structured help + drill target, resolved from the catalog the same way as
+  // the description (a placed item only stores its identity). Drill applies to
+  // widget cards only — a viz card renders a platform visualization of a
+  // dataset, so there's no module view behind it to open.
+  const cardMetaFor = useMemo(() => {
+    const map = new Map<string, CatalogCard>();
+    for (const c of catalog ?? []) map.set(`${c.module_id}:${c.widget_id}`, c);
+    return (it: DashboardItem) =>
+      it.kind === "viz" ? undefined : map.get(`${it.module_id}:${it.widget_id}`);
+  }, [catalog]);
+  // The header's "open in module" href. Uses the same resolver as `onDrill`,
+  // so the button and a click inside the widget can never point at different
+  // places. `null` ⇒ nowhere to go (no bound log, or drilling disabled), and
+  // the header renders a disabled affordance rather than a dead link.
+  const drillHrefFor = useCallback(
+    (it: DashboardItem): string | null => {
+      if (it.kind === "viz" || !it.module_id) return null;
+      return resolveDrillHref({
+        moduleId: it.module_id,
+        logId,
+        manifestDrill: cardMetaFor(it)?.drill,
+      });
+    },
+    [logId, cardMetaFor],
+  );
   const { data: datasetCatalog } = useDatasetCatalog();
   const descriptionFor = useMemo(() => {
     const widgets = new Map<string, string | null>();
@@ -305,30 +435,54 @@ export function DashboardCanvas({
   // Every field MUST resolve to a positive number — RGL treats a missing min as
   // `1` (GridItem default) — so coerce per-field to the historical floor when the
   // catalog hasn't loaded, predates the field, or no longer lists the card.
+  //
+  // A widget declares its minimum twice: in grid units (`min_w`/`min_h`) and as
+  // absolute pixels (`min_px_w`/`min_px_h`). The pixel floors are the ones that
+  // actually hold a card above its usable size — a grid unit is only a real
+  // size once the container width is known, which is why this memo depends on
+  // the measured width. We take whichever floor is larger.
   const constraintsFor = useMemo(() => {
     const FALLBACK = { resizable: true, minW: 2, minH: 3, fixedW: 6, fixedH: 8 };
     const num = (v: unknown, fallback: number) =>
       typeof v === "number" && Number.isFinite(v) && v > 0 ? v : fallback;
+    // Width of one column, mirroring RGL's own calcGridColWidth: the container
+    // pads by `margin` on both sides and gaps by `margin` between columns.
+    const [marginX] = GRID.margin;
+    const colWidth =
+      containerWidth > 0 ? (containerWidth - marginX * (cols + 1)) / cols : 0;
+    /** Absolute pixel width -> the smallest column count that covers it. */
+    const colsForPx = (px: number) =>
+      colWidth > 0 && px > 0 ? Math.ceil((px + marginX) / (colWidth + marginX)) : 0;
     const map = new Map<string, typeof FALLBACK>();
     for (const c of catalog ?? [])
       map.set(`${c.module_id}:${c.widget_id}`, {
         resizable: c.resizable !== false,
-        minW: num(c.min_w, FALLBACK.minW),
-        minH: num(c.min_h, FALLBACK.minH),
+        minW: Math.min(
+          cols,
+          Math.max(num(c.min_w, FALLBACK.minW), colsForPx(c.min_px_w ?? 0)),
+        ),
+        minH: Math.max(num(c.min_h, FALLBACK.minH), rowsForPx(c.min_px_h ?? 0)),
         fixedW: num(c.default_w, FALLBACK.fixedW),
         fixedH: num(c.default_h, FALLBACK.fixedH),
       });
     return (it: DashboardItem) => {
-      // viz cards are always resizable; their floor comes from the viz registry.
+      // viz cards are always resizable; their floor comes from the viz registry
+      // (grid units only — the registry has no pixel floors to fold in).
       if (it.kind === "viz") {
         const d = it.viz_id ? vizRegistry[it.viz_id]?.defaults : undefined;
         return d
-          ? { resizable: true, minW: d.minW, minH: d.minH, fixedW: d.w, fixedH: d.h }
+          ? {
+              resizable: true,
+              minW: Math.min(cols, d.minW),
+              minH: d.minH,
+              fixedW: d.w,
+              fixedH: d.h,
+            }
           : FALLBACK;
       }
       return map.get(`${it.module_id}:${it.widget_id}`) ?? FALLBACK;
     };
-  }, [catalog]);
+  }, [catalog, cols, containerWidth]);
 
   // Live free-mode drag state. `liveItems` overrides the rendered layout while a
   // drag is in flight; `draggingId` marks the card whose transition is killed so
@@ -351,7 +505,6 @@ export function DashboardCanvas({
   const dragRef = useRef<FreeDrag | null>(null);
   const resizeRef = useRef<FreeResize | null>(null);
   const liveRef = useRef<DashboardItem[] | null>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
   // Detach in-flight drag/add listeners (and pending lifecycle timers) on unmount.
   const teardownRef = useRef<() => void>(() => {});
   const addTeardownRef = useRef<() => void>(() => {});
@@ -435,15 +588,22 @@ export function DashboardCanvas({
   itemsRef.current = items;
   const onItemsChangeRef = useRef(onItemsChange);
   onItemsChangeRef.current = onItemsChange;
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
   const updateItem = useCallback(
     (id: string, patch: CardPatch) =>
       onItemsChangeRef.current(
         itemsRef.current.map((it) => (it.i === id ? { ...it, ...patch } : it)),
+        "config",
       ),
     [],
   );
   const removeItem = useCallback(
-    (id: string) => onItemsChangeRef.current(itemsRef.current.filter((it) => it.i !== id)),
+    (id: string) =>
+      onItemsChangeRef.current(itemsRef.current.filter((it) => it.i !== id), "remove"),
     [],
   );
   // Play the card's exit animation, then drop it from `items` a tick later so the
@@ -473,11 +633,59 @@ export function DashboardCanvas({
     return m;
   }, [items, updateItem, requestRemove]);
 
+  // Drill handlers, cached per card id and NEVER rebuilt.
+  //
+  // This one has to be identity-stable in a way the handlers above don't:
+  // `onDrill` is passed into the module's own widget component, so a fresh
+  // function on every render would re-render every widget body on every drag
+  // commit — remounting charts mid-drag. The changing values (bound log, the
+  // catalog entry) are read through refs at call time instead of captured.
+  const router = useRouter();
+  const logIdRef = useRef(logId);
+  logIdRef.current = logId;
+  const cardMetaRef = useRef(cardMetaFor);
+  cardMetaRef.current = cardMetaFor;
+  const routerRef = useRef(router);
+  routerRef.current = router;
+  const drillCache = useRef(new Map<string, DrillHandler>());
+  const drillFor = useCallback((id: string): DrillHandler => {
+    const cached = drillCache.current.get(id);
+    if (cached) return cached;
+    const handler: DrillHandler = (target) => {
+      const it = itemsRef.current.find((c) => c.i === id);
+      if (!it || !it.module_id) return;
+      const href = resolveDrillHref(
+        {
+          moduleId: it.module_id,
+          logId: logIdRef.current,
+          manifestDrill: cardMetaRef.current(it)?.drill,
+        },
+        target,
+      );
+      if (href) routerRef.current.push(href);
+    };
+    drillCache.current.set(id, handler);
+    return handler;
+  }, []);
+  // Drop handlers for removed cards so the cache can't grow across a long
+  // editing session.
+  useEffect(() => {
+    const live = new Set(items.map((it) => it.i));
+    for (const id of drillCache.current.keys()) {
+      if (!live.has(id)) drillCache.current.delete(id);
+    }
+  }, [items]);
+
   const handleLayoutChange = (next: Layout[]) => {
     // RGL fires this on mount, on resize, and on its own (non-free) drags. While
     // a free drag/resize or palette add is in flight the layout prop is ours (it
     // carries the ghost/reflow), so ignore the echo or we'd persist the preview.
-    if (!editing || dragRef.current || resizeRef.current || addReq) return;
+    // `historyApplying` is the load-bearing one. An undo swaps `items`, the
+    // layout re-derives, and RGL echoes it straight back here — recorded as a
+    // fresh edit, that would push the state you just undid back onto the stack
+    // and make undo unreachable.
+    if (!editing || stacked || dragRef.current || resizeRef.current || addReq) return;
+    if (historyApplying?.()) return;
     const byId = new Map(next.map((l) => [l.i, l]));
     const merged = items.map((it) => {
       const l = byId.get(it.i);
@@ -491,7 +699,7 @@ export function DashboardCanvas({
         m.w !== items[idx].w ||
         m.h !== items[idx].h,
     );
-    if (changed) onItemsChange(merged);
+    if (changed) onItemsChange(merged, "layout");
   };
 
   // Free-mode pointer gestures: move (drag handle) and resize (corner handle).
@@ -505,9 +713,28 @@ export function DashboardCanvas({
     const target = e.target as HTMLElement;
     const cardEl = target.closest("[data-grid-id]") as HTMLElement | null;
     const id = cardEl?.dataset.gridId;
-    if (!id || id === ADD_GHOST_ID) return;
+
+    // Empty canvas: clear the selection. Doing this on pointerdown (not click)
+    // keeps it consistent with how selection is made.
+    if (!id) {
+      if (selectedIdsRef.current.length > 0) onSelectionChange?.([]);
+      return;
+    }
+    if (id === ADD_GHOST_ID) return;
     const it = itemsRef.current.find((i) => i.i === id);
     if (!it) return;
+
+    // Select before any gesture starts, so a drag always moves what the user
+    // sees highlighted. Shift/meta toggles; a plain press on an already-
+    // selected card keeps the whole selection (so you can drag several).
+    const current = selectedIdsRef.current;
+    if (e.shiftKey || e.metaKey || e.ctrlKey) {
+      onSelectionChange?.(
+        current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+      );
+    } else if (!current.includes(id)) {
+      onSelectionChange?.([id]);
+    }
     const gridEl = wrapRef.current?.querySelector(".react-grid-layout") as HTMLElement | null;
     const width = gridEl?.clientWidth ?? wrapRef.current?.clientWidth ?? 0;
     if (!width) return;
@@ -575,7 +802,7 @@ export function DashboardCanvas({
             const o = itemsRef.current.find((i) => i.i === m.i);
             return !o || o.x !== m.x || o.y !== m.y || o.w !== m.w || o.h !== m.h;
           });
-          if (changed) onItemsChangeRef.current(final);
+          if (changed) onItemsChangeRef.current(final, "resize");
         }
       };
       const up = () => end(true);
@@ -612,6 +839,12 @@ export function DashboardCanvas({
     setLiveItems(itemsRef.current);
     e.preventDefault();
 
+    // Everything selected moves together. Captured at gesture start so the
+    // group can't change mid-drag.
+    const groupIds = selectedIdsRef.current.includes(id)
+      ? selectedIdsRef.current.filter((gid) => itemsRef.current.some((c) => c.i === gid))
+      : [id];
+
     const move = (ev: PointerEvent) => {
       const d = dragRef.current;
       if (!d) return;
@@ -621,7 +854,12 @@ export function DashboardCanvas({
       const top = d.startTop + (ev.clientY - d.pointerY) / z;
       const x = Math.max(0, Math.min(d.cols - d.w, Math.round((left - d.padX) / d.stepX)));
       const y = Math.max(0, Math.round((top - d.padY) / d.stepY));
-      const nextLayout = reflowFree(d.snapshot, d.id, x, y);
+      // Drive the group by the DELTA of the card actually under the cursor, so
+      // the others keep their relative offsets instead of stacking on it.
+      const nextLayout =
+        groupIds.length > 1
+          ? reflowDelta(d.snapshot, groupIds, x - it.x, y - it.y, d.cols)
+          : reflowFree(d.snapshot, d.id, x, y);
       liveRef.current = nextLayout;
       setLiveItems(nextLayout);
     };
@@ -640,7 +878,7 @@ export function DashboardCanvas({
           const o = itemsRef.current.find((i) => i.i === m.i);
           return !o || o.x !== m.x || o.y !== m.y;
         });
-        if (changed) onItemsChangeRef.current(final);
+        if (changed) onItemsChangeRef.current(final, "move");
       }
     };
     const up = () => end(true);
@@ -659,12 +897,11 @@ export function DashboardCanvas({
   // preview), then hand the new list to the parent. Refs so it's stable for the
   // gesture effect below.
   const commitAdd = useCallback((req: AddRequest, x: number, y: number) => {
-    const id =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `card-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const newItem = buildAddItem(req, id, x, y);
-    onItemsChangeRef.current(reflowFree([...itemsRef.current, newItem], newItem.i, x, y));
+    const newItem = buildAddItem(req, newCardId(), x, y);
+    onItemsChangeRef.current(
+      reflowFree([...itemsRef.current, newItem], newItem.i, x, y),
+      "add",
+    );
     // Pop the new card in; clear the flag after the animation (no-op under
     // reduced motion, where the CSS guard strips the animation duration).
     setRecentlyAddedId(newItem.i);
@@ -776,6 +1013,98 @@ export function DashboardCanvas({
     };
   }, [startAdd, startAddRef]);
 
+  // Keyboard editing for the current selection. Pointer-only editing meant
+  // nudging a card one cell required a steady hand; these are the operations
+  // that are genuinely faster from the keyboard.
+  useEffect(() => {
+    if (!freeReflow) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Never hijack typing. Covers inputs, textareas, contenteditable, and
+      // anything inside a Radix popover (the card settings form lives there).
+      const el = document.activeElement as HTMLElement | null;
+      if (
+        el &&
+        (el.isContentEditable ||
+          ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) ||
+          el.closest("[data-radix-popper-content-wrapper]"))
+      ) {
+        return;
+      }
+
+      const ids = selectedIdsRef.current;
+      const mod = e.metaKey || e.ctrlKey;
+
+      if (e.key === "Escape") {
+        if (ids.length) onSelectionChangeRef.current?.([]);
+        return;
+      }
+      // Select-all is only meaningful while editing.
+      if (mod && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        onSelectionChangeRef.current?.(itemsRef.current.map((it) => it.i));
+        return;
+      }
+      if (!ids.length) return;
+
+      if (mod && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        const copies: DashboardItem[] = [];
+        for (const id of ids) {
+          const src = itemsRef.current.find((c) => c.i === id);
+          if (!src) continue;
+          copies.push({
+            ...src,
+            i: newCardId(),
+            y: src.y + src.h,
+            // Deep-clone so editing the copy's options can't mutate the
+            // original's (both would otherwise share one object).
+            config: structuredClone(src.config),
+            mapping: src.mapping ? structuredClone(src.mapping) : src.mapping,
+          });
+        }
+        if (!copies.length) return;
+        const next = [...itemsRef.current, ...copies];
+        onItemsChangeRef.current(
+          reflowPinned(next, new Map(copies.map((c) => [c.i, { x: c.x, y: c.y }]))),
+          "duplicate",
+        );
+        onSelectionChangeRef.current?.(copies.map((c) => c.i));
+        return;
+      }
+
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        const remove = new Set(ids);
+        onItemsChangeRef.current(
+          itemsRef.current.filter((it) => !remove.has(it.i)),
+          "remove",
+        );
+        onSelectionChangeRef.current?.([]);
+        return;
+      }
+
+      const NUDGE: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      const delta = NUDGE[e.key];
+      if (!delta) return;
+      e.preventDefault();
+      // Shift jumps in fours — a whole card-width step on a 12-column grid.
+      const scale = e.shiftKey ? 4 : 1;
+      onItemsChangeRef.current(
+        reflowDelta(itemsRef.current, ids, delta[0] * scale, delta[1] * scale, cols),
+        // One label so a burst of nudges coalesces into a single undo step
+        // instead of filling the stack one cell at a time.
+        "nudge",
+      );
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [freeReflow, cols]);
+
   // The zoom layer scales the grid down/up around the top-left corner. Width is
   // widened by 1/zoom so the scaled result still fills the viewport exactly
   // (WidthProvider remeasures via ResizeObserver); the wrapper gets the scaled
@@ -783,6 +1112,45 @@ export function DashboardCanvas({
   // transform never shrinks the layout box). min-h-full keeps the empty-board
   // area a full-height drop target either way.
   const gridH = gridPixelHeight(displayItems, grid);
+
+  // Narrow viewport: 12 columns of ~50px can't hold a real card, so drop the
+  // grid entirely and stack in reading order at each card's natural height
+  // (never below its pixel floor). Read-only — `freeReflow` is already false
+  // when stacked, so no gesture can start and geometry can't be edited into a
+  // state the user can't see.
+  if (stacked) {
+    const ordered = [...items].sort((a, b) => a.y - b.y || a.x - b.x);
+    return (
+      <div ref={wrapRef} className="flex min-h-full flex-col gap-2">
+        {ordered.map((it) => {
+          const c = constraintsFor(it);
+          return (
+            <div
+              key={it.i}
+              data-grid-id={it.i}
+              style={{ height: rowsToPx(Math.max(it.h, c.minH)) }}
+            >
+              <DashboardCard
+                item={it}
+                logId={logId}
+                editing={false}
+                schema={schemaFor(it)}
+                description={descriptionFor(it)}
+                help={cardMetaFor(it)?.help}
+                drillHref={drillHrefFor(it)}
+                drillLabel={drillLabel(cardMetaFor(it)?.drill)}
+                onDrill={drillFor(it.i)}
+                chrome={settings.chrome}
+                onUpdate={() => {}}
+                onRemove={() => {}}
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div
       ref={wrapRef}
@@ -805,11 +1173,18 @@ export function DashboardCanvas({
           cols={cols}
           rowHeight={grid.rowHeight}
           margin={grid.margin}
-          isDraggable={editing && grid.compactType !== null}
-          isResizable={editing && grid.compactType !== null}
+          // RGL is a positioning engine here, nothing more. Its own drag and
+          // resize stay off because they can't express this board's model: RGL
+          // refuses to move non-dragged items from the `layout` prop mid-drag,
+          // and with no compaction it never springs pushed cards back. Both
+          // gestures are driven by `onPointerDown` above via `reflowFree`,
+          // which also already handles zoom, the palette add-ghost and touch.
+          isDraggable={false}
+          isResizable={false}
           draggableHandle=".dashboard-drag-handle"
           onLayoutChange={handleLayoutChange}
-          compactType={grid.compactType}
+          // Never auto-compact: cards stay exactly where they are placed.
+          compactType={null}
           transformScale={zoom}
         >
         {items.map((it) => {
@@ -818,6 +1193,7 @@ export function DashboardCanvas({
             <div
               key={it.i}
               data-grid-id={it.i}
+              data-selected={selectedSet.has(it.i) || undefined}
               className={cn(
                 "group",
                 draggingId === it.i && "rgl-free-dragging",
@@ -825,13 +1201,17 @@ export function DashboardCanvas({
               )}
             >
               {/* Inner wrapper carries the add/remove animation (transform/opacity)
-                  so it never fights RGL's `transform` on the grid-item above. */}
+                  so it never fights RGL's `transform` on the grid-item above.
+                  `fill-mode-forwards` on the exit is mandatory: the card outlives
+                  its animation by a tick, and without it the faded-out state is
+                  discarded on animation end and the card flashes back at full
+                  opacity for a frame before it's dropped. */}
               <div
                 className={cn(
                   "h-full",
                   recentlyAddedId === it.i && "animate-in fade-in-0 zoom-in-95 duration-200",
                   removingIds.has(it.i) &&
-                    "animate-out fade-out-0 zoom-out-95 pointer-events-none duration-150",
+                    "animate-out fade-out-0 zoom-out-95 fill-mode-forwards pointer-events-none duration-150",
                 )}
               >
                 <DashboardCard
@@ -840,6 +1220,10 @@ export function DashboardCanvas({
                   editing={editing}
                   schema={schemaFor(it)}
                   description={descriptionFor(it)}
+                  help={cardMetaFor(it)?.help}
+                  drillHref={drillHrefFor(it)}
+                  drillLabel={drillLabel(cardMetaFor(it)?.drill)}
+                  onDrill={drillFor(it.i)}
                   chrome={settings.chrome}
                   onUpdate={h?.onUpdate ?? (() => {})}
                   onRemove={h?.onRemove ?? (() => {})}

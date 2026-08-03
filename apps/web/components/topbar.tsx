@@ -52,6 +52,14 @@ function deriveCrumbs(
 
     const isLast = i === parts.length - 1;
 
+    // The intermediate "variants" segment (…/processes/{id}/variants/{variantId})
+    // has no page of its own — send its crumb (and parent-mode back) to the
+    // process page's Variants tab instead of a 404.
+    if (parts[i] === "variants" && i > 0 && !isLast) {
+      out.push({ href: `/processes/${parts[i - 1]}?tab=variants`, label: "Variants", current: false });
+      continue;
+    }
+
     // Use the resource's name (not its UUID/slug) when this segment is an id
     // that follows a known collection.
     let label = parts[i] === "modules" ? "Module Settings" : prettify(parts[i]);
@@ -63,6 +71,10 @@ function deriveCrumbs(
       label = moduleNames.get(parts[i])!;
     } else if (parts[i - 1] === "variants") {
       label = "Variant";
+    } else if (parts[i] === "activities" && i > 1) {
+      // The activity detail route (…/processes/{id}/activities?name=…) — the
+      // segment is plural but the page shows one activity.
+      label = "Activity";
     }
 
     out.push({ href: acc, label, current: isLast });

@@ -91,21 +91,28 @@ export function JobChildRow({ job }: { job: LiveJob }) {
  * (its upstream hasn't finished, so the platform hasn't submitted it) or
  * `skipped` (an upstream failed, so its `<upstream>.completed` trigger will never
  * fire). Mirrors `JobChildRow`'s layout so the checklist stays aligned.
+ *
+ * `name`/`waitingOnNames` are display names resolved by the caller (one
+ * `useModuleNames()` per group, not per row). They fall back to the raw id, so a
+ * row is never blank; the id stays reachable as the row's `title`, and the
+ * drawer's id-based filter keeps working.
  */
 export function PrecomputeStepRow({
   moduleId,
+  name,
   state,
-  waitingOn,
+  waitingOnNames,
 }: {
   moduleId: string;
+  name: string;
   state: "waiting" | "skipped";
-  waitingOn: string[];
+  waitingOnNames: string[];
 }) {
   const label =
     state === "skipped"
       ? "Skipped"
-      : waitingOn.length > 0
-        ? `Waiting on ${waitingOn.join(", ")}`
+      : waitingOnNames.length > 0
+        ? `Waiting on ${waitingOnNames.join(", ")}`
         : "Waiting";
 
   return (
@@ -118,6 +125,7 @@ export function PrecomputeStepRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <div
+            title={moduleId}
             className={cn(
               "truncate text-xs font-medium leading-tight",
               state === "skipped"
@@ -125,7 +133,7 @@ export function PrecomputeStepRow({
                 : "text-muted-foreground",
             )}
           >
-            {moduleId}
+            {name}
           </div>
           <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
             {label}

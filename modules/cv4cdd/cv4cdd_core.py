@@ -56,12 +56,20 @@ def log_to_windowed_dfg_count(
     act_idx = {a: i for i, a in enumerate(activities)}
     n_acts = len(activities)
 
-    # Sort events by timestamp to get traces in chronological order,
-    # mirroring pm4py's TIMESTAMP_SORT behaviour in the reference repo.
-    # Must use mergesort (stable) - quicksort (pandas default) breaks ties
-    # arbitrarily, producing a different trace order from the reference for
-    # the ~17 traces that all start at 2017-01-01 00:00:00.
-    df_ts = df.sort_values("timestamp", kind="mergesort").reset_index(drop=True)
+    # Trace order IS the x-axis of the similarity image: WINSIM cuts windows of
+    # equal trace count, so windowing a log in the wrong trace order produces a
+    # meaningless image. Sorting the events by timestamp and taking the case
+    # column in first-appearance order reproduces pm4py's TIMESTAMP_SORT (sort
+    # events per trace, then traces by first event) used by the reference repo.
+    #
+    # Repeated here even though `_load_sorted_df` already sorts: this function is
+    # the public encoding entry point and must never depend on how the caller
+    # happened to order its rows. `(timestamp, case_id)` with a stable mergesort
+    # makes the result a pure function of the data - a plain timestamp sort would
+    # inherit the incoming row order for traces sharing a start timestamp (common
+    # when a log carries a placeholder date), and `events.parquet` arrives sorted
+    # by `(case_id, timestamp)`, whose raw row order is alphabetical.
+    df_ts = df.sort_values(["timestamp", "case_id"], kind="mergesort").reset_index(drop=True)
     unique_traces = list(pd.unique(df_ts["case_id"]))
 
     window_size = max(1, len(unique_traces) // n_windows)

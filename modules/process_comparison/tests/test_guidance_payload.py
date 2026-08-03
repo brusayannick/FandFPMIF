@@ -75,7 +75,7 @@ class _Ctx:
         self.module_id = "process_comparison"
         self.user_id = "user-1"
 
-    async def open_event_log(self, log_id: str) -> Any:
+    async def open_event_log(self, log_id: str, filters: list[dict[str, Any]] | None = None) -> Any:
         raise AssertionError("guidance_payload tried to open another event log")
 
 

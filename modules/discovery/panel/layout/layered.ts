@@ -38,6 +38,52 @@ export interface LayeredOptions {
    * a dominant-path spine. Return `undefined` for edges without overrides.
    */
   edgeOptions?: (edge: Edge) => ElkOptions | undefined;
+  /**
+   * Per-node size; wins over `nodeSizes[node.type]` and `defaultSize`. Needed
+   * when the rendered width depends on the data (a label-sized box), because a
+   * size ELK didn't reserve is space it routes edges straight through.
+   */
+  nodeSize?: (node: Node) => NodeSize | undefined;
+  /**
+   * Stamp the size ELK was given onto `node.style.width/height`, so the DOM box
+   * cannot disagree with the layout. Node components must then size themselves
+   * `h-full w-full` – otherwise `measured.*` drifts from what was reserved and
+   * every routed edge falls back to a plain bezier.
+   */
+  pinNodeSize?: boolean;
+  /**
+   * `elk.layered.mergeEdges`: edges out of one node share a trunk and branch
+   * late, instead of each claiming its own point on the face.
+   */
+  mergeEdges?: boolean;
+}
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/**
+ * ELK's route for one edge, in the form an edge component can draw.
+ *
+ * `points` are absolute layout coordinates (same space as `child.x/child.y`);
+ * the endpoint offsets let a renderer re-anchor them to the LIVE node rect, and
+ * `expected` carries the layout-time node top-lefts so `hasDrifted` can tell a
+ * stale route from a current one.
+ *
+ * NOTE: `bendPoints` only mean "polyline corners" under `ORTHOGONAL` routing.
+ * Under `SPLINES` they are cubic control points (two per segment) and under
+ * `POLYLINE` none are emitted at all, so a consumer that treats this as a
+ * polyline must ask for `ORTHOGONAL`.
+ */
+export interface ElkRoute {
+  points: Point[];
+  /** First point relative to the source node's top-left. */
+  sourceOffset: Point;
+  /** Last point relative to the target node's top-left. */
+  targetOffset: Point;
+  /** Node top-lefts at layout time – matches `edge-common.ExpectedRects`. */
+  expected: { sx: number; sy: number; tx: number; ty: number };
 }
 
 const elk = new ELK();
@@ -130,8 +176,8 @@ export async function elkLayout<TNodeData extends Record<string, unknown>, TEdge
     "elk.spacing.nodeNode": String(opts.nodeNode ?? 40),
     "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
     "elk.layered.feedbackEdges": "true",
-    "elk.portConstraints": "FIXED_SIDE",
     "elk.edgeRouting": opts.edgeRouting ?? "ORTHOGONAL",
+    ...(opts.mergeEdges ? { "elk.layered.mergeEdges": "true" } : {}),
     ...crossingMin,
     ...edgeSpacing,
     ...celonisOpts,
@@ -146,8 +192,15 @@ export async function elkLayout<TNodeData extends Record<string, unknown>, TEdge
     ? [...nodes].sort((a, b) => opts.nodeOrderHint!(a.id) - opts.nodeOrderHint!(b.id))
     : nodes;
 
+  // No `ports` are declared: ELK layered synthesises one port per edge endpoint
+  // on the flow-correct side and spreads them along the face itself, and
+  // declaring them explicitly yields byte-identical output. (`elk.portConstraints`
+  // is a node-target option that does not propagate from the root graph, so
+  // setting it here never did anything either.)
+  const sizeById = new Map<string, NodeSize>();
   const elkChildren: ElkNode[] = orderedNodes.map((node) => {
-    const size = (node.type && opts.nodeSizes?.[node.type]) || defaultSize;
+    const size = opts.nodeSize?.(node) ?? ((node.type && opts.nodeSizes?.[node.type]) || defaultSize);
+    sizeById.set(node.id, size);
     return {
       id: node.id,
       width: size.width,
@@ -180,13 +233,14 @@ export async function elkLayout<TNodeData extends Record<string, unknown>, TEdge
     }
   }
 
-  // Capture ELK's edge sections so a custom xyflow edge component can render
-  // through the bend points – that's how spline routing actually looks
-  // Celonis-clean (xyflow's built-in bezier ignores ELK's intended path).
-  const sectionsByEdge = new Map<string, { x: number; y: number }[]>();
+  // Capture ELK's edge sections. ELK routes every edge into its own channel
+  // (`elk.spacing.edgeEdge` etc. above); throwing that away and letting xyflow's
+  // built-in `smoothstep`/`bezier` re-invent a path between two centred handles
+  // is what manufactures overlapping edges. `ElkEdge` draws these instead.
+  const sectionsByEdge = new Map<string, Point[]>();
   for (const re of result.edges ?? []) {
     if (!re.id || !re.sections || re.sections.length === 0) continue;
-    const points: { x: number; y: number }[] = [];
+    const points: Point[] = [];
     for (const s of re.sections) {
       points.push({ x: s.startPoint.x, y: s.startPoint.y });
       if (s.bendPoints) {
@@ -200,20 +254,34 @@ export async function elkLayout<TNodeData extends Record<string, unknown>, TEdge
   const handles = DIRECTION_HANDLES[direction];
   const positionedNodes = nodes.map((node) => {
     const pos = positions.get(node.id);
+    const size = sizeById.get(node.id);
     return {
       ...node,
       position: pos ?? node.position ?? { x: 0, y: 0 },
       sourcePosition: handles.source,
       targetPosition: handles.target,
+      ...(opts.pinNodeSize && size
+        ? { style: { ...(node.style ?? {}), width: size.width, height: size.height } }
+        : {}),
     };
   });
 
   const positionedEdges = edges.map((edge) => {
     const points = sectionsByEdge.get(edge.id);
-    if (!points) return edge;
+    const srcPos = positions.get(edge.source);
+    const tgtPos = positions.get(edge.target);
+    if (!points || points.length < 2 || !srcPos || !tgtPos) return edge;
+    const first = points[0]!;
+    const last = points[points.length - 1]!;
+    const route: ElkRoute = {
+      points,
+      sourceOffset: { x: first.x - srcPos.x, y: first.y - srcPos.y },
+      targetOffset: { x: last.x - tgtPos.x, y: last.y - tgtPos.y },
+      expected: { sx: srcPos.x, sy: srcPos.y, tx: tgtPos.x, ty: tgtPos.y },
+    };
     return {
       ...edge,
-      data: { ...(edge.data ?? {}), elkPoints: points },
+      data: { ...(edge.data ?? {}), elkRoute: route },
     } as unknown as Edge<TEdgeData>;
   });
 

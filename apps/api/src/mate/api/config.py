@@ -348,8 +348,22 @@ class Settings(BaseSettings):
         """
         return self.data_dir / "uploaded_modules"
 
+    @property
+    def staging_dir(self) -> Path:
+        """Root for uploads staged by the import wizard but not yet confirmed.
+
+        The wizard uploads once, probes the staged file for its columns, and
+        only creates the log once the user confirms the mapping - so an
+        abandoned wizard leaves bytes here. Never user-visible; swept by TTL
+        (``_staging_sweep`` in ``main.py``).
+        """
+        return self.data_dir / "staging"
+
     def event_logs_dir_for(self, user_id: str) -> Path:
         return self.users_dir / user_id / "event_logs"
+
+    def staging_dir_for(self, user_id: str) -> Path:
+        return self.staging_dir / user_id
 
     def module_results_dir_for(self, user_id: str) -> Path:
         return self.users_dir / user_id / "module_results"
@@ -358,6 +372,7 @@ class Settings(BaseSettings):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.users_dir.mkdir(parents=True, exist_ok=True)
         self.uploaded_modules_dir.mkdir(parents=True, exist_ok=True)
+        self.staging_dir.mkdir(parents=True, exist_ok=True)
 
     def ensure_user_dirs(self, user_id: str) -> None:
         self.event_logs_dir_for(user_id).mkdir(parents=True, exist_ok=True)

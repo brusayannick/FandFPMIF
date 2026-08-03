@@ -40,6 +40,9 @@ from mate.api.modules.event_log_access import EventLogAccess, file_identity
 from mate.api.modules.object_centric_log_access import ObjectCentricLogAccess
 from mate.api.schemas.common import utc_isoformat
 from mate.api.schemas.event_log_data import (
+    ActivityCase,
+    ActivityCasesPage,
+    ActivityDetail,
     AttributeBreakdown,
     AttributeBreakdownEntry,
     ColumnSpec,
@@ -525,6 +528,165 @@ async def variant_cases_page(
                 case_end=r[2],
                 case_duration_seconds=float(r[3]) if r[3] is not None else None,
                 event_count=int(r[4]),
+            )
+            for r in rows
+        ],
+        total=int(total),
+        offset=offset,
+        limit=limit,
+    )
+
+
+# ── activity detail ──────────────────────────────────────────────────────────
+
+
+async def activity_detail(log_row: EventLog, user_id: str, activity: str) -> ActivityDetail:
+    """Frequency, case coverage, start/end role + containing variants for one activity."""
+    total_cases = int(log_row.cases_count or 0)
+
+    # Containing variants come from the cached variant table (default order is
+    # already case_count desc, so rank is positional). Membership is exact -
+    # the variants listing's `activity_contains` is a substring match, this
+    # must not treat "ship" as contained in "ship extra".
+    entries = await variant_table(log_row.id, user_id, log_row.active_filter)
+    variant_count = 0
+    top_variants: list[VariantRow] = []
+    for i, e in enumerate(entries, start=1):
+        activities = e.activities_str.split("→") if e.activities_str else []
+        if activity not in activities:
+            continue
+        variant_count += 1
+        if len(top_variants) < 10:
+            top_variants.append(
+                VariantRow(
+                    rank=i,
+                    variant_id=e.variant_id,
+                    activities=activities,
+                    case_count=e.case_count,
+                    case_pct=(float(e.case_count) / total_cases) if total_cases else 0.0,
+                    avg_duration_seconds=e.avg_duration_seconds,
+                    median_duration_seconds=e.median_duration_seconds,
+                    first_seen=e.first_seen,
+                    last_seen=e.last_seen,
+                )
+            )
+
+    async with EventLogAccess(log_row.id, user_id, log_row.active_filter) as access:
+        total_events, distinct_cases = (
+            await access.duckdb_fetch("SELECT COUNT(*), COUNT(DISTINCT case_id) FROM events")
+        )[0]
+        event_count, case_count, first_seen, last_seen = (
+            await access.duckdb_fetch(
+                "SELECT COUNT(*), COUNT(DISTINCT case_id), MIN(timestamp), MAX(timestamp) "
+                "FROM events WHERE activity = ?",
+                [activity],
+            )
+        )[0]
+        if not event_count:
+            raise HTTPException(status_code=404, detail="Activity not found.")
+        (max_per_case,) = (
+            await access.duckdb_fetch(
+                "SELECT MAX(n) FROM ("
+                "SELECT COUNT(*) AS n FROM events WHERE activity = ? GROUP BY case_id)",
+                [activity],
+            )
+        )[0]
+        if not log_row.active_filter and access.cases_path.exists():
+            # cases.parquet stores first/last activity per case (kept coherent
+            # at import and on every edit) - no events scan.
+            start_cases, end_cases = (
+                await access.duckdb_fetch(
+                    "SELECT COUNT(*) FILTER (WHERE first_activity = ?), "
+                    "COUNT(*) FILTER (WHERE last_activity = ?) FROM cases",
+                    [activity, activity],
+                )
+            )[0]
+        else:
+            start_cases, end_cases = (
+                await access.duckdb_fetch(
+                    """
+                    SELECT COUNT(*) FILTER (WHERE fa = ?), COUNT(*) FILTER (WHERE la = ?)
+                    FROM (
+                        SELECT arg_min(activity, timestamp) AS fa,
+                               arg_max(activity, timestamp) AS la
+                        FROM events
+                        GROUP BY case_id
+                    )
+                    """,
+                    [activity, activity],
+                )
+            )[0]
+
+    event_count = int(event_count)
+    case_count = int(case_count)
+    total_events = int(total_events)
+    distinct_cases = int(distinct_cases)
+    return ActivityDetail(
+        activity=activity,
+        event_count=event_count,
+        event_pct=(float(event_count) / total_events) if total_events else 0.0,
+        case_count=case_count,
+        case_pct=(float(case_count) / distinct_cases) if distinct_cases else 0.0,
+        avg_occurrences_per_case=(float(event_count) / case_count) if case_count else None,
+        max_occurrences_per_case=int(max_per_case) if max_per_case is not None else None,
+        start_case_count=int(start_cases),
+        start_case_pct=(float(start_cases) / distinct_cases) if distinct_cases else 0.0,
+        end_case_count=int(end_cases),
+        end_case_pct=(float(end_cases) / distinct_cases) if distinct_cases else 0.0,
+        first_seen=first_seen,
+        last_seen=last_seen,
+        variant_count=variant_count,
+        top_variants=top_variants,
+    )
+
+
+async def activity_cases_page(
+    log_id: str,
+    user_id: str,
+    activity: str,
+    *,
+    offset: int,
+    limit: int,
+) -> ActivityCasesPage:
+    """Case-level metadata rows for the cases containing an activity."""
+    async with EventLogAccess(log_id, user_id) as access:
+        # Case metadata (start/end/duration) lives in cases.parquet - mirror
+        # variant_cases_page and serve an empty page when it's missing.
+        if not access.cases_path.exists():
+            return ActivityCasesPage(rows=[], total=0, offset=offset, limit=limit)
+
+        (total,) = (
+            await access.duckdb_fetch(
+                "SELECT COUNT(DISTINCT case_id) FROM events WHERE activity = ?",
+                [activity],
+            )
+        )[0]
+        rows = await access.duckdb_fetch(
+            """
+            SELECT c.case_id, c.case_start, c.case_end, c.case_duration_seconds,
+                   c.event_count, a.occurrences
+            FROM cases c
+            JOIN (
+                SELECT case_id, COUNT(*) AS occurrences
+                FROM events
+                WHERE activity = ?
+                GROUP BY case_id
+            ) a USING (case_id)
+            ORDER BY c.case_start DESC NULLS LAST
+            LIMIT ? OFFSET ?
+            """,
+            [activity, limit, offset],
+        )
+
+    return ActivityCasesPage(
+        rows=[
+            ActivityCase(
+                case_id=str(r[0]),
+                case_start=r[1],
+                case_end=r[2],
+                case_duration_seconds=float(r[3]) if r[3] is not None else None,
+                event_count=int(r[4]),
+                occurrences=int(r[5]),
             )
             for r in rows
         ],

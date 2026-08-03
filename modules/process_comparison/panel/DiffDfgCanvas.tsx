@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   MarkerType,
   Position,
@@ -11,7 +11,6 @@ import {
 } from "@xyflow/react";
 
 import { CanvasShell } from "@/components/visualizations/canvases/shared/canvas-shell";
-import { CanvasResetButton } from "@/components/visualizations/canvases/shared/canvas-toolbar";
 import { formatNumber } from "@/lib/format";
 import { useVizSettings } from "@/lib/stores/visualization-settings";
 
@@ -101,9 +100,13 @@ export function layeredPositions(
 export function DiffDfgCanvas({
   data,
   mode = "delta",
+  settings,
 }: {
   data: DfgDiffData;
   mode?: DfgColorMode;
+  /** Popover body of the canvas control cluster (see `canvas-toolbar.tsx`) –
+   *  where the layout / colour-mode switches live. */
+  settings?: ReactNode;
 }) {
   const general = useVizSettings((s) => s.general);
   const { nodes: laidNodes, edges: laidEdges } = useMemo(() => {
@@ -197,7 +200,8 @@ export function DiffDfgCanvas({
       fitViewKey={`${data.baseline_log_id}-${data.other_log_id}-${mode}-${resetNonce}-${data.activities.length}`}
       miniMap={general.showMinimap}
       showGrid={general.showGrid}
-      toolbarSlot={<CanvasResetButton onReset={() => setResetNonce((n) => n + 1)} />}
+      settings={settings}
+      onReset={() => setResetNonce((n) => n + 1)}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
     />

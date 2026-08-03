@@ -518,7 +518,7 @@ function ModelCardControl({ item }: { item: ControlItem }) {
   const models = modelsQ.data?.models ?? [];
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">

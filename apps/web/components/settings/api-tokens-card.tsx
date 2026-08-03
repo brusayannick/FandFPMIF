@@ -93,7 +93,7 @@ function McpServerCard({ info, loading }: { info: McpInfo | undefined; loading: 
   );
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle>MCP server</CardTitle>
         <CardDescription>
@@ -235,7 +235,7 @@ function TokensCard({ info }: { info: McpInfo | undefined }) {
   }
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle>Personal access tokens</CardTitle>
         <CardDescription>
@@ -363,7 +363,7 @@ function AdminCard() {
   if (!cfg.isSuccess || !cfg.data) return null;
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader>
         <CardTitle>MCP administration</CardTitle>
         <CardDescription>Platform-wide controls. Only administrators see this.</CardDescription>

@@ -9,7 +9,9 @@ import {
   LayoutDashboard,
   Loader2,
   Pencil,
+  Redo2,
   Share2,
+  Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AnimatePresence, motion, useReducedMotion, type Transition } from "framer-motion";
@@ -28,6 +30,7 @@ import {
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/empty-state";
 import { CardPalette } from "@/components/dashboards/card-palette";
+import { CardInspector } from "@/components/dashboards/card-inspector";
 import { CanvasZoomControls } from "@/components/dashboards/canvas-zoom-controls";
 import {
   DashboardCanvas,
@@ -44,15 +47,16 @@ import {
 import { DashboardFilterBar } from "@/components/dashboards/dashboard-filter-bar";
 import { DashboardSettingsDialog } from "@/components/dashboards/dashboard-settings-dialog";
 import { DashboardTimeRange } from "@/components/dashboards/dashboard-time-range";
+import { useItemHistory } from "@/lib/dashboards/use-item-history";
 import { useEventLogs } from "@/lib/queries";
 import { useNoShareTargets } from "@/lib/sharing-queries";
 import {
   canvasSettings,
   DEFAULT_CANVAS_SETTINGS,
-  GRANULARITY,
+  GRID,
   initialColumnFilters as loadColumnFilters,
   initialTimeFilters as loadTimeFilters,
-  rescaleColumns,
+  useCardCatalog,
   useDashboard,
   useEventColumns,
   useTimeBounds,
@@ -61,8 +65,6 @@ import {
   type DashboardItem,
 } from "@/lib/dashboard-queries";
 import type { FilterEntry } from "@/lib/api-types";
-
-const DEFAULT_COLS = 12;
 
 // Shared "subtle & snappy" timing for the view's enter/exit transitions.
 const MOTION: Transition = { duration: 0.18, ease: [0.2, 0, 0, 1] };
@@ -98,16 +100,25 @@ function boardPatch(s: {
 export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const { data: dashboard, isLoading, isError } = useDashboard(dashboardId);
   const { data: logs } = useEventLogs({ status: "ready" });
+  // Shared with the palette and the canvas via react-query's cache; the
+  // inspector needs it to resolve the selected card's views/kpis/schema/help.
+  const { data: catalog } = useCardCatalog();
   const update = useUpdateDashboard(dashboardId);
 
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [items, setItems] = useState<DashboardItem[]>([]);
+  // Which cards are selected. Lives here rather than in the canvas because the
+  // inspector and the toolbar's bulk actions are siblings of it.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [logId, setLogId] = useState<string | null>(null);
   const [settings, setSettings] = useState<CanvasSettings>(DEFAULT_CANVAS_SETTINGS);
   // The canvas publishes its add-drag starter here; the palette calls it
   // synchronously from `pointerdown` so the gesture matches an in-canvas drag.
   const startAddRef = useRef<AddStarter | null>(null);
+  // Undo/redo over the item list. Every edit autosaves, so without this a
+  // mis-drag or a stray Delete is permanent.
+  const history = useItemHistory(items, setItems);
   const [shareOpen, setShareOpen] = useState(false);
   // Shared enter/exit timing for the framer-motion bits; zeroed (instant) under
   // prefers-reduced-motion since width/height/opacity animations bypass the CSS
@@ -190,8 +201,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
   const fitZoom = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const g = GRANULARITY[settings.granularity] ?? GRANULARITY.medium;
-    const h = gridPixelHeight(items, g);
+    const h = gridPixelHeight(items, GRID);
     if (h <= 0) return;
     const z = Math.max(MIN_ZOOM, Math.min(1, (el.clientHeight - CANVAS_PAD * 2) / h));
     if (z === zoomRef.current) {
@@ -323,16 +333,10 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
     }));
   };
 
-  // Settings edits flow through here so a granularity change (which changes the
-  // column count) can rescale the cards' x/w to keep their relative layout.
-  const changeSettings = (next: CanvasSettings) => {
-    const fromCols = GRANULARITY[settings.granularity]?.cols ?? DEFAULT_COLS;
-    const toCols = GRANULARITY[next.granularity]?.cols ?? DEFAULT_COLS;
-    if (toCols !== fromCols) {
-      setItems((prev) => rescaleColumns(prev, fromCols, toCols));
-    }
-    setSettings(next);
-  };
+  // The column count is fixed now, so settings edits never move a card and this
+  // is a plain setter. (It used to rescale every card's x/w whenever the board's
+  // granularity changed the column count.)
+  const changeSettings = (next: CanvasSettings) => setSettings(next);
 
   // Only logs of the board's own model are bindable – a case-centric board can
   // only render case-centric logs and vice-versa.
@@ -451,6 +455,34 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
             </span>
           )}
           {editing && (
+            <span className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Undo"
+                title="Undo (⌘Z)"
+                disabled={!history.canUndo}
+                onClick={history.undo}
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Redo"
+                title="Redo (⌘⇧Z)"
+                disabled={!history.canRedo}
+                onClick={history.redo}
+              >
+                <Redo2 className="h-3.5 w-3.5" />
+              </Button>
+            </span>
+          )}
+          {editing && (
             <DashboardSettingsDialog settings={settings} onChange={changeSettings} />
           )}
           {editing && (
@@ -462,7 +494,16 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
           {editing ? (
             // Binary mode toggle: exactly one View (editing) / one Edit (viewing)
             // button. Changes autosave, so leaving edit mode needs no save step.
-            <Button type="button" size="sm" onClick={() => setEditing(false)}>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                // A selection is an edit-mode concept; leaving with cards still
+                // highlighted would show a ring nothing can act on.
+                setSelectedIds([]);
+                setEditing(false);
+              }}
+            >
               <Eye className="mr-1.5 h-3.5 w-3.5" />
               View
             </Button>
@@ -514,30 +555,79 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
             )}
           </AnimatePresence>
           <div className="flex min-h-0 flex-1">
-            <AnimatePresence initial={false}>
-              {editing && (
-                <motion.div
-                  key="palette"
-                  initial={{ width: 0, opacity: 0 }}
-                  animate={{ width: "16rem", opacity: 1 }}
-                  exit={{ width: 0, opacity: 0 }}
-                  transition={motionTransition}
-                  className="shrink-0 overflow-hidden"
-                >
-                  <CardPalette
-                    onStartAdd={(req, e) => startAddRef.current?.(req, e)}
-                    logModel={dashboard.log_model}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
             <DashboardWidgetScope>
               {/* The zoom controls float over the scroll container (not inside
                   it) so they stay put while the board scrolls. */}
               <div className="relative min-h-0 flex-1">
+                {/* The palette OVERLAYS the canvas rather than sitting beside
+                    it. As a flex sibling animating 0 -> 16rem it changed the
+                    grid's measured width on every frame, so entering edit mode
+                    re-laid-out and visibly moved every card. As an overlay the
+                    grid keeps its width; only the scroll container's padding
+                    changes, once, on the mode toggle. */}
+                <AnimatePresence initial={false}>
+                  {editing && (
+                    <motion.div
+                      key="palette"
+                      initial={{ x: "-100%", opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      exit={{ x: "-100%", opacity: 0 }}
+                      transition={motionTransition}
+                      className="absolute inset-y-0 left-0 z-20 w-64"
+                    >
+                      <CardPalette
+                        onStartAdd={(req, e) => startAddRef.current?.(req, e)}
+                        logModel={dashboard.log_model}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                {/* The inspector mirrors the palette: an overlay on the right,
+                    for the same reason. As a flex sibling it would re-measure
+                    the grid every time a card was selected — reproducing the
+                    card-jumping bug on the other side. */}
+                <AnimatePresence initial={false}>
+                  {editing && (
+                    <motion.div
+                      key="inspector"
+                      initial={{ x: "100%", opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      exit={{ x: "100%", opacity: 0 }}
+                      transition={motionTransition}
+                      className="absolute inset-y-0 right-0 z-20"
+                    >
+                      <CardInspector
+                        items={items}
+                        selectedIds={selectedIds}
+                        catalog={catalog}
+                        logId={logId}
+                        onUpdate={(id, patch) =>
+                          history.commit(
+                            items.map((it) => (it.i === id ? { ...it, ...patch } : it)),
+                            "config",
+                          )
+                        }
+                        onRemove={(ids) => {
+                          const drop = new Set(ids);
+                          history.commit(
+                            items.filter((it) => !drop.has(it.i)),
+                            "remove",
+                          );
+                          setSelectedIds([]);
+                        }}
+                        onClose={() => setSelectedIds([])}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 <div
                   ref={scrollRef}
-                  className="dashboard-canvas-bg relative h-full overflow-auto p-3"
+                  className={cn(
+                    "dashboard-canvas-bg relative h-full overflow-auto p-3",
+                    // Static, not animated: the grid must re-measure at most
+                    // once per mode change.
+                    editing && "pl-[16.75rem] pr-[18.75rem]",
+                  )}
                 >
                   {items.length === 0 && !editing ? (
                     <EmptyState
@@ -567,7 +657,13 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
                       startAddRef={startAddRef}
                       settings={settings}
                       zoom={zoom}
-                      onItemsChange={setItems}
+                      selectedIds={selectedIds}
+                      onSelectionChange={setSelectedIds}
+                      historyApplying={history.isApplying}
+                      // Every geometry change goes through the history so it
+                      // can be undone; the label groups a burst of the same
+                      // edit into one step.
+                      onItemsChange={(next, label) => history.commit(next, label ?? "edit")}
                     />
                   )}
                   <AnimatePresence>
@@ -589,7 +685,7 @@ export function DashboardView({ dashboardId }: { dashboardId: string }) {
                       </motion.div>
                     )}
                   </AnimatePresence>
-                </div>
+                  </div>
                 {(items.length > 0 || editing) && (
                   <CanvasZoomControls
                     zoom={zoom}

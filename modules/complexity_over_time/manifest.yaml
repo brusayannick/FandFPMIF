@@ -63,9 +63,9 @@ frontend:
       title: Complexity trend
       description: A complexity metric plotted over evenly-sized time slices.
       icon: TrendingUp
-      default_w: 8
+      default_w: 4
       default_h: 8
-      min_w: 6
+      min_w: 3
       min_h: 6
       config_schema:
         properties:
@@ -104,7 +104,12 @@ frontend:
             default: 12
             ui:
               widget: slider
-
+      min_px_w: 320
+      min_px_h: 220
+      help:
+        what: "How process complexity changes over time."
+        read: "A rising line means the process is drifting toward more variation — often worth investigating before it becomes normal."
+        computed: "Complexity measures recomputed per time slice."
 permissions:
   - read:event_log
   - write:module_results

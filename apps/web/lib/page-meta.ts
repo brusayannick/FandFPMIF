@@ -49,7 +49,8 @@ const STATIC: Record<string, PageMeta> = {
   },
   "/processes/import": {
     title: "Import event log",
-    description: "Upload a XES, XES.gz, or CSV file — or import directly from a URL.",
+    description:
+      "Upload a XES, CSV, XML, JSON, or OCEL file, check how its columns map, then import.",
   },
   "/processes/watched": {
     title: "Watched folders",
@@ -147,6 +148,13 @@ export function resolvePageMeta(pathname: string, ctx: ResolvePageCtx = {}): Pag
       return {
         title: "Variant",
         description: "A single process variant — its cases, durations, and attribute breakdowns.",
+      };
+    }
+    if (parts[2] === "activities") {
+      return {
+        title: "Activity",
+        description:
+          "One activity — its frequency, position in cases, and the variants that contain it.",
       };
     }
     if (parts[2] === "modules" && parts[3]) {

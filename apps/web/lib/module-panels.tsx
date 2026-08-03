@@ -4,7 +4,7 @@ import { useEffect, useState, type ComponentType } from "react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { rawFetch } from "@/lib/api";
-import { installModuleRuntime } from "@/lib/module-runtime";
+import { CORE_EXTERNALS, installModuleRuntime, scanBundleExternals } from "@/lib/module-runtime";
 
 export interface ModulePanelProps {
   logId: string;
@@ -77,9 +77,13 @@ async function loadPanel(moduleId: string): Promise<AnyComponent> {
   if (pending) return pending;
 
   const promise = (async () => {
-    // Runtime must be installed before the bundle's require() shim fires.
-    // installModuleRuntime() is idempotent and a no-op on the server.
-    await installModuleRuntime();
+    // The core externals are needed by every bundle, so start them now and let
+    // them stream in parallel with the bundle fetch instead of gating it. The
+    // rest is installed from the bundle's own require() calls below - the two
+    // used to be one eager all-externals install ahead of the fetch, which
+    // both serialised the two big transfers and pulled in ~650 KB gzip of
+    // dependencies the panel never touches.
+    const core = installModuleRuntime(CORE_EXTERNALS);
     const res = await rawFetch(
       `/api/v1/modules/${encodeURIComponent(moduleId)}/assets/panel.js`,
     );
@@ -87,6 +91,8 @@ async function loadPanel(moduleId: string): Promise<AnyComponent> {
       throw new Error(`Failed to load module panel ${moduleId} (HTTP ${res.status}).`);
     }
     const source = await res.text();
+    // Runtime must be complete before the bundle's require() shim fires.
+    await Promise.all([core, installModuleRuntime(scanBundleExternals(source))]);
     const moduleObj: { exports: Record<string, unknown> } = { exports: {} };
     // Module bundles are CJS. We treat the source as the body of an IIFE so
     // top-level `var ...` doesn't leak into globals.

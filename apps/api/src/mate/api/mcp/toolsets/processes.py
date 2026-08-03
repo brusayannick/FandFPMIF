@@ -245,6 +245,26 @@ async def get_activities(ctx: MCPContext, log_id: str) -> dict[str, Any]:
 
 
 @mcp_tool(toolset="processes", idempotent=True)
+async def get_activity(ctx: MCPContext, log_id: str, name: str) -> dict[str, Any]:
+    """One activity in depth: event/case counts + shares, occurrences per case,
+    start/end-of-case role, first/last seen, and the variants containing it
+    (exact membership). ``name`` is the raw activity name."""
+    p = await authz(ctx, SCOPE_PROCESSES_READ)
+
+    async def _impl() -> dict[str, Any]:
+        sm = get_sessionmaker()
+        async with sm() as session:
+            row = await _ready_case_centric(session, log_id, p.user.id)
+        try:
+            detail = await svc.activity_detail(row, p.user.id, name)
+        except HTTPException as exc:
+            raise from_http_exception(exc) from exc
+        return cap(detail.model_dump(mode="json"))
+
+    return await guarded(p, "get_activity", {"log_id": log_id, "name": name}, _impl())
+
+
+@mcp_tool(toolset="processes", idempotent=True)
 async def get_variants(
     ctx: MCPContext,
     log_id: str,

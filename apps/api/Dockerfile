@@ -30,7 +30,7 @@ WORKDIR /app
 # `.python-version` pins uv to 3.12 so dev (host-mode) and the image resolve
 # the same interpreter – in_process module venvs are ABI-locked to it.
 COPY .python-version ./
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
 COPY apps/api/pyproject.toml apps/api/pyproject.toml
 COPY packages/module-sdk-py/pyproject.toml packages/module-sdk-py/pyproject.toml
 COPY packages/module-sdk-py/README.md packages/module-sdk-py/README.md
@@ -42,7 +42,12 @@ COPY apps/api/alembic.ini apps/api/alembic.ini
 COPY apps/api/README.md apps/api/README.md
 COPY packages/module-sdk-py/src packages/module-sdk-py/src
 
-RUN uv sync --frozen --no-dev || uv sync --no-dev
+# --frozen, no fallback: the image must install exactly what uv.lock pins. The
+# old `|| uv sync --no-dev` escape hatch silently re-resolved whenever --frozen
+# failed (it always did – uv.lock wasn't COPYed), so the image drifted to
+# whatever was newest on PyPI while dev stayed on the lock. A stale lock should
+# fail the build loudly; fix it with `uv lock`, don't resolve around it.
+RUN uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     DATA_DIR=/app/data \

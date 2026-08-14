@@ -27,12 +27,12 @@ from mate.sdk.manifest import Manifest
 # in the UI.
 OPTED_OUT = {
     "agentsimulator",
-    "alpha_miner_java",  # no panel at all
     "concept_drift_explainer",
     "conformance",
     "cv4cdd",
     "pcomp",
     "performance",
+    "performance_java",  # no panel at all
     "process_comparison",
 }
 

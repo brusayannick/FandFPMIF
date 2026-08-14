@@ -82,7 +82,7 @@ so the per-port CORS and `/etc/hosts` Keycloak hacks from the local setup are go
 > **Image size note:** the api image bakes a Temurin 21 JRE (~150 MB layer) for
 > JVM modules (`runtime: {kind: jvm}`, see `modules/PROTOCOL.md`). First pull
 > after upgrading grows by that layer once; nothing else changes. JVM module
-> jars (e.g. `modules/alpha_miner_java/dist/`) ship in the repo – no build
+> jars (e.g. `modules/performance_java/dist/`) ship in the repo – no build
 > tooling needed on the VM.
 
 ## Files this deployment adds

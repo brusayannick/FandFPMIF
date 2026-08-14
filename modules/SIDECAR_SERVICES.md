@@ -20,7 +20,7 @@ Walk this list top to bottom; stop at the first match.
 |---|---|
 | A Python library | `dependencies.python.packages` in the manifest — no container |
 | A Python lib with conflicting pins / other Python version | `isolation: subprocess` (own venv + interpreter) |
-| JVM code (a jar) | `runtime: {kind: jvm}` — see [`modules/PROTOCOL.md`](./PROTOCOL.md), reference `modules/alpha_miner_java` |
+| JVM code (a jar) | `runtime: {kind: jvm}` — see [`modules/PROTOCOL.md`](./PROTOCOL.md), reference `modules/performance_java` |
 | A separate **server process** with its own storage/protocol (Neo4j, OpenSearch, a CPLEX server, …) | **This pattern** |
 
 Why never Docker-in-Docker / mounting docker.sock: both are root-equivalent on the

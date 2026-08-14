@@ -50,7 +50,7 @@ test: ## Run the Python test suite
 	uv run --extra dev pytest apps/api/tests -v
 
 sdk-jvm: ## Build the JVM module SDK + example + conformance jars (needs JDK 17+)
-	cd packages/module-sdk-jvm && ./gradlew build shadowJar :examples:alpha-miner:copyExampleJar
+	cd packages/module-sdk-jvm && ./gradlew build shadowJar :examples:performance-metrics:copyExampleJar
 
 typecheck: ## Type-check the web app
 	cd apps/web && pnpm typecheck

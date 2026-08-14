@@ -784,11 +784,11 @@ ships `mate-sdk-jvm-<v>-all.jar` – the only compile-time dependency you need
 
 ```java
 public static void main(String[] argv) {
-    MateModule.builder("alpha_miner_java")
-        .onEventJob("mine_on_import", "log.imported",
-            JobSpec.of().progress(true).cancellable(true).title("Alpha Miner"),
-            MyImpl::mine)
-        .route("get_model", RouteSpec.get("/model"), MyImpl::getModel)
+    MateModule.builder("performance_java")
+        .onEventJob("compute_on_import", "log.imported",
+            JobSpec.of().progress(true).cancellable(true).title("Performance metrics"),
+            MyImpl::compute)
+        .route("get_kpis", RouteSpec.get("/kpis"), MyImpl::getKpis)
         .build()
         .run(argv);   // connects, handshakes, serves - never returns
 }
@@ -819,8 +819,8 @@ Cancellation: platform cancel makes every `ctx.*` call throw
 swallow it); poll `checkCancelled()` in tight compute loops – after ~3 s of
 grace the platform SIGKILLs the worker instead.
 
-The reference module is [`modules/alpha_miner_java`](./alpha_miner_java/)
-(source under `packages/module-sdk-jvm/examples/alpha-miner`); the
+The reference module is [`modules/performance_java`](./performance_java/)
+(source under `packages/module-sdk-jvm/examples/performance-metrics`); the
 cross-runtime conformance suite lives at
 `apps/api/tests/test_worker_conformance.py`.
 

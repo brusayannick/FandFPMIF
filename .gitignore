@@ -34,8 +34,8 @@ modules/*/.installed-hash
 # The JVM example module's runnable fat jar is a COMMITTED artefact - the api
 # image is JRE-only and modules/ is bind-mounted, so the platform can't build
 # it; `make sdk-jvm` regenerates it. Carve it out of the global `dist/` ignore.
-!modules/alpha_miner_java/dist/
-!modules/alpha_miner_java/dist/*.jar
+!modules/performance_java/dist/
+!modules/performance_java/dist/*.jar
 
 # CV4CDD pretrained models are large (~0.5 GB each) and uploaded at runtime via
 # the module's settings page – never committed. The dir itself is kept via a

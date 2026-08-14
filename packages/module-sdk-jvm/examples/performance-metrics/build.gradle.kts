@@ -1,5 +1,5 @@
-// The bundled example JVM module: classic Alpha-algorithm process discovery.
-// `copyExampleJar` drops the fat jar into modules/alpha_miner_java/dist/ - the
+// The bundled example JVM module: event-log performance metrics.
+// `copyExampleJar` drops the fat jar into modules/performance_java/dist/ - the
 // committed artefact the platform actually runs (`make sdk-jvm` rebuilds it).
 
 plugins {
@@ -12,11 +12,11 @@ dependencies {
 }
 
 application {
-    mainClass = "mate.modules.alphaminer.AlphaMinerModule"
+    mainClass = "mate.modules.performance.PerformanceMetricsModule"
 }
 
 tasks.shadowJar {
-    archiveFileName = "alpha-miner-all.jar"
+    archiveFileName = "performance-metrics-all.jar"
     manifest {
         attributes["Main-Class"] = application.mainClass.get()
     }
@@ -25,5 +25,5 @@ tasks.shadowJar {
 val copyExampleJar by tasks.registering(Copy::class) {
     dependsOn(tasks.shadowJar)
     from(tasks.shadowJar.flatMap { it.archiveFile })
-    into(rootProject.layout.projectDirectory.dir("../../modules/alpha_miner_java/dist"))
+    into(rootProject.layout.projectDirectory.dir("../../modules/performance_java/dist"))
 }

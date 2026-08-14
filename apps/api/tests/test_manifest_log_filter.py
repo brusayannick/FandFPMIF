@@ -32,7 +32,6 @@ OPTED_OUT = {
     "cv4cdd",
     "pcomp",
     "performance",
-    "performance_java",  # no panel at all
     "process_comparison",
 }
 

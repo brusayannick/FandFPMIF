@@ -26,8 +26,12 @@ separately as processing time, so waiting can be read off against it.
   (progress + cooperative cancellation throughout) and caches them as JSON.
 - The routes serve that cache and compute on a miss, so a log imported before
   the module was installed still answers.
-- The manifest's `datasets:` entries let the platform's generic visualizations
-  render the results on dashboards - zero frontend code here.
+- `panel/index.tsx` is the module's own page: a KPI strip plus a ranked
+  activities / hand-offs view. Plain TSX like any other module's panel - the
+  frontend never knew the backend is a jar.
+- The manifest's `datasets:` entries additionally let the platform's generic
+  visualizations render the same three results as dashboard cards, with no
+  widget code of our own.
 
 ## How it reads the log
 

@@ -314,7 +314,7 @@ async def _activities_variants_block(
         return ""
 
     if act_rows:
-        shown = act_rows[: _AI_ACTIVITIES_LIMIT]
+        shown = act_rows[:_AI_ACTIVITIES_LIMIT]
         head = ", ".join(f"{r[0]} ({int(r[1])})" for r in shown)
         more = len(act_rows) - len(shown)
         tail = f" (+{more} more)" if more > 0 else ""
@@ -371,9 +371,7 @@ async def _build_context_block(context: ChatContext | None, user_id: str) -> str
         # restrict_event_log=True walls off raw XES/parquet access: a module's
         # guidance_payload sees only its own cached outputs, never event rows.
         try:
-            ctx = await loader._make_context(
-                mid, context.log_id, user_id, restrict_event_log=True
-            )
+            ctx = await loader._make_context(mid, context.log_id, user_id, restrict_event_log=True)
         except Exception:
             continue
         try:

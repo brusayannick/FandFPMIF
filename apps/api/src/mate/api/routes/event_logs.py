@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -423,10 +424,8 @@ async def probe_xml_upload(
             auto_mapping=mapping,
         )
     finally:
-        try:
+        with contextlib.suppress(OSError):
             tmp_path.unlink()
-        except OSError:
-            pass
 
 
 @router.post("/probe-json", response_model=JsonProbeResponse)
@@ -465,10 +464,8 @@ async def probe_json_upload(
             auto_mapping=mapping,
         )
     finally:
-        try:
+        with contextlib.suppress(OSError):
             tmp_path.unlink()
-        except OSError:
-            pass
 
 
 @router.get("", response_model=list[EventLogSummary])

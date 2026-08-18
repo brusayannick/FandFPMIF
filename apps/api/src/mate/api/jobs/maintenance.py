@@ -36,9 +36,7 @@ async def prune_old_jobs(session: AsyncSession, retention_days: int) -> int:
     where = (Job.status.in_(_TERMINAL), age < cutoff)
     # Count then delete (same txn) rather than reading the DML rowcount - one
     # cheap COUNT a day, and it keeps the return type clean.
-    removed = int(
-        await session.scalar(select(func.count()).select_from(Job).where(*where)) or 0
-    )
+    removed = int(await session.scalar(select(func.count()).select_from(Job).where(*where)) or 0)
     if removed:
         await session.execute(delete(Job).where(*where))
         await session.commit()

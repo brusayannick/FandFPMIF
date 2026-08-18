@@ -22,7 +22,9 @@ def _sample():
 
 
 def test_filter_gte() -> None:
-    out = apply_transforms(_sample(), [{"op": "filter", "filters": [{"field": "dev", "op": "gte", "value": 3}]}])
+    out = apply_transforms(
+        _sample(), [{"op": "filter", "filters": [{"field": "dev", "op": "gte", "value": 3}]}]
+    )
     devs = sorted(r["dev"] for r in out.data.rows)  # type: ignore[attr-defined]
     assert devs == [3, 5]
 
@@ -45,7 +47,13 @@ def test_sort_desc_then_limit() -> None:
 def test_aggregate_sum_by_group() -> None:
     out = apply_transforms(
         _sample(),
-        [{"op": "aggregate", "group_by": ["activity"], "aggregations": [{"column": "dev", "fn": "sum", "as": "total"}]}],
+        [
+            {
+                "op": "aggregate",
+                "group_by": ["activity"],
+                "aggregations": [{"column": "dev", "fn": "sum", "as": "total"}],
+            }
+        ],
     )
     by = {r["activity"]: r["total"] for r in out.data.rows}  # type: ignore[attr-defined]
     assert by == {"A": 8, "B": 2}
@@ -88,19 +96,34 @@ def test_pivot() -> None:
         ColumnSpec(id="grp", label="Grp", type="string", role="dimension"),
         ColumnSpec(id="v", label="V", type="integer", role="measure"),
     ]
-    env = table_envelope(cols, [{"cat": "A", "grp": "x", "v": 1}, {"cat": "A", "grp": "y", "v": 2}, {"cat": "B", "grp": "x", "v": 3}])
-    out = apply_transforms(env, [{"op": "pivot", "index": ["cat"], "columns": "grp", "values": "v", "agg": "sum"}])
+    env = table_envelope(
+        cols,
+        [
+            {"cat": "A", "grp": "x", "v": 1},
+            {"cat": "A", "grp": "y", "v": 2},
+            {"cat": "B", "grp": "x", "v": 3},
+        ],
+    )
+    out = apply_transforms(
+        env, [{"op": "pivot", "index": ["cat"], "columns": "grp", "values": "v", "agg": "sum"}]
+    )
     by = {r["cat"]: r for r in out.data.rows}  # type: ignore[attr-defined]
     assert by["A"]["x"] == 1 and by["A"]["y"] == 2 and by["B"]["x"] == 3
 
 
 def test_join() -> None:
     left = table_envelope(
-        [ColumnSpec(id="id", label="Id", type="string", role="id"), ColumnSpec(id="a", label="A", type="integer", role="measure")],
+        [
+            ColumnSpec(id="id", label="Id", type="string", role="id"),
+            ColumnSpec(id="a", label="A", type="integer", role="measure"),
+        ],
         [{"id": "1", "a": 10}, {"id": "2", "a": 20}],
     )
     right = table_envelope(
-        [ColumnSpec(id="id", label="Id", type="string", role="id"), ColumnSpec(id="b", label="B", type="integer", role="measure")],
+        [
+            ColumnSpec(id="id", label="Id", type="string", role="id"),
+            ColumnSpec(id="b", label="B", type="integer", role="measure"),
+        ],
         [{"id": "1", "b": 100}, {"id": "3", "b": 300}],
     )
     out = join_envelopes(left, right, {"on": "id", "how": "inner"})

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import contextlib
 import os
 import tempfile
 import threading
@@ -224,10 +225,8 @@ class EventLogAccess:
 
     async def __aexit__(self, *exc: object) -> None:
         if self._conn is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._conn.close()
-            except Exception:
-                pass
             self._conn = None
         if self._lease is not None:
             eviction.release_lease(self._lease)

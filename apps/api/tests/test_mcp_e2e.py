@@ -100,9 +100,11 @@ async def test_streamable_http_end_to_end(client: AsyncClient) -> None:
                 # Mirror the SDK's defaults: short connect/write, long SSE read.
                 timeout=httpx.Timeout(30.0, read=300.0),
             ) as http_client,
-            streamable_http_client(
-                "http://testserver/mcp/", http_client=http_client
-            ) as (read, write, _get_session_id),
+            streamable_http_client("http://testserver/mcp/", http_client=http_client) as (
+                read,
+                write,
+                _get_session_id,
+            ),
             ClientSession(read, write) as session,
         ):
             init = await session.initialize()

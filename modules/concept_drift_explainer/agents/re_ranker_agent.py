@@ -76,11 +76,11 @@ def _format_snippets(snippets: list[ContextSnippet], start_date: datetime) -> st
         text = snippet["snippet_text"].replace("\n", " ").replace('"', '\\"')
         out += (
             f"Candidate {i}:\n"
-            f"  doc_id: \"{snippet['source_document']}\"\n"
+            f'  doc_id: "{snippet["source_document"]}"\n'
             f"  priority_score: {snippet.get('priority_score', 0.0):.3f}\n"
             f"  similarity_score: {snippet.get('score', 0.0):.3f}\n"
             f"  semantic_specificity: {snippet.get('semantic_specificity', 0.0):.3f}\n"
-            f"  snippet: \"{text}\"\n"
+            f'  snippet: "{text}"\n'
         )
     return out
 
@@ -154,23 +154,17 @@ def make_reranker_agent(*, llm: BaseChatModel, embedder: Embedder):
                 try:
                     resp = structured_llm.invoke(prompt)
                 except Exception as e:
-                    logging.warning(
-                        "Re-ranker LLM call failed, falling back to pre-sort: %s", e
-                    )
+                    logging.warning("Re-ranker LLM call failed, falling back to pre-sort: %s", e)
                     resp = None
                 if resp is None:
-                    cached = {
-                        "reranked_indices": list(range(1, len(candidates_for_llm) + 1))
-                    }
+                    cached = {"reranked_indices": list(range(1, len(candidates_for_llm) + 1))}
                 else:
                     cached = resp.dict()
                 response_cache[prompt] = cached
 
             indices = cached.get("reranked_indices", []) or []
             llm_picks = [
-                candidates_for_llm[i - 1]
-                for i in indices
-                if 1 <= i <= len(candidates_for_llm)
+                candidates_for_llm[i - 1] for i in indices if 1 <= i <= len(candidates_for_llm)
             ]
 
             seen_docs: set[str] = set()

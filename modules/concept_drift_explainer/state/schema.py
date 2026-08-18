@@ -36,12 +36,12 @@ class ContextSnippet(TypedDict, total=False):
 
     snippet_text: str
     source_document: str
-    timestamp: int                       # Unix seconds, 0 when unknown.
-    source_type: str                     # "context" | "bpm-kb"
-    score: float                         # raw cosine similarity from Pinecone
+    timestamp: int  # Unix seconds, 0 when unknown.
+    source_type: str  # "context" | "bpm-kb"
+    score: float  # raw cosine similarity from Pinecone
     semantic_specificity: float | None
     priority_score: float | None
-    support_only: bool                   # True for glossary entries
+    support_only: bool  # True for glossary entries
     classifications: list[FranzoiClassification]
 
 

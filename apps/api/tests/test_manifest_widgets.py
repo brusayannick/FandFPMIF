@@ -21,9 +21,7 @@ def _write(tmp_path: Path, body: str) -> Path:
     # Dedent the body on its own: dedenting header+body together would compare
     # their (different) indentation and strip the wrong common prefix.
     path = tmp_path / "manifest.yaml"
-    header = (
-        "id: demo\nname: Demo\nversion: 0.1.0\ncategory: foundation\nentrypoint: module.py\n"
-    )
+    header = "id: demo\nname: Demo\nversion: 0.1.0\ncategory: foundation\nentrypoint: module.py\n"
     path.write_text(header + textwrap.dedent(body))
     return path
 
@@ -133,9 +131,7 @@ def test_help_requires_what() -> None:
     with pytest.raises(ValidationError):
         WidgetHelp.model_validate({"read": "Taller bars are slower."})
 
-    helped = WidgetHelp.model_validate(
-        {"what": "Time per activity.", "read": "Taller is slower."}
-    )
+    helped = WidgetHelp.model_validate({"what": "Time per activity.", "read": "Taller is slower."})
     assert helped.what == "Time per activity."
     assert helped.computed is None
 

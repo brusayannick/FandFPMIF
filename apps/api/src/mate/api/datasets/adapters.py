@@ -74,7 +74,9 @@ def table_from_rows(rows: list[dict[str, Any]]) -> tuple[list[ColumnSpec], list[
     for k in keys:
         sample = next((r[k] for r in rows if r.get(k) is not None), None)
         col_type = _infer_type(sample)
-        columns.append(ColumnSpec(id=k, label=_prettify(k), type=col_type, role=_role_for(col_type)))
+        columns.append(
+            ColumnSpec(id=k, label=_prettify(k), type=col_type, role=_role_for(col_type))
+        )
     return columns, rows
 
 
@@ -94,7 +96,9 @@ def _measures_from(obj: dict[str, Any], prefix: str = "") -> list[KpiMeasure]:
         if isinstance(v, bool):
             continue
         if isinstance(v, (int, float)):
-            out.append(KpiMeasure(key=key, label=_prettify(k), value=float(v), format=_kpi_format(k, v)))
+            out.append(
+                KpiMeasure(key=key, label=_prettify(k), value=float(v), format=_kpi_format(k, v))
+            )
         elif isinstance(v, dict):
             out.extend(_measures_from(v, key))
     return out
@@ -137,7 +141,9 @@ def _graph_from_petri(raw: dict[str, Any]) -> GraphData:
     places = raw.get("places") or []
     transitions = raw.get("transitions") or []
     arcs = raw.get("arcs") or []
-    nodes = [GraphNode(id=str(p.get("id")), label=str(p.get("label", "")), kind="place") for p in places]
+    nodes = [
+        GraphNode(id=str(p.get("id")), label=str(p.get("label", "")), kind="place") for p in places
+    ]
     nodes += [
         GraphNode(
             id=str(t.get("id")),
@@ -223,14 +229,20 @@ def adapt(shape: str, raw: Any) -> DatasetEnvelope:
                 items += _measures_from(obj["enriched"], "enriched")
         else:
             items = _measures_from(obj)
-        return DatasetEnvelope(shape="kpi", data=KpiData(items=items), meta=DatasetMeta(sourceKind=kind, note=note))
+        return DatasetEnvelope(
+            shape="kpi", data=KpiData(items=items), meta=DatasetMeta(sourceKind=kind, note=note)
+        )
 
     if shape == "blob":
         value = obj.get("xml") if isinstance(obj.get("xml"), str) else obj.get("value") or ""
         media = "bpmn-xml" if kind == "bpmn" else "text"
         from mate.api.datasets.envelope import BlobData
 
-        return DatasetEnvelope(shape="blob", data=BlobData(media=media, value=str(value)), meta=DatasetMeta(sourceKind=kind))
+        return DatasetEnvelope(
+            shape="blob",
+            data=BlobData(media=media, value=str(value)),
+            meta=DatasetMeta(sourceKind=kind),
+        )
 
     # table (default)
     rows: list[dict[str, Any]] = []
@@ -253,7 +265,9 @@ def adapt(shape: str, raw: Any) -> DatasetEnvelope:
         shape="table",
         schema=DatasetSchema(columns=columns),
         data=TableData(columns=columns, rows=rows),
-        meta=DatasetMeta(sourceKind=kind, rowCount=len(rows), note=None if rows else (note or "No rows.")),
+        meta=DatasetMeta(
+            sourceKind=kind, rowCount=len(rows), note=None if rows else (note or "No rows.")
+        ),
     )
 
 

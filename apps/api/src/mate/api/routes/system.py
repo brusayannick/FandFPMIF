@@ -293,8 +293,7 @@ async def diagnostics(user: CurrentUserDep) -> DiagnosticsOut:
         logs = DiagnosticsLogsOut(
             available=False,
             note=(
-                "Restricted to admin accounts: application logs may contain other "
-                "users' activity."
+                "Restricted to admin accounts: application logs may contain other users' activity."
             ),
         )
 

@@ -666,9 +666,7 @@ async def prune_expired(session: SessionDep) -> int:
                 AnalyticsObject.last_seen_at < cutoff,
             )
         )
-        alive = select(AnalyticsObject.object_id).where(
-            AnalyticsObject.user_id == cfg_row.user_id
-        )
+        alive = select(AnalyticsObject.object_id).where(AnalyticsObject.user_id == cfg_row.user_id)
         await session.execute(
             delete(AnalyticsObjectRelation).where(
                 AnalyticsObjectRelation.user_id == cfg_row.user_id,

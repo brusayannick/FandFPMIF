@@ -85,9 +85,7 @@ class CanvasSettings(BaseModel):
     # permanently uninterpretable. ``exclude=True`` keeps it out of every
     # ``model_dump``, so a coerced board is rewritten without it and is never
     # rescaled twice (see ``routes.dashboards.coerce_grid``).
-    legacy_granularity: Granularity | None = Field(
-        default=None, alias="granularity", exclude=True
-    )
+    legacy_granularity: Granularity | None = Field(default=None, alias="granularity", exclude=True)
 
 
 class DatasetRef(BaseModel):
@@ -155,9 +153,8 @@ class DashboardItem(BaseModel):
         if self.kind == "widget":
             if not self.module_id or not self.widget_id:
                 raise ValueError("A widget card requires module_id and widget_id.")
-        elif self.kind == "viz":
-            if self.dataset_ref is None:
-                raise ValueError("A viz card requires dataset_ref.")
+        elif self.kind == "viz" and self.dataset_ref is None:
+            raise ValueError("A viz card requires dataset_ref.")
         return self
 
 

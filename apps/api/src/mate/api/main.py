@@ -11,7 +11,7 @@ import asyncio
 import logging
 import shutil
 import sys
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 
 # Process trees discovered from real-world logs can nest deep enough to
@@ -443,10 +443,8 @@ async def lifespan(app: FastAPI):
             db_backup_task,
         ):
             task.cancel()
-            try:
+            with suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
         if hot_reload is not None:
             hot_reload.stop()
         await sampler.stop()

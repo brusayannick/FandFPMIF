@@ -253,7 +253,5 @@ async def test_sweep_reclaims_expired_staging(client: AsyncClient) -> None:
     assert sweep_staging(ttl_seconds=0) >= 1
     assert not root.exists()
 
-    resp = await client.post(
-        "/api/v1/event-logs", data={"staging_token": staged["staging_token"]}
-    )
+    resp = await client.post("/api/v1/event-logs", data={"staging_token": staged["staging_token"]})
     assert resp.status_code == 404

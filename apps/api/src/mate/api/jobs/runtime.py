@@ -1066,9 +1066,12 @@ class JobRuntime:
 
         cancelled = 0
         for job_id, payload in rows:
-            if isinstance(payload, dict) and payload.get("log_id") in wanted:
-                if await self.cancel(job_id):
-                    cancelled += 1
+            if (
+                isinstance(payload, dict)
+                and payload.get("log_id") in wanted
+                and await self.cancel(job_id)
+            ):
+                cancelled += 1
         return cancelled
 
     async def cancel_all(self) -> int:

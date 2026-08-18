@@ -8,7 +8,7 @@ populated by phase 5 - the column shape is fixed in v1.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from sqlalchemy import (
     JSON,
@@ -29,7 +29,7 @@ def _utcnow() -> datetime:
 
 
 class Base(DeclarativeBase):
-    type_annotation_map = {dict[str, Any]: JSON}
+    type_annotation_map: ClassVar[dict[Any, Any]] = {dict[str, Any]: JSON}
 
 
 class User(Base):
@@ -575,9 +575,7 @@ class AnalyticsObjectRelation(Base):
     tgt_object_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     qualifier: Mapped[str] = mapped_column(String(64), primary_key=True)
 
-    __table_args__ = (
-        Index("ix_analytics_object_relations_user_src", "user_id", "src_object_id"),
-    )
+    __table_args__ = (Index("ix_analytics_object_relations_user_src", "user_id", "src_object_id"),)
 
 
 class AnalyticsEventObject(Base):
@@ -597,9 +595,7 @@ class AnalyticsEventObject(Base):
     qualifier: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(36), nullable=False)
 
-    __table_args__ = (
-        Index("ix_analytics_event_objects_user_object", "user_id", "object_id"),
-    )
+    __table_args__ = (Index("ix_analytics_event_objects_user_object", "user_id", "object_id"),)
 
 
 class Dashboard(Base):

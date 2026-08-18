@@ -31,7 +31,15 @@ def test_widget_kind_requires_module_and_widget() -> None:
 def test_legacy_item_without_kind_loads_as_widget() -> None:
     # A row written before `kind` existed: no `kind`, carries module_id/widget_id.
     item = DashboardItem.model_validate(
-        {"i": "a", "module_id": "discovery", "widget_id": "process-map", "x": 0, "y": 0, "w": 6, "h": 8}
+        {
+            "i": "a",
+            "module_id": "discovery",
+            "widget_id": "process-map",
+            "x": 0,
+            "y": 0,
+            "w": 6,
+            "h": 8,
+        }
     )
     assert item.kind == "widget"
     assert item.module_id == "discovery"

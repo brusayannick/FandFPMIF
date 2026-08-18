@@ -48,8 +48,13 @@ async def test_restricted_event_log_denies_all_raw_access() -> None:
 
     el = _RestrictedEventLog()
 
-    for coro in (el.pandas(), el.polars(), el.pm4py(), el.duckdb_fetch("SELECT 1"),
-                 el.materialize_parquet()):
+    for coro in (
+        el.pandas(),
+        el.polars(),
+        el.pm4py(),
+        el.duckdb_fetch("SELECT 1"),
+        el.materialize_parquet(),
+    ):
         with pytest.raises(PermissionError):
             await coro
 
@@ -90,9 +95,7 @@ async def test_make_context_restrict_flag(client_with_sample_mod: AsyncClient) -
     loader = get_module_loader()
     mod_id = next(iter(loader.loaded))
 
-    restricted = await loader._make_context(
-        mod_id, log_id, TEST_USER_ID, restrict_event_log=True
-    )
+    restricted = await loader._make_context(mod_id, log_id, TEST_USER_ID, restrict_event_log=True)
     assert isinstance(restricted.event_log, _RestrictedEventLog)
     with pytest.raises(PermissionError):
         await restricted.event_log.pandas()

@@ -40,7 +40,13 @@ TRANSFORM_OPS: frozenset[str] = frozenset(
 # Ops compiled to SQL over the upstream table; the rest run in pandas.
 _SQL_OPS: frozenset[str] = frozenset({"filter", "select", "sort", "limit", "aggregate"})
 _AGG_FNS: frozenset[str] = frozenset({"sum", "avg", "count", "count_distinct", "min", "max"})
-_AGG_PANDAS: dict[str, str] = {"sum": "sum", "avg": "mean", "count": "count", "min": "min", "max": "max"}
+_AGG_PANDAS: dict[str, str] = {
+    "sum": "sum",
+    "avg": "mean",
+    "count": "count",
+    "min": "min",
+    "max": "max",
+}
 
 
 class TransformError(ValueError):
@@ -148,7 +154,9 @@ def _step_sql(step: dict[str, Any], columns: set[str]) -> tuple[str, list[Any]]:
                     raise TransformError(f"aggregate over unknown column {col!r}.")
                 expr = f"{fn.upper()}({quote_ident(col)})"
             select_parts.append(f"{expr} AS {quote_ident(alias)}")
-        group_clause = (" GROUP BY " + ", ".join(quote_ident(c) for c in group_by)) if group_by else ""
+        group_clause = (
+            (" GROUP BY " + ", ".join(quote_ident(c) for c in group_by)) if group_by else ""
+        )
         return f"SELECT {', '.join(select_parts)} FROM t{group_clause}", []
     raise TransformError(f"unsupported transform op {op!r}; allowed: {sorted(TRANSFORM_OPS)}")
 
@@ -162,7 +170,9 @@ def _pivot(df: Any, step: dict[str, Any]) -> Any:
     if not index or columns not in df.columns or values not in df.columns:
         raise TransformError("pivot needs an index, a `columns` field and a `values` field.")
     aggfunc = _AGG_PANDAS.get(str(step.get("agg", "sum")).lower(), "sum")
-    pv = pd.pivot_table(df, index=index, columns=columns, values=values, aggfunc=aggfunc, fill_value=0)
+    pv = pd.pivot_table(
+        df, index=index, columns=columns, values=values, aggfunc=aggfunc, fill_value=0
+    )
     pv.columns = [str(c) for c in pv.columns]
     return pv.reset_index()
 
@@ -293,5 +303,7 @@ def join_envelopes(
     columns = _columns_from_df(out)
     rows = _json_records(out)
     return table_envelope(
-        columns, rows, meta=DatasetMeta(rowCount=len(rows), note=None if rows else "No rows after join.")
+        columns,
+        rows,
+        meta=DatasetMeta(rowCount=len(rows), note=None if rows else "No rows after join."),
     )

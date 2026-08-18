@@ -81,9 +81,7 @@ def _list_models() -> list[str]:
     if not MODEL_ROOT.is_dir():
         return []
     return sorted(
-        p.name
-        for p in MODEL_ROOT.iterdir()
-        if not p.name.startswith(".") and _is_model_dir(p)
+        p.name for p in MODEL_ROOT.iterdir() if not p.name.startswith(".") and _is_model_dir(p)
     )
 
 
@@ -176,9 +174,7 @@ class Cv4cddModule(Module):
 
     @on_event("log.imported")
     @job(progress=True, title="CV4CDD - auto-detecting drifts")
-    async def on_log_imported(
-        self, ctx: ModuleContext, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def on_log_imported(self, ctx: ModuleContext, payload: dict[str, Any]) -> dict[str, Any]:
         """Auto-run detection right after a log finishes importing.
 
         The loader stacks this as a job so the user sees a progress toast
@@ -307,14 +303,10 @@ class Cv4cddModule(Module):
 
         def progress(fraction: float, message: str) -> None:
             # Fire-and-forget on the main loop; we don't await so the worker
-            # thread isn't blocked on the WebSocket write.
-            try:
-                asyncio.run_coroutine_threadsafe(
-                    ctx.progress.update(fraction, message), loop
-                )
-            except RuntimeError:
-                # Loop is closed (shutdown in progress) - drop the update.
-                pass
+            # thread isn't blocked on the WebSocket write. RuntimeError means the
+            # loop is closed (shutdown in progress) - drop the update.
+            with contextlib.suppress(RuntimeError):
+                asyncio.run_coroutine_threadsafe(ctx.progress.update(fraction, message), loop)
 
         return cv4cdd_core.run_detection(
             df=df,
@@ -433,9 +425,7 @@ class Cv4cddModule(Module):
             raise
         except Exception as exc:  # surface install failure to the UI
             ctx.logger.exception("cv4cdd.model_upload_failed", model=name)
-            raise HTTPException(
-                status_code=500, detail=f"Failed to install model: {exc}"
-            ) from exc
+            raise HTTPException(status_code=500, detail=f"Failed to install model: {exc}") from exc
         finally:
             await file.close()
             if archive and archive.exists():

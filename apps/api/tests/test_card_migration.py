@@ -50,20 +50,35 @@ def test_card_migration_split_and_recombine(monkeypatch: pytest.MonkeyPatch) -> 
             " VALUES (:s,:k,:m,:v, datetime('now'))"
         )
         # legacy whole-module lock (config props only - the finding-2 reality)
-        conn.execute(seed, {"s": "module", "k": "cv4cdd", "m": "admin", "v": json.dumps({"n_windows": 5})})
+        conn.execute(
+            seed, {"s": "module", "k": "cv4cdd", "m": "admin", "v": json.dumps({"n_windows": 5})}
+        )
         # legacy model pin (the cv4cdd.model setting, bare string)
-        conn.execute(seed, {"s": "setting", "k": "cv4cdd.model", "m": "admin", "v": json.dumps("model-x")})
+        conn.execute(
+            seed, {"s": "setting", "k": "cv4cdd.model", "m": "admin", "v": json.dumps("model-x")}
+        )
         # a module lock that carried ai + model keys too
-        conn.execute(seed, {"s": "module", "k": "expl", "m": "admin",
-                            "v": json.dumps({"max_causes": 3, "ai": {"k": 1}, "model": "leg"})})
+        conn.execute(
+            seed,
+            {
+                "s": "module",
+                "k": "expl",
+                "m": "admin",
+                "v": json.dumps({"max_causes": 3, "ai": {"k": 1}, "model": "leg"}),
+            },
+        )
         # unrelated server setting - must be untouched
-        conn.execute(seed, {"s": "setting", "k": "ai.config", "m": "admin", "v": json.dumps({"p": "openai"})})
+        conn.execute(
+            seed, {"s": "setting", "k": "ai.config", "m": "admin", "v": json.dumps({"p": "openai"})}
+        )
 
         _run("upgrade", mig, monkeypatch, conn)
 
         rows = {
             (r[0], r[1]): r[2]
-            for r in conn.execute(sa.text("SELECT scope,key,admin_value_json FROM control_policies"))
+            for r in conn.execute(
+                sa.text("SELECT scope,key,admin_value_json FROM control_policies")
+            )
         }
         assert ("module", "cv4cdd") not in rows
         assert ("setting", "cv4cdd.model") not in rows
@@ -81,7 +96,9 @@ def test_card_migration_split_and_recombine(monkeypatch: pytest.MonkeyPatch) -> 
         _run("downgrade", mig, monkeypatch, conn)
         rows2 = {
             (r[0], r[1]): r[2]
-            for r in conn.execute(sa.text("SELECT scope,key,admin_value_json FROM control_policies"))
+            for r in conn.execute(
+                sa.text("SELECT scope,key,admin_value_json FROM control_policies")
+            )
         }
         assert not any(scope == "card" for scope, _ in rows2)
         assert ("module", "cv4cdd") in rows2

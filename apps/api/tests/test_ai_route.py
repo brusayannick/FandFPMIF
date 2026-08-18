@@ -156,7 +156,12 @@ def test_coerce_defaults_garbage_to_chat() -> None:
 
 def test_coerce_extracts_process_hint() -> None:
     out = _coerce_routing(
-        {"intent": "navigate", "targets": ["performance"], "process": "Order Process", "confidence": 0.9},
+        {
+            "intent": "navigate",
+            "targets": ["performance"],
+            "process": "Order Process",
+            "confidence": 0.9,
+        },
         {"performance"},
     )
     assert out["process"] == "Order Process"
@@ -326,9 +331,7 @@ def test_route_intent_skips_llm_for_unambiguous_nav(monkeypatch) -> None:
 
     monkeypatch.setattr(ai_nav, "classify_intent", _boom)
     res = asyncio.run(
-        route_intent(
-            _cfg(), message="open the performance module", destinations=DESTS, log_id="L1"
-        )
+        route_intent(_cfg(), message="open the performance module", destinations=DESTS, log_id="L1")
     )
     assert res.intent == "navigate"
     assert [t.id for t in res.targets] == ["performance"]
@@ -344,9 +347,7 @@ def test_route_intent_calls_llm_for_ambiguous_message(monkeypatch) -> None:
 
     monkeypatch.setattr(ai_nav, "classify_intent", _fake)
     res = asyncio.run(
-        route_intent(
-            _cfg(), message="the cycle time looks high", destinations=DESTS, log_id="L1"
-        )
+        route_intent(_cfg(), message="the cycle time looks high", destinations=DESTS, log_id="L1")
     )
     assert called["n"] == 1
     assert res.intent == "both"
@@ -430,8 +431,16 @@ def test_resolve_action_rejects_invalid_values() -> None:
 
 def test_resolve_action_rejects_blocked_and_malformed_settings() -> None:
     # Sensitive / non-whitelisted settings must never resolve, even if the model emits them.
-    for blocked in ("allow_process_data", "api_key", "system_prompt", "analytics_enabled",
-                    "selected_model", "password", "email", "completed"):
+    for blocked in (
+        "allow_process_data",
+        "api_key",
+        "system_prompt",
+        "analytics_enabled",
+        "selected_model",
+        "password",
+        "email",
+        "completed",
+    ):
         assert resolve_action({"setting": blocked, "value": "true"}) is None
     assert resolve_action(None) is None
     assert resolve_action("nope") is None
@@ -541,9 +550,7 @@ def test_route_intent_swallows_classifier_errors(monkeypatch) -> None:
 
     monkeypatch.setattr(ai_nav, "classify_intent", _fail)
     res = asyncio.run(
-        route_intent(
-            _cfg(), message="the cycle time looks high", destinations=DESTS, log_id="L1"
-        )
+        route_intent(_cfg(), message="the cycle time looks high", destinations=DESTS, log_id="L1")
     )
     assert res.intent == "chat"
     assert res.targets == []

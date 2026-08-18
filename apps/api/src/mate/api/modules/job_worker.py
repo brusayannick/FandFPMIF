@@ -123,9 +123,7 @@ class JobWorker:
                 {"stream": label},
             )
 
-    async def run(
-        self, attr: str, ctx: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> Any:
+    async def run(self, attr: str, ctx: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         self._ctx = ctx
         try:
             self._server = await asyncio.start_unix_server(

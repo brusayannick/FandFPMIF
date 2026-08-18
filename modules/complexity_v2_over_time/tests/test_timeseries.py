@@ -125,13 +125,15 @@ def test_max_variants_downsamples_per_slice():
     # 20 distinct variants per slice, cap at 5 → the per-slice suite downsamples.
     rows: list[dict[str, object]] = []
     base = pd.Timestamp("2023-01-01")
-    cid = 0
-    for i in range(20):
-        cid += 1
+    for i, cid in enumerate(range(1, 21)):
         start = base + pd.Timedelta(days=cid)
         for step, act in enumerate(["start", f"branch{i}", "end"]):
             rows.append(
-                {"case_id": f"c{cid}", "activity": act, "timestamp": start + pd.Timedelta(hours=step)}
+                {
+                    "case_id": f"c{cid}",
+                    "activity": act,
+                    "timestamp": start + pd.Timedelta(hours=step),
+                }
             )
     df = pd.DataFrame(rows)
     out = compute_timeseries(df, "absolute", {"slices": 1}, max_variants=5, min_cases=1)

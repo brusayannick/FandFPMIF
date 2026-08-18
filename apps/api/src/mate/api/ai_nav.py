@@ -160,7 +160,13 @@ PLATFORM_PAGES: list[NavDestination] = [
         kind="page",
         href_template="/modules/import",
         requires_log=False,
-        keywords=["install module", "upload module", "add module", "new module", "modul installieren"],
+        keywords=[
+            "install module",
+            "upload module",
+            "add module",
+            "new module",
+            "modul installieren",
+        ],
         description="Upload/install a new module package.",
     ),
     NavDestination(
@@ -420,7 +426,7 @@ def match_process(hint: str | None, processes: list[ProcessInfo]) -> ProcessInfo
     # The model sometimes echoes the catalog's framing - strip leading labels.
     for prefix in ("internal id:", "id=", "id:", "name=", "name:"):
         if h.startswith(prefix):
-            h = h[len(prefix):].strip().strip('"')
+            h = h[len(prefix) :].strip().strip('"')
     if not h:
         return None
     for p in processes:  # exact id
@@ -436,6 +442,32 @@ def match_process(hint: str | None, processes: list[ProcessInfo]) -> ProcessInfo
     return None
 
 
+# Below this, a process name is too generic to be recognised inside free text
+# ("P2P", "log") without firing on unrelated words.
+_MIN_PROCESS_MENTION_LEN = 4
+
+
+def names_a_process(message: str, processes: list[ProcessInfo] | None) -> bool:
+    """True when the message plausibly names one of the user's processes.
+
+    Only the classifier can resolve a named process, so the prefilter fast path
+    must stand down whenever one is mentioned - otherwise "show me the
+    performance of the invoice flow" resolves the module against the *current*
+    process, or degrades to the module's config page when there is none. A
+    false positive only costs one classifier call (the same call the slow path
+    would have made anyway), so this errs towards matching.
+    """
+    if not processes:
+        return False
+    m = message.lower()
+    for p in processes:
+        for token in (p.name, p.id):
+            t = token.strip().lower()
+            if len(t) >= _MIN_PROCESS_MENTION_LEN and t in m:
+                return True
+    return False
+
+
 # ── Settings actions (whitelisted, applied client-side on click) ─────────────
 
 # Canonical setting id -> spec. ONLY settings listed here can ever be produced;
@@ -444,12 +476,44 @@ def match_process(hint: str | None, processes: list[ProcessInfo]) -> ProcessInfo
 # onboarding completion, account/email/password, data wipe/export, module
 # install/uninstall - is deliberately ABSENT here and rejected, so the AI can
 # never change it.
-_BOOL_TRUE = {"true", "on", "yes", "enable", "enabled", "1", "mute", "muted",
-              "collapse", "collapsed", "show", "shown"}
-_BOOL_FALSE = {"false", "off", "no", "disable", "disabled", "0", "unmute",
-               "expand", "expanded", "hide", "hidden"}
-_DELIMITER_SYNONYMS = {"comma": ",", ",": ",", "semicolon": ";", ";": ";",
-                       "tab": "\t", "\\t": "\t", "\t": "\t", "pipe": "|", "|": "|"}
+_BOOL_TRUE = {
+    "true",
+    "on",
+    "yes",
+    "enable",
+    "enabled",
+    "1",
+    "mute",
+    "muted",
+    "collapse",
+    "collapsed",
+    "show",
+    "shown",
+}
+_BOOL_FALSE = {
+    "false",
+    "off",
+    "no",
+    "disable",
+    "disabled",
+    "0",
+    "unmute",
+    "expand",
+    "expanded",
+    "hide",
+    "hidden",
+}
+_DELIMITER_SYNONYMS = {
+    "comma": ",",
+    ",": ",",
+    "semicolon": ";",
+    ";": ";",
+    "tab": "\t",
+    "\\t": "\t",
+    "\t": "\t",
+    "pipe": "|",
+    "|": "|",
+}
 
 SETTING_WHITELIST: dict[str, dict[str, Any]] = {
     "theme": {"target": "theme", "kind": "enum", "values": ("light", "dark", "system")},
@@ -756,7 +820,9 @@ def _coerce_routing(obj: Any, valid_ids: set[str]) -> dict[str, Any]:
             if len(targets) >= 3:
                 break
     raw_process = obj.get("process")
-    process = str(raw_process).strip() if isinstance(raw_process, str) and raw_process.strip() else None
+    process = (
+        str(raw_process).strip() if isinstance(raw_process, str) and raw_process.strip() else None
+    )
     try:
         confidence = float(obj.get("confidence", 0.0))
     except (TypeError, ValueError):
@@ -895,9 +961,10 @@ def current_destination(
         if d.requires_log:
             continue
         href = d.href_template.rstrip("/")
-        if p == href or p.startswith(href + "/"):
-            if best is None or len(href) > len(best.href_template.rstrip("/")):
-                best = d
+        if (p == href or p.startswith(href + "/")) and (
+            best is None or len(href) > len(best.href_template.rstrip("/"))
+        ):
+            best = d
     return best
 
 
@@ -935,10 +1002,10 @@ async def route_intent(
     pf = prefilter(message, destinations)
 
     # Fast path: an explicit navigation verb + exactly one matching destination
-    # is unambiguous, so we navigate without paying for the LLM. (No named-process
-    # resolution here - that needs the classifier; the fast path uses the current
-    # process context only.)
-    if pf.has_cue and len(pf.matches) == 1:
+    # is unambiguous, so we navigate without paying for the LLM. It resolves
+    # against the *current* process only, so a message that names a different
+    # one has to go through the classifier instead.
+    if pf.has_cue and len(pf.matches) == 1 and not names_a_process(message, processes):
         targets = _strip_current(
             resolve_targets("navigate", pf.matches, PREFILTER_CONFIDENCE, destinations, log_id)
         )

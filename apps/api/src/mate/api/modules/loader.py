@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import contextlib
 import hashlib
 import importlib.util
 import inspect
@@ -48,14 +49,15 @@ from mate.api.modules.event_filters import FILTER_OPS
 from mate.api.modules.event_log_access import EventLogAccess
 from mate.api.modules.finder import get_finder, module_namespace, reset_finder
 from mate.api.modules.installer import ModuleInstallError, venv_site_packages
-from mate.api.modules.runtimes import runtime_for
 from mate.api.modules.installs import user_module_ids, user_owns_module
 from mate.api.modules.job_logs import get_job_log_buffer
 from mate.api.modules.job_worker import JobWorker
 from mate.api.modules.object_centric_log_access import ObjectCentricLogAccess
 from mate.api.modules.registry import CapabilityRegistry
+from mate.api.modules.runtimes import runtime_for
 from mate.api.modules.subprocess_host import SubprocessBridge
 from mate.api.sharing import user_can_read_log
+from mate.api.tasks import spawn
 from mate.sdk.context import ModuleContext
 from mate.sdk.decorators import (
     JobSpec,
@@ -283,16 +285,14 @@ class _BusForwardingLogger:
         # so unlike the bus publish below it also captures lines logged from inside
         # `asyncio.to_thread` module compute (no running loop there). Best-effort.
         if self._job_id:
-            try:
+            with contextlib.suppress(Exception):
                 get_job_log_buffer().append(self._job_id, level, event, kwargs)
-            except Exception:
-                pass
         # Best-effort: never let a logging side-effect break the handler.
         # `user_id` scopes the line to the owning tenant - the Settings logs
         # tail subscribes to `module.log.*` over the per-user WS, so without it
         # one user would see another's log fields (which can embed their data).
-        try:
-            asyncio.create_task(
+        with contextlib.suppress(Exception):
+            spawn(
                 self._bus.publish(
                     f"module.log.{level}",
                     {
@@ -304,8 +304,6 @@ class _BusForwardingLogger:
                     },
                 )
             )
-        except Exception:
-            pass
 
     def debug(self, event: str, **kw: Any) -> None:
         self._emit("debug", event, **kw)

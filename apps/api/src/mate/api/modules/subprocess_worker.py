@@ -20,6 +20,7 @@ responses. Both sides initiate requests; ids are local to the initiator.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.util
 import inspect
 import json
@@ -44,6 +45,20 @@ RPC_STREAM_LIMIT = 256 * 1024 * 1024  # 256 MiB
 # carrying this string for every ctx call made by a soft-cancelled job; the
 # worker turns it into `Cancelled` (below) so the handler unwinds cleanly.
 _CANCEL_RPC_MSG = "__ff_job_cancelled__"
+
+# `asyncio.create_task` only weakly references its task, so a fire-and-forget
+# task can be collected mid-flight and never finish - dropping a log line or a
+# whole inbound RPC dispatch. This file runs on the *module's* interpreter and
+# must stay stdlib-only (no `mate.api` imports), so it keeps its own reference
+# set rather than using `mate.api.tasks.spawn`.
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _spawn(coro: Any) -> None:
+    """Schedule *coro* and hold a strong reference until it completes."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
 
 
 def _resolve_cancelled() -> type[BaseException]:
@@ -481,7 +496,7 @@ class _LoggerProxy:
 
     def _log(self, level: str, event: str, **kwargs: Any) -> None:
         payload = {**self._bound, **kwargs, "event": event}
-        asyncio.create_task(
+        _spawn(
             self._conn.send_request(
                 "ctx.logger.log",
                 {"ctx_token": self._token, "level": level, "payload": payload},
@@ -566,7 +581,7 @@ class WireConnection:
             except json.JSONDecodeError:
                 continue
             if "method" in msg:
-                asyncio.create_task(self._dispatch(msg))
+                _spawn(self._dispatch(msg))
             else:
                 rid = msg.get("id")
                 fut = self._pending.pop(rid, None)
@@ -662,10 +677,8 @@ async def _amain(socket_path: str, module_folder: str) -> int:
     )
     await conn.run()
     writer.close()
-    try:
+    with contextlib.suppress(Exception):
         await writer.wait_closed()
-    except Exception:
-        pass
     return 0
 
 

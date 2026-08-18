@@ -38,6 +38,7 @@ from mate.api.modules.ctx_rpc import (
 from mate.api.modules.job_logs import get_job_log_buffer
 from mate.api.modules.runtimes.base import WorkerLaunchSpec
 from mate.api.modules.subprocess_worker import RPC_STREAM_LIMIT, WireConnection
+from mate.api.tasks import spawn
 from mate.sdk.decorators import (
     _ATTR_JOB,
     _ATTR_ON_EVENT,
@@ -301,9 +302,11 @@ class SubprocessBridge:
             ChildHandle(pid=self._proc.pid, kind="subprocess_worker", module_id=self.manifest.id)
         )
 
-        # Pipe worker stderr to our log so author tracebacks aren't lost.
-        asyncio.create_task(self._drain_pipe(self._proc.stderr, "stderr"))
-        asyncio.create_task(self._drain_pipe(self._proc.stdout, "stdout"))
+        # Pipe worker stderr to our log so author tracebacks aren't lost. These
+        # outlive the call, so they need a strong reference (see `tasks.spawn`)
+        # or the GC can collect them and the drain stops silently.
+        spawn(self._drain_pipe(self._proc.stderr, "stderr"))
+        spawn(self._drain_pipe(self._proc.stdout, "stdout"))
 
     async def cancel_active(self) -> None:
         """Hard-stop whatever the worker is running by killing its process
@@ -436,10 +439,8 @@ class SubprocessBridge:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._respawn_task
         if self._conn is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await asyncio.wait_for(self._conn.send_request("shutdown", {}), timeout=2.0)
-            except Exception:
-                pass
         if self._proc is not None and self._proc.returncode is None:
             try:
                 self._proc.terminate()

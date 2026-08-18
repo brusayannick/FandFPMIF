@@ -12,6 +12,7 @@ import os
 import shutil
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -83,6 +84,42 @@ def _configure_env(session_data_dir: Path) -> Iterator[None]:
     yield
 
 
+@pytest.fixture(scope="session")
+def _sync_engine(_configure_env: None) -> Iterator[Any]:
+    """A plain sync engine on the session DB, for fixtures that run outside a loop."""
+    from sqlalchemy import create_engine
+
+    engine = create_engine(os.environ["DATABASE_URL"].replace("+aiosqlite", ""), future=True)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _reset_admin_module_defaults(_sync_engine: Any) -> None:
+    """Drop the admin module-default overrides before every test.
+
+    ``modules.default_ids`` / ``modules.default_excluded_ids`` are *system*-wide
+    ``SystemSetting`` rows living in the session-scoped SQLite DB, so an admin
+    test that withholds a bundled default (``test_admin_modules.py``) reshapes
+    the effective default set for every test that runs after it - which is how
+    ``test_modules_per_user.py`` came to pass alone but fail in a full run.
+    Clearing them up front keeps default resolution independent of file order.
+    """
+    from sqlalchemy import delete
+    from sqlalchemy.orm import Session
+
+    from mate.api.db.models import SystemSetting
+    from mate.api.modules.defaults import ADMIN_DEFAULTS_KEY, EXCLUDED_DEFAULTS_KEY
+
+    with Session(_sync_engine) as s:
+        s.execute(
+            delete(SystemSetting).where(
+                SystemSetting.key.in_([ADMIN_DEFAULTS_KEY, EXCLUDED_DEFAULTS_KEY])
+            )
+        )
+        s.commit()
+
+
 def _override_current_user_for_tests(app) -> None:
     """Bypass JWT validation by overriding ``get_current_user`` in the app.
 
@@ -117,9 +154,11 @@ async def client() -> AsyncIterator[AsyncClient]:
     app = create_app()
     _override_current_user_for_tests(app)
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as c:
-        async with app.router.lifespan_context(app):
-            yield c
+    async with (
+        AsyncClient(transport=transport, base_url="http://testserver") as c,
+        app.router.lifespan_context(app),
+    ):
+        yield c
 
 
 async def _seed_module_installs_for_test_user() -> None:
@@ -188,11 +227,13 @@ async def _sample_mod_client(
 
             app.dependency_overrides[get_current_user] = _admin_user
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://testserver") as c:
-            async with app.router.lifespan_context(app):
-                if seed:
-                    await _seed_module_installs_for_test_user()
-                yield c
+        async with (
+            AsyncClient(transport=transport, base_url="http://testserver") as c,
+            app.router.lifespan_context(app),
+        ):
+            if seed:
+                await _seed_module_installs_for_test_user()
+            yield c
     finally:
         if prev_modules is None:
             os.environ.pop("MODULES_DIR", None)

@@ -8,8 +8,10 @@ registered.
 from __future__ import annotations
 
 import asyncio
+import faulthandler
 import logging
 import shutil
+import signal
 import sys
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
@@ -56,6 +58,13 @@ from mate.api.storage.db_backup import backup_sync, db_backup_loop
 from mate.api.storage.eviction import eviction_loop
 from mate.api.storage.module_archive import restore_missing_modules_sync
 from mate.api.system.metrics import ResourceSampler, set_resource_sampler
+
+# On-demand thread-stack dump for diagnosing an event-loop wedge without killing the
+# process first: `docker exec mate-api kill -USR1 1` writes every thread's real stack
+# to stderr (captured by `docker compose logs`). Main-thread-only; suppressed elsewhere
+# (e.g. a non-main-thread test import).
+with suppress(ValueError):
+    faulthandler.register(signal.SIGUSR1)
 
 # Daily - re-evaluated every loop iteration against the current
 # `analytics.config.retention_days` setting.
